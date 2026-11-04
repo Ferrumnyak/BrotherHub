@@ -1,0 +1,18 @@
+# Rust build output
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local secrets / config
+.env
+*.local.toml
