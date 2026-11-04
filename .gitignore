@@ -16,3 +16,10 @@ desktop.ini
 # Local secrets / config
 .env
 *.local.toml
+
+# Frontend
+node_modules/
+/app/dist/
+
+# Tauri generated
+/app/src-tauri/gen/
