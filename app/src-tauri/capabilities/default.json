@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Права главного окна",
-  "windows": ["main"],
+  "windows": ["main", "controls"],
   "permissions": ["core:default", "dialog:default", "core:window:allow-set-fullscreen"]
 }

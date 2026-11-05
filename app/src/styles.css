@@ -643,19 +643,38 @@ button.play:disabled {
   padding: 0 24px 12px;
 }
 
-/* Полный экран без движения мыши: только видео. */
-.controls-hidden .controls,
-.controls-hidden .stage-error {
+/* В полном экране панель плеера живёт в отдельном окне поверх видео,
+   а в главном окне остаётся только видео — без полос и прыжков. */
+.fullscreen .stage > .controls,
+.fullscreen .stage-error {
   display: none;
 }
 
-.controls-hidden {
-  cursor: none;
+/* ---------- Окно панели поверх видео ---------- */
+
+html.overlay,
+html.overlay body {
+  background: transparent;
 }
 
-.fullscreen .controls {
-  padding-top: 10px;
-  padding-bottom: 14px;
+.overlay-panel {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  /* Затемнение снизу, чтобы панель читалась на любом кадре. */
+  background: linear-gradient(to top, rgba(14, 10, 12, 0.92) 0%, rgba(14, 10, 12, 0.7) 55%, rgba(14, 10, 12, 0) 100%);
+  opacity: 1;
+  transition: opacity 0.35s ease;
+}
+
+.overlay-panel.hidden {
+  opacity: 0;
+  transition-duration: 0.6s;
+}
+
+.overlay-panel .controls {
+  padding: 0 32px 22px;
 }
 
 /* Узкая сцена: дорожки и громкость переносятся на свою строку. */

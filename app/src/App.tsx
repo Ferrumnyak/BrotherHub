@@ -1,6 +1,6 @@
 import { CSSProperties, FormEvent, ReactElement, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import {
@@ -48,6 +48,35 @@ function people(n: number): string {
   const dd = n % 100;
   const word = d >= 2 && d <= 4 && (dd < 12 || dd > 14) ? "человека" : "человек";
   return `${n} ${word}`;
+}
+
+/** Высота панели плеера поверх видео в полном экране, CSS-пиксели. */
+const OVERLAY_HEIGHT = 150;
+
+/** Что нужно панели плеера поверх видео (событие `overlay-state`). */
+interface OverlayState {
+  canControl: boolean;
+  controlHint: string;
+  title: string;
+  status: string;
+  tracks: Track[];
+  quality: string;
+  qualityEnabled: boolean;
+}
+
+function hostNameOf(members: Member[], host: MemberId | null): string | undefined {
+  return members.find((m) => m.id === host)?.name;
+}
+
+/** Подпись под названием фильма в панели плеера. */
+function playbackStatus(
+  playback: PlaybackState | null,
+  isHost: boolean,
+  hostName: string | undefined,
+): string {
+  if (!playback?.media) return isHost ? "Выбери, что смотрим" : "Ждём ведущего";
+  if (playback.paused) return isHost ? "На паузе" : `${hostName ?? "Ведущий"} поставил на паузу`;
+  return "Смотрите вместе";
 }
 
 /** Ссылку показываем коротко: сайт и начало пути. */
@@ -474,11 +503,16 @@ export default function App() {
       return;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const show = (visible: boolean) => {
+      setControlsHidden(!visible);
+      emit("overlay-visible", visible).catch(() => {});
+      invoke("overlay_interactive", { interactive: visible }).catch(() => {});
+    };
     const poke = () => {
-      setControlsHidden(false);
+      show(true);
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (!overControlsRef.current) setControlsHidden(true);
+        if (!overControlsRef.current) show(false);
       }, 3000);
     };
     poke();
@@ -492,6 +526,7 @@ export default function App() {
       active = false;
       clearTimeout(timer);
       unlisten?.();
+      invoke("overlay_close").catch(() => {});
       invoke("watch_cursor", { enabled: false }).catch(() => {});
       window.removeEventListener("mousemove", poke);
       window.removeEventListener("keydown", poke);
@@ -629,6 +664,18 @@ export default function App() {
           height: Math.round(r.height * k),
         },
       }).catch(() => {});
+      // В полном экране панель плеера — отдельное окно поверх низа видео.
+      if (fullscreen) {
+        const h = Math.min(OVERLAY_HEIGHT, r.height);
+        invoke("overlay_place", {
+          rect: {
+            x: Math.round(r.left * k),
+            y: Math.round((r.bottom - h) * k),
+            width: Math.round(r.width * k),
+            height: Math.round(h * k),
+          },
+        }).catch((err) => setError(String(err)));
+      }
     };
     update();
     if (!show || !el) return;
@@ -640,7 +687,46 @@ export default function App() {
       window.removeEventListener("resize", update);
       invoke("set_video_rect", { rect: null }).catch(() => {});
     };
-  }, [joinedRoom, player.running, chatOpen, fullscreen, controlsHidden]);
+  }, [joinedRoom, player.running, chatOpen, fullscreen]);
+
+  // ----- Связь с панелью поверх видео -----
+
+  const overlayState: OverlayState = {
+    canControl: isHost && player.running && player.loaded === (playback?.media ?? null),
+    controlHint: isHost ? "Сначала открой видео" : `Управляет ${hostNameOf(members, host) ?? "ведущий"}`,
+    title: playback?.media ? mediaTitle(playback.media) : "Ничего не выбрано",
+    status: playbackStatus(playback, isHost, hostNameOf(members, host)),
+    tracks,
+    quality,
+    qualityEnabled: playback?.media != null && isUrl(playback.media),
+  };
+  const overlayJson = JSON.stringify(overlayState);
+  const overlayJsonRef = useRef(overlayJson);
+  overlayJsonRef.current = overlayJson;
+
+  useEffect(() => {
+    if (fullscreen) emit("overlay-state", JSON.parse(overlayJson)).catch(() => {});
+  }, [overlayJson, fullscreen]);
+
+  useEffect(() => {
+    let active = true;
+    const unlisteners: Array<() => void> = [];
+    const keep = (u: () => void) => (active ? unlisteners.push(u) : u());
+    listen("overlay-ready", () => {
+      emit("overlay-state", JSON.parse(overlayJsonRef.current)).catch(() => {});
+    }).then(keep);
+    listen<boolean>("overlay-hover", (e) => (overControlsRef.current = e.payload)).then(keep);
+    listen<PlayerKey>("overlay-key", (e) => onKeyRef.current(e.payload)).then(keep);
+    listen<string>("overlay-quality", (e) => {
+      setQuality(e.payload);
+      save("quality", e.payload);
+    }).then(keep);
+    listen<string>("overlay-error", (e) => setError(e.payload)).then(keep);
+    return () => {
+      active = false;
+      unlisteners.forEach((u) => u());
+    };
+  }, []);
 
   if (!joinedRoom) {
     return (
@@ -840,17 +926,7 @@ export default function App() {
           canControl={isHost && player.running && player.loaded === media}
           controlHint={isHost ? "Сначала открой видео" : `Управляет ${hostName ?? "ведущий"}`}
           title={media ? mediaTitle(media) : "Ничего не выбрано"}
-          status={
-            !media
-              ? isHost
-                ? "Выбери, что смотрим"
-                : "Ждём ведущего"
-              : playback?.paused
-                ? isHost
-                  ? "На паузе"
-                  : `${hostName ?? "Ведущий"} поставил на паузу`
-                : "Смотрите вместе"
-          }
+          status={playbackStatus(playback, isHost, hostName)}
           scrub={scrub}
           onScrub={setScrub}
           tracks={tracks}
@@ -1095,6 +1171,93 @@ export default function App() {
         </aside>
       )}
     </main>
+  );
+}
+
+/**
+ * Панель плеера в отдельном прозрачном окне поверх видео (полный экран).
+ * Состояние присылает главное окно, а управляет плеером панель напрямую.
+ */
+export function ControlsOverlay() {
+  const [state, setState] = useState<OverlayState | null>(null);
+  const [visible, setVisible] = useState(true);
+  const [info, setInfo] = useState<PlaybackInfo | null>(null);
+  const [scrub, setScrub] = useState<number | null>(null);
+
+  useEffect(() => {
+    document.documentElement.classList.add("overlay");
+    let active = true;
+    const unlisteners: Array<() => void> = [];
+    const keep = (u: () => void) => (active ? unlisteners.push(u) : u());
+    listen<OverlayState>("overlay-state", (e) => setState(e.payload)).then(keep);
+    listen<boolean>("overlay-visible", (e) => setVisible(e.payload)).then(keep);
+    emit("overlay-ready").catch(() => {});
+
+    const poll = () =>
+      invoke<PlaybackInfo>("player_info")
+        .then((i) => active && setInfo(i))
+        .catch(() => {});
+    poll();
+    const timer = setInterval(poll, 400);
+
+    // Клавиши, пока фокус в панели: пауза и перемотка — сами,
+    // полный экран и чат — главному окну.
+    const onKey = (e: KeyboardEvent) => {
+      const key: PlayerKey | null =
+        e.key === "Escape"
+          ? "exit-fullscreen"
+          : e.code === "KeyF"
+            ? "fullscreen"
+            : e.key === "Tab"
+              ? "toggle-chat"
+              : null;
+      if (key) {
+        e.preventDefault();
+        emit("overlay-key", key).catch(() => {});
+      } else if (e.code === "Space" && (e.target as HTMLElement).tagName !== "BUTTON") {
+        e.preventDefault();
+        control({ type: "toggle_pause" }).catch(() => {});
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        if ((e.target as HTMLElement).tagName === "INPUT") return;
+        e.preventDefault();
+        control({ type: "seek_by", delta: e.key === "ArrowLeft" ? -5 : 5 }).catch(() => {});
+      }
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener("keydown", onKey);
+      unlisteners.forEach((u) => u());
+    };
+  }, []);
+
+  if (!state) return null;
+
+  return (
+    <div className={visible ? "overlay-panel" : "overlay-panel hidden"}>
+      <PlayerControls
+        onHover={(over) => emit("overlay-hover", over).catch(() => {})}
+        info={info}
+        canControl={state.canControl}
+        controlHint={state.controlHint}
+        title={state.title}
+        status={state.status}
+        scrub={scrub}
+        onScrub={setScrub}
+        tracks={state.tracks}
+        quality={state.quality}
+        qualityEnabled={state.qualityEnabled}
+        onQuality={(value) => {
+          invoke("set_quality", { height: value ? Number(value) : null }).catch(() => {});
+          emit("overlay-quality", value).catch(() => {});
+        }}
+        onError={(message) => emit("overlay-error", message).catch(() => {})}
+        fullscreen
+        onFullscreen={() => emit("overlay-key", "exit-fullscreen").catch(() => {})}
+      />
+    </div>
   );
 }
 
