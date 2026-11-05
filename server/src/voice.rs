@@ -86,7 +86,8 @@ impl LiveKit {
                 "canPublish": true,
                 "canSubscribe": true,
                 "canPublishData": false,
-                "canPublishSources": ["microphone"],
+                // Голос и показ экрана со звуком; камеры у нас нет.
+                "canPublishSources": ["microphone", "screen_share", "screen_share_audio"],
             },
         }))
     }

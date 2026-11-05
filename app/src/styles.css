@@ -1144,6 +1144,77 @@ button.danger-solid:hover {
   background: #352a2f;
 }
 
+/* Объёмные смайлики: в тексте — по высоте строки, в панели — крупнее. */
+img.emoji3d {
+  width: 1.35em;
+  height: 1.35em;
+  vertical-align: -0.3em;
+  margin: 0 0.04em;
+}
+
+.emoji-picker img.emoji3d {
+  width: 26px;
+  height: 26px;
+  vertical-align: middle;
+  margin: 0;
+}
+
+.rich.jumbo img.emoji3d {
+  width: 48px;
+  height: 48px;
+  margin-top: 2px;
+}
+
+.sticker-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 4px;
+}
+
+.sticker-picker button {
+  width: auto;
+  height: 72px;
+}
+
+/* Стикеры */
+.sticker {
+  display: block;
+}
+
+.message .sticker {
+  margin-top: 2px;
+}
+
+.sticker .st-pop { animation: st-pop 1.2s ease-in-out infinite; }
+.sticker .st-delay { animation-delay: 0.3s; }
+.sticker .st-stamp { animation: st-stamp 1.8s ease-out infinite; }
+.sticker .st-twinkle { animation: st-twinkle 1.8s ease-in-out infinite; }
+.sticker .st-nod { animation: st-nod 2.4s ease-in-out infinite; }
+.sticker .st-zz { animation: st-zz 2s infinite; }
+.sticker .st-zz.st-delay { animation-delay: 0.7s; }
+.sticker .st-blink { animation: st-blink 1s infinite; }
+.sticker .st-run { animation: st-run 0.5s ease-in-out infinite; }
+.sticker .st-legs { animation: st-legs 0.25s ease-in-out infinite alternate; }
+.sticker .st-tear-left { animation: st-tear-left 1.8s ease-in-out infinite; }
+.sticker .st-tear-right { animation: st-tear-right 1.8s ease-in-out infinite; }
+.sticker .st-clap { animation: st-clap 1.4s ease-in-out infinite; }
+.sticker .st-look { animation: st-look 2.6s ease-in-out infinite; }
+.sticker .st-shake { animation: st-shake 0.6s ease-in-out infinite; }
+
+@keyframes st-pop { 0%, 100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-22px) scale(1.1); } 70% { transform: translateY(-8px); } }
+@keyframes st-stamp { 0% { transform: scale(2.4) rotate(-14deg); opacity: 0; } 30% { transform: scale(0.92) rotate(-12deg); opacity: 1; } 40%, 100% { transform: scale(1) rotate(-12deg); opacity: 1; } }
+@keyframes st-twinkle { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+@keyframes st-nod { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(14deg); } }
+@keyframes st-zz { 0% { opacity: 0; transform: translate(0, 0); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(14px, -26px); } }
+@keyframes st-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@keyframes st-run { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(3px, -4px); } }
+@keyframes st-legs { from { transform: rotate(-18deg); } to { transform: rotate(18deg); } }
+@keyframes st-tear-left { 0%, 40% { transform: translateX(0) rotate(0); } 70%, 100% { transform: translateX(-10px) rotate(-14deg); } }
+@keyframes st-tear-right { 0%, 40% { transform: translateX(0) rotate(0); } 70%, 100% { transform: translateX(10px) rotate(14deg); } }
+@keyframes st-clap { 0%, 60%, 100% { transform: rotate(-28deg); } 75% { transform: rotate(0); } }
+@keyframes st-look { 0%, 20% { transform: translateX(-7px); } 30%, 60% { transform: translateX(7px); } 70%, 100% { transform: translateX(-7px); } }
+@keyframes st-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-4px); } 80% { transform: translateX(4px); } }
+
 /* Вкладки справа: чат и «Что посмотреть» */
 .side-tabs {
   display: flex;

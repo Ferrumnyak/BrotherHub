@@ -10,7 +10,41 @@ export interface EmojiGroup {
 
 const split = (s: string) => s.trim().split(/\s+/);
 
+/**
+ * Основные смайлики — объёмные картинки Microsoft Fluent Emoji 3D (MIT),
+ * лежат в `public/emoji3d/<код>.webp`. В чате они рисуются картинкой,
+ * а в сообщении остаются обычными символами.
+ */
+export const EMOJI_3D = split(`
+  😂 🤣 😍 🥰 😎 🥹 🥺 🤔 🙄 😐 🤭 🤪 🫠 🫡 😴 😱 😭 😡 🤬 🤯
+  🥶 🤢 🥳 🤡 💀 👻 💩 🗿 👍 👎 👏 🤝 💪 👀 ❤️ 🔥 💯 🍿 🎬 🎉
+`);
+
+const stripVs = (e: string) => e.replace(/\uFE0F/g, "");
+
+/** Путь к картинке объёмного смайлика. */
+export function emoji3dSrc(emoji: string): string {
+  const code = [...stripVs(emoji)].map((c) => c.codePointAt(0)!.toString(16)).join("-");
+  return `/emoji3d/${code}.webp`;
+}
+
+const KNOWN_3D = new Set(EMOJI_3D.map(stripVs));
+
+export function isEmoji3d(emoji: string): boolean {
+  return KNOWN_3D.has(stripVs(emoji));
+}
+
+/**
+ * Смайлики-картинки в тексте. После смайлика не должно идти соединение (ZWJ)
+ * или оттенок кожи — иначе это другой смайлик, его оставляем символом.
+ */
+export const EMOJI_3D_RE = new RegExp(
+  `(${[...KNOWN_3D].sort((a, b) => b.length - a.length).join("|")})\uFE0F?(?![\u200D\u{1F3FB}-\u{1F3FF}])`,
+  "gu",
+);
+
 export const EMOJI_GROUPS: EmojiGroup[] = [
+  { icon: "😂", title: "Основные", list: EMOJI_3D },
   {
     icon: "😀",
     title: "Смайлы и люди",

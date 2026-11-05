@@ -19,6 +19,8 @@ import {
   type VoiceAccess,
 } from "./protocol";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
+import { EmojiGlyph, RichText } from "./RichText";
+import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
 import { keyName, listMicrophones, VoiceClient, type ScreenShare, type VoiceStatus } from "./voice";
 
 type VoiceMode = "open" | "ptt";
@@ -294,7 +296,8 @@ export default function App() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [recent, setRecent] = useState<string[]>(recentEmoji);
   /** Раздел смайликов: -1 — недавние. */
-  const [emojiGroup, setEmojiGroup] = useState(() => (recentEmoji().length > 0 ? -1 : 0));
+  const [emojiGroup, setEmojiGroup] = useState(0);
+  const [stickersOpen, setStickersOpen] = useState(false);
   const draftRef = useRef<HTMLInputElement>(null);
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
@@ -775,13 +778,16 @@ export default function App() {
 
   // Панель смайликов закрывается кликом мимо неё.
   useEffect(() => {
-    if (!emojiOpen) return;
+    if (!emojiOpen && !stickersOpen) return;
     const close = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest(".composer")) setEmojiOpen(false);
+      if (!(e.target as HTMLElement).closest(".composer")) {
+        setEmojiOpen(false);
+        setStickersOpen(false);
+      }
     };
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
-  }, [emojiOpen]);
+  }, [emojiOpen, stickersOpen]);
 
   // Ошибки прячутся сами через несколько секунд.
   useEffect(() => {
@@ -1616,7 +1622,14 @@ export default function App() {
                     <span className="author" style={{ color: NAME_COLORS[colorIndex(l.name)] }}>
                       {l.name}
                     </span>
-                    <span>{l.text}</span>
+                    {(() => {
+                      const sticker = stickerFromMessage(l.text);
+                      return sticker ? (
+                        <StickerArt sticker={sticker} size={112} />
+                      ) : (
+                        <RichText text={l.text} />
+                      );
+                    })()}
                   </div>
                 ),
               )}
@@ -1637,8 +1650,8 @@ export default function App() {
                 <div className="emoji-picker" role="dialog" aria-label="Смайлики">
                   <div className="emoji-grid">
                     {(emojiGroup === -1 ? recent : EMOJI_GROUPS[emojiGroup].list).map((e) => (
-                      <button key={e} type="button" onClick={() => insertEmoji(e)}>
-                        {e}
+                      <button key={e} type="button" onClick={() => insertEmoji(e)} title={e}>
+                        <EmojiGlyph emoji={e} />
                       </button>
                     ))}
                   </div>
@@ -1663,10 +1676,27 @@ export default function App() {
                         onClick={() => setEmojiGroup(i)}
                         title={g.title}
                       >
-                        {g.icon}
+                        <EmojiGlyph emoji={g.icon} />
                       </button>
                     ))}
                   </div>
+                </div>
+              )}
+              {stickersOpen && (
+                <div className="emoji-picker sticker-picker" role="dialog" aria-label="Стикеры">
+                  {STICKERS.map((st) => (
+                    <button
+                      key={st.id}
+                      type="button"
+                      title={st.title}
+                      onClick={() => {
+                        setStickersOpen(false);
+                        run(() => send({ type: "chat", text: stickerMessage(st.id) }));
+                      }}
+                    >
+                      <StickerArt sticker={st} size={64} />
+                    </button>
+                  ))}
                 </div>
               )}
               <div className="composer-row">
@@ -1683,11 +1713,26 @@ export default function App() {
                 <button
                   type="button"
                   className={emojiOpen ? "icon active" : "icon"}
-                  onClick={() => setEmojiOpen((o) => !o)}
+                  onClick={() => {
+                    setStickersOpen(false);
+                    setEmojiOpen((o) => !o);
+                  }}
                   aria-label="Смайлики"
                   title="Смайлики"
                 >
                   <Icon name="smile" size={18} />
+                </button>
+                <button
+                  type="button"
+                  className={stickersOpen ? "icon active" : "icon"}
+                  onClick={() => {
+                    setEmojiOpen(false);
+                    setStickersOpen((o) => !o);
+                  }}
+                  aria-label="Стикеры"
+                  title="Стикеры"
+                >
+                  <Icon name="sticker" size={18} />
                 </button>
               </div>
             </form>
@@ -2264,7 +2309,8 @@ type IconName =
   | "pip-exit"
   | "cast"
   | "smile"
-  | "dice";
+  | "dice"
+  | "sticker";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
   chevron: <polyline points="9 6 15 12 9 18" />,
@@ -2436,6 +2482,12 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
       <path d="M8.5 14a4 4 0 0 0 7 0" />
       <line x1="9" y1="9.5" x2="9.01" y2="9.5" />
       <line x1="15" y1="9.5" x2="15.01" y2="9.5" />
+    </>
+  ),
+  sticker: (
+    <>
+      <path d="M15 3H6a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h7l8-8V6a3 3 0 0 0-3-3z" />
+      <path d="M13 21v-5a3 3 0 0 1 3-3h5" />
     </>
   ),
   dice: (

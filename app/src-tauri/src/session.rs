@@ -550,6 +550,12 @@ impl Session {
         if !self.overlay_enabled {
             return;
         }
+        // Стикер поверх видео не нарисовать — показываем подпись.
+        let text = if text.starts_with("[[sticker:") && text.ends_with("]]") {
+            "отправил стикер"
+        } else {
+            text
+        };
         self.overlay
             .push_back((Instant::now(), name.to_string(), text.to_string()));
         while self.overlay.len() > OVERLAY_LINES {

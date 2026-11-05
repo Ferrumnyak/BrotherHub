@@ -20,6 +20,13 @@ BrotherWatch использует программы других авторов
 
 - Исходный код: https://github.com/yt-dlp/yt-dlp
 
+## Microsoft Fluent Emoji
+
+Объёмные смайлики в чате (`app/public/emoji3d/`, 40 штук, уменьшены до 64×64).
+Лицензия: MIT, © Microsoft Corporation.
+
+- Источник: https://github.com/microsoft/fluentui-emoji
+
 ## Корневые сертификаты Mozilla
 
 Список доверенных центров сертификации из проекта certifi
