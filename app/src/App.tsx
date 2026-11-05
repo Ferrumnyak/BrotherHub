@@ -93,7 +93,19 @@ function mediaTitle(media: string): string {
 
 // При сборке установщика можно вшить адрес сервера друзей:
 //   $env:VITE_DEFAULT_SERVER = "wss://example.com"; npm run bundle
-const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER || "ws://127.0.0.1:8080";
+const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER || "wss://bw.sokolovds.com";
+
+/** Сохранённый адрес сервера; устаревший или явно ошибочный заменяем на адрес по умолчанию. */
+function savedServer(): string {
+  const saved = load("server", DEFAULT_SERVER).trim();
+  const outdated =
+    !saved ||
+    saved.includes("127.0.0.1") ||
+    saved.includes("localhost") ||
+    // Адрес голосового сервера вписывать сюда не нужно — его присылает сервер.
+    saved.includes("livekit");
+  return outdated ? DEFAULT_SERVER : saved;
+}
 
 const VIDEO_EXTENSIONS = [
   "mkv", "mp4", "avi", "mov", "webm", "m4v", "wmv", "flv", "ts", "m2ts", "mpg", "mpeg",
@@ -185,7 +197,7 @@ async function pickVideoFile(): Promise<string | null> {
 }
 
 export default function App() {
-  const [server, setServer] = useState(() => load("server", DEFAULT_SERVER));
+  const [server, setServer] = useState(savedServer);
   const [name, setName] = useState(() => load("name", ""));
   const [room, setRoom] = useState(() => load("room", "brotherhood"));
   const [password, setPassword] = useState(() => load("password", ""));
