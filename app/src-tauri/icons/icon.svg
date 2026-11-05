@@ -1,8 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-<rect x="2" y="2" width="96" height="96" rx="22" fill="#181b22"/>
-<rect x="22" y="14" width="56" height="34" rx="5" fill="#e0a63a"/>
-<polygon points="45,22 57,31 45,40" fill="#181b22"/>
-<path d="M20 60 H80 V68 H20 Z" fill="#f3d08a"/>
-<path d="M14 62 A6 6 0 0 1 26 62 V84 H14 Z M74 62 A6 6 0 0 1 86 62 V84 H74 Z" fill="#e0a63a"/>
-<rect x="24" y="68" width="52" height="12" rx="3" fill="#e0a63a"/>
+<defs>
+<radialGradient id="glow" cx="50%" cy="30%" r="55%">
+<stop offset="0" stop-color="#F2C879" stop-opacity="0.22"/>
+<stop offset="1" stop-color="#F2C879" stop-opacity="0"/>
+</radialGradient>
+</defs>
+<rect x="2" y="2" width="96" height="96" rx="22" fill="#191416"/>
+<rect x="2" y="2" width="96" height="96" rx="22" fill="url(#glow)"/>
+<rect x="22" y="14" width="56" height="34" rx="5" fill="#F2C879"/>
+<polygon points="45,22 57,31 45,40" fill="#2A1D12"/>
+<path d="M20 60 H80 V68 H20 Z" fill="#D06A72"/>
+<path d="M14 62 A6 6 0 0 1 26 62 V84 H14 Z M74 62 A6 6 0 0 1 86 62 V84 H74 Z" fill="#B54A53"/>
+<rect x="24" y="68" width="52" height="12" rx="3" fill="#B54A53"/>
 </svg>
