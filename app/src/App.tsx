@@ -1,4 +1,12 @@
-import { CSSProperties, FormEvent, ReactElement, useEffect, useRef, useState } from "react";
+import {
+  CSSProperties,
+  FormEvent,
+  ReactElement,
+  ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
@@ -20,6 +28,7 @@ import {
 } from "./protocol";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { EmojiGlyph, RichText } from "./RichText";
+import { RouletteWheel, SPIN_MS } from "./Roulette";
 import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
 import { keyName, listMicrophones, VoiceClient, type ScreenShare, type VoiceStatus } from "./voice";
 
@@ -91,7 +100,7 @@ function playbackStatus(
   isHost: boolean,
   hostName: string | undefined,
 ): string {
-  if (!playback?.media) return isHost ? "Выбери, что смотрим" : "Ждём ведущего";
+  if (!playback?.media) return isHost ? "Выбери, что смотрим" : "Ждём, что выберут";
   if (playback.paused) return isHost ? "На паузе" : `${hostName ?? "Ведущий"} поставил на паузу`;
   return "Смотрите вместе";
 }
@@ -294,6 +303,9 @@ export default function App() {
   );
   const [spinIndex, setSpinIndex] = useState<number | null>(null);
   const [spinDone, setSpinDone] = useState(false);
+  // Секретный пульт админа и «подкрученные» шансы (id предложения → вес).
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [weights, setWeights] = useState<Map<number, number>>(new Map());
   // Автозапуск: у кого уже открылось видео, и чего ждём.
   const [loadedBy, setLoadedBy] = useState<Map<MemberId, string>>(new Map());
   const autoplayRef = useRef<{ media: string; since: number } | null>(null);
@@ -400,7 +412,7 @@ export default function App() {
           setVoiceAccess(msg.voice);
           setLines([]);
           system(`Ты в зале «${msg.room}»`, "enter");
-          if (msg.host === msg.you) system("Ты ведёшь просмотр: выбирай, что смотрим", "host");
+          if (msg.host === msg.you) system("Пульт у тебя: выбирай, что смотрим", "host");
           break;
         }
         case "member_status":
@@ -427,8 +439,8 @@ export default function App() {
           setHost(msg.host);
           system(
             msg.host === meRef.current
-              ? "Теперь просмотр ведёшь ты"
-              : `Теперь просмотр ведёт ${nameOf(msg.host)}`,
+              ? "Теперь пульт у тебя"
+              : `Пульт теперь у ${nameOf(msg.host)}`,
             "host",
           );
           break;
@@ -862,39 +874,56 @@ export default function App() {
     return () => clearTimeout(t);
   }, [isHost, me, playback, loadedBy, members]);
 
-  // Рулетка: подсветка бежит по списку, замедляется и останавливается
-  // на выпавшем. Потом ведущий сам включает выпавшее.
+  // Рулетка: колесо крутится SPIN_MS и останавливается на выпавшем.
+  // Потом тот, у кого пульт, сам включает выпавшее.
   useEffect(() => {
     if (!spin) return;
-    const n = spin.list.length;
-    const steps = n * 3 + spin.winner;
-    const timers: ReturnType<typeof setTimeout>[] = [];
-    let at = 0;
-    for (let i = 0; i <= steps; i++) {
-      const delay = 50 + 330 * (i / steps) ** 2;
-      at += delay;
-      timers.push(setTimeout(() => setSpinIndex(i % n), at));
-    }
-    timers.push(
-      setTimeout(() => {
-        const winner = spin.list[spin.winner];
-        setSpinDone(true);
-        addSystem(`Рулетка выбрала «${mediaTitle(winner.media)}»`, "roulette");
-        if (isHostRef.current) {
-          run(() => invoke("open_url", { url: winner.media }));
-        }
-      }, at + 300),
-    );
-    timers.push(
-      setTimeout(() => {
-        setSpin(null);
-        setSpinIndex(null);
-        setSpinDone(false);
-      }, at + 3000),
-    );
-    return () => timers.forEach(clearTimeout);
+    const winner = spin.list[spin.winner];
+    const done = setTimeout(() => {
+      setSpinDone(true);
+      setSpinIndex(spin.winner);
+      addSystem(`Рулетка выбрала «${mediaTitle(winner.media)}»`, "roulette");
+      if (isHostRef.current) {
+        run(() => invoke("open_url", { url: winner.media }));
+      }
+    }, SPIN_MS + 200);
+    const clear = setTimeout(() => {
+      setSpin(null);
+      setSpinIndex(null);
+      setSpinDone(false);
+    }, SPIN_MS + 3500);
+    return () => {
+      clearTimeout(done);
+      clearTimeout(clear);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spin]);
+
+  // Секретный пульт админа: Shift + \ + 1 одновременно. Позволяет
+  // «подкрутить» шансы рулетки — их учитывает только тот, у кого пульт.
+  useEffect(() => {
+    const down = new Set<string>();
+    const onDown = (e: KeyboardEvent) => {
+      down.add(e.code);
+      if (e.shiftKey && down.has("Backslash") && down.has("Digit1")) {
+        e.preventDefault();
+        down.clear();
+        setAdminOpen((o) => !o);
+        setChatOpen(true);
+        setSideTab("suggest");
+      }
+    };
+    const onUp = (e: KeyboardEvent) => down.delete(e.code);
+    const onBlur = () => down.clear();
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
 
   // Окно сузили — чат прячется сам, чтобы видео не стало крошечным.
   // Обратно его можно открыть кнопкой или Tab.
@@ -1137,7 +1166,7 @@ export default function App() {
   const overlayState: OverlayState = {
     mini,
     canControl: isHost && player.running && player.loaded === (playback?.media ?? null),
-    controlHint: isHost ? "Сначала открой видео" : `Управляет ${hostNameOf(members, host) ?? "ведущий"}`,
+    controlHint: isHost ? "Сначала открой видео" : `Пульт у ${hostNameOf(members, host) ?? "другого"}`,
     title: playback?.media ? mediaTitle(playback.media) : "Ничего не выбрано",
     status: playbackStatus(playback, isHost, hostNameOf(members, host)),
     tracks,
@@ -1239,9 +1268,9 @@ export default function App() {
   const others = members.length - 1;
   const roomStatus = isHost
     ? others > 0
-      ? `Просмотр ведёшь ты, в зале ещё ${people(others)}`
-      : "Просмотр ведёшь ты, в зале пока никого"
-    : `${hostName ?? "Кто-то"} ведёт просмотр, в зале ${people(members.length)}`;
+      ? `Пульт у тебя, в зале ещё ${people(others)}`
+      : "Пульт у тебя, в зале пока никого"
+    : `Пульт у ${hostName ?? "кого-то"}, в зале ${people(members.length)}`;
 
   const transmitting =
     voiceStatus === "connected" && !deafened && (voiceMode === "open" ? micOn : pttPressed);
@@ -1418,7 +1447,7 @@ export default function App() {
           onHover={(over) => (overControlsRef.current = over)}
           info={info}
           canControl={isHost && player.running && player.loaded === media}
-          controlHint={isHost ? "Сначала открой видео" : `Управляет ${hostName ?? "ведущий"}`}
+          controlHint={isHost ? "Сначала открой видео" : `Пульт у ${hostName ?? "другого"}`}
           title={media ? mediaTitle(media) : "Ничего не выбрано"}
           status={playbackStatus(playback, isHost, hostName)}
           scrub={scrub}
@@ -1456,7 +1485,7 @@ export default function App() {
                       .join(" ")}
                     role={manageable ? "button" : undefined}
                     tabIndex={manageable ? 0 : undefined}
-                    title={manageable ? "Передать управление или выгнать" : undefined}
+                    title={manageable ? "Передать пульт или выгнать" : undefined}
                     aria-haspopup={manageable ? "menu" : undefined}
                     aria-expanded={manageable ? memberMenu?.id === m.id : undefined}
                     onClick={manageable ? (e) => toggleMemberMenu(m, e.currentTarget) : undefined}
@@ -1488,7 +1517,7 @@ export default function App() {
                       {!m.online ? (
                         <span className="seat-role">переподключается…</span>
                       ) : (
-                        m.id === host && <span className="seat-role">ведёт просмотр</span>
+                        m.id === host && <span className="seat-role">держит пульт</span>
                       )}
                     </span>
                     {(m.deaf || (m.in_voice && !m.mic)) && (
@@ -1648,7 +1677,35 @@ export default function App() {
                 done={spinDone}
                 onPlay={(x) => run(() => invoke("open_url", { url: x.media }))}
                 onRemove={(x) => run(() => send({ type: "remove_suggestion", id: x.id }))}
-                onSpin={() => run(() => send({ type: "spin" }))}
+                onSpin={() =>
+                  run(() =>
+                    send({
+                      type: "spin",
+                      weights: [...weights.entries()].filter(
+                        ([id, w]) => w !== 1 && suggestions.some((x) => x.id === id),
+                      ),
+                    }),
+                  )
+                }
+                wheel={
+                  <RouletteWheel
+                    list={spin ? spin.list : suggestions}
+                    winner={spin ? spin.winner : null}
+                    title={mediaTitle}
+                  />
+                }
+                admin={
+                  adminOpen ? (
+                    <AdminPanel
+                      list={suggestions}
+                      weights={weights}
+                      onChange={(id, w) => setWeights((m) => new Map(m).set(id, w))}
+                      onReset={() => setWeights(new Map())}
+                      onClose={() => setAdminOpen(false)}
+                      isHost={isHost}
+                    />
+                  ) : null
+                }
               />
             ) : (
             <div className="lines">
@@ -1828,6 +1885,67 @@ export default function App() {
   );
 }
 
+/** Секретный пульт админа: шансы предложений в рулетке. */
+function AdminPanel({
+  list,
+  weights,
+  onChange,
+  onReset,
+  onClose,
+  isHost,
+}: {
+  list: Suggestion[];
+  weights: Map<number, number>;
+  onChange: (id: number, weight: number) => void;
+  onReset: () => void;
+  onClose: () => void;
+  isHost: boolean;
+}) {
+  const weightOf = (id: number) => weights.get(id) ?? 1;
+  const total = list.reduce((sum, x) => sum + weightOf(x.id), 0);
+  return (
+    <div className="admin-panel" role="dialog" aria-label="Пульт админа">
+      <div className="admin-head">
+        <span>🤫 Пульт админа</span>
+        <button className="icon" onClick={onClose} aria-label="Закрыть">
+          <Icon name="close" />
+        </button>
+      </div>
+      {list.length === 0 ? (
+        <p className="suggestions-empty">Список пуст — подкручивать нечего.</p>
+      ) : (
+        list.map((x) => {
+          const w = weightOf(x.id);
+          const pct = total > 0 ? Math.round((w / total) * 100) : 0;
+          return (
+            <label key={x.id} className="admin-row">
+              <span className="suggestion-title">{mediaTitle(x.media)}</span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                step={1}
+                value={w}
+                style={{ "--progress": `${w * 10}%` } as CSSProperties}
+                onChange={(e) => onChange(x.id, Number(e.target.value))}
+              />
+              <span className="pct">{pct}%</span>
+            </label>
+          );
+        })
+      )}
+      <div className="admin-foot">
+        <span className="suggestion-by">
+          {isHost ? "Колесо об этом не узнает." : "Сработает, только когда пульт у тебя."}
+        </span>
+        <button className="quiet" onClick={onReset}>
+          Честно
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Список «Что посмотреть» и рулетка по нему. */
 function SuggestionsPanel({
   list,
@@ -1839,7 +1957,11 @@ function SuggestionsPanel({
   onPlay,
   onRemove,
   onSpin,
+  wheel,
+  admin,
 }: {
+  wheel: ReactNode;
+  admin: ReactNode;
   list: Suggestion[];
   me: MemberId | null;
   isHost: boolean;
@@ -1852,10 +1974,12 @@ function SuggestionsPanel({
 }) {
   return (
     <div className="suggestions">
+      {admin}
+      {list.length > 0 && wheel}
       {list.length === 0 ? (
         <p className="suggestions-empty">
           Пока пусто. Вставь ссылку в поле сверху и нажми «{isHost ? "В список" : "Предложить"}» —
-          а ведущий включит или крутанёт рулетку.
+          а тот, у кого пульт, включит или крутанёт рулетку.
         </p>
       ) : (
         <ul>
@@ -1954,7 +2078,7 @@ function MemberMenu({
         <>
           <button role="menuitem" autoFocus onClick={() => setConfirm("transfer")}>
             <Icon name="crown" />
-            Передать управление
+            Передать пульт
           </button>
           <button role="menuitem" className="danger" onClick={() => setConfirm("kick")}>
             <Icon name="leave" />

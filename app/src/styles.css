@@ -1318,6 +1318,61 @@ img.emoji3d {
   line-height: 1.5;
 }
 
+/* Колесо рулетки */
+.wheel {
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+}
+
+.wheel-disk {
+  transform-origin: 110px 110px;
+}
+
+.wheel-disk.spinning {
+  transition: transform 5.2s cubic-bezier(0.12, 0.8, 0.2, 1);
+}
+
+.wheel-label {
+  fill: #efe6dc;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Секретный пульт админа */
+.admin-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--lamp);
+  border-radius: var(--radius-sm);
+  background: #2a2024;
+}
+
+.admin-head,
+.admin-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.admin-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 90px 38px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.admin-row .pct {
+  text-align: right;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
 button.roulette {
   flex: none;
   height: 42px;

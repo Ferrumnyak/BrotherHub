@@ -59,7 +59,7 @@ export type ClientMsg =
   | { type: "sync"; position: number; paused: boolean }
   | { type: "transfer_host"; to: MemberId }
   | { type: "kick"; id: MemberId }
-  | { type: "spin" }
+  | { type: "spin"; weights?: Array<[number, number]> }
   | { type: "clear_media" };
 
 export type ServerMsg =

@@ -332,6 +332,31 @@ fn random_u64() -> u64 {
     RandomState::new().build_hasher().finish()
 }
 
+/// Случайное предложение с учётом шансов (у кого вес не указан — 1).
+fn pick_weighted(list: &[Suggestion], weights: &[(u64, f64)]) -> u64 {
+    let weight = |id: u64| {
+        weights
+            .iter()
+            .find(|(w, _)| *w == id)
+            .map(|(_, w)| if w.is_finite() { w.max(0.0) } else { 0.0 })
+            .unwrap_or(1.0)
+    };
+    let total: f64 = list.iter().map(|s| weight(s.id)).sum();
+    if total <= 0.0 {
+        return list[(random_u64() % list.len() as u64) as usize].id;
+    }
+    // Случайное число в [0, total).
+    let mut at = (random_u64() >> 11) as f64 / (1u64 << 53) as f64 * total;
+    for s in list {
+        let w = weight(s.id);
+        if at < w {
+            return s.id;
+        }
+        at -= w;
+    }
+    list[list.len() - 1].id
+}
+
 fn new_token() -> String {
     // RandomState каждый раз берёт новый случайный ключ от ОС.
     let a = RandomState::new().build_hasher().finish();
@@ -703,12 +728,11 @@ fn handle_host_command(
             room.set_position(0.0);
             room.broadcast_playback(Some(PlaybackAction::SetMedia), Some(name));
         }
-        ClientMsg::Spin => {
+        ClientMsg::Spin { weights } => {
             if room.suggestions.is_empty() {
                 return error("в списке предложений пусто");
             }
-            let pick = (random_u64() % room.suggestions.len() as u64) as usize;
-            let winner = room.suggestions[pick].id;
+            let winner = pick_weighted(&room.suggestions, &weights);
             room.broadcast(&ServerMsg::Roulette { winner, by: name });
         }
         ClientMsg::Play { position } => {
@@ -829,6 +853,20 @@ async fn connection_lost(state: &Arc<AppState>, seat: Seat, conn: u64) {
             id: seat.id,
             online: false,
         });
+        // Пульт не ждёт 30 секунд — сразу переходит тому, кто на связи.
+        if room.host == seat.id {
+            let next = room
+                .peers
+                .iter()
+                .filter(|(id, p)| **id != seat.id && p.tx.is_some())
+                .map(|(id, _)| *id)
+                .min();
+            if let Some(next) = next {
+                room.host = next;
+                room.broadcast(&ServerMsg::HostChanged { host: next });
+                tracing::info!("пульт перешёл к {next}: у прошлого пропала связь");
+            }
+        }
         tracing::info!("у участника {} пропала связь, жду возвращения", seat.id);
     }
 

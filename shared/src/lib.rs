@@ -55,8 +55,12 @@ pub enum ClientMsg {
     TransferHost { to: MemberId },
     /// Исключить участника из комнаты.
     Kick { id: MemberId },
-    /// Крутить рулетку по списку предложений.
-    Spin,
+    /// Крутить рулетку по списку предложений. `weights` — шансы
+    /// предложений (id → вес, по умолчанию у всех 1).
+    Spin {
+        #[serde(default)]
+        weights: Vec<(u64, f64)>,
+    },
     /// Закрыть видео у всех.
     ClearMedia,
 }
@@ -279,7 +283,10 @@ mod tests {
     #[test]
     fn new_messages_round_trip() {
         let spin: ClientMsg = serde_json::from_str(r#"{"type":"spin"}"#).unwrap();
-        assert!(matches!(spin, ClientMsg::Spin));
+        assert!(matches!(spin, ClientMsg::Spin { weights } if weights.is_empty()));
+        let rigged: ClientMsg =
+            serde_json::from_str(r#"{"type":"spin","weights":[[3,5.0]]}"#).unwrap();
+        assert!(matches!(rigged, ClientMsg::Spin { weights } if weights == vec![(3, 5.0)]));
         let clear: ClientMsg = serde_json::from_str(r#"{"type":"clear_media"}"#).unwrap();
         assert!(matches!(clear, ClientMsg::ClearMedia));
         let voice: ClientMsg =

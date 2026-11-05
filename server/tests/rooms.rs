@@ -292,3 +292,38 @@ async fn voice_state_is_shared_and_kept() {
     assert_eq!(anya["mic"], false);
     assert_eq!(anya["deaf"], true);
 }
+
+#[tokio::test]
+async fn host_role_passes_on_when_host_connection_drops() {
+    let url = start(Config::default()).await;
+    let (a, _) = Client::join(&url, "r", "Аня").await;
+    let (mut b, wb) = Client::join(&url, "r", "Боря").await;
+
+    // Связь у ведущего пропала (без «выхода») — пульт переходит сразу.
+    drop(a);
+    let changed = b.expect("host_changed").await;
+    assert_eq!(changed["host"], wb["you"]);
+}
+
+#[tokio::test]
+async fn roulette_respects_weights() {
+    let url = start(Config::default()).await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    a.send(json!({"type": "suggest", "media": "https://example.com/1"}))
+        .await;
+    a.send(json!({"type": "suggest", "media": "https://example.com/2"}))
+        .await;
+    let list = loop {
+        let msg = a.expect("suggestions").await;
+        if msg["list"].as_array().unwrap().len() == 2 {
+            break msg;
+        }
+    };
+    let second = list["list"][1]["id"].as_u64().unwrap();
+    let first = list["list"][0]["id"].as_u64().unwrap();
+    for _ in 0..5 {
+        a.send(json!({"type": "spin", "weights": [[first, 0.0], [second, 1.0]]}))
+            .await;
+        assert_eq!(a.expect("roulette").await["winner"], second);
+    }
+}
