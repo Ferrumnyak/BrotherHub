@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App, { ControlsOverlay } from "./App";
+import PlayerSetup from "./PlayerSetup";
 // Шрифты лежат внутри приложения — работают и без интернета.
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -20,5 +21,13 @@ declare global {
 const isControls = window.__BW_VIEW === "controls";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>{isControls ? <ControlsOverlay /> : <App />}</React.StrictMode>,
+  <React.StrictMode>
+    {isControls ? (
+      <ControlsOverlay />
+    ) : (
+      <PlayerSetup>
+        <App />
+      </PlayerSetup>
+    )}
+  </React.StrictMode>,
 );

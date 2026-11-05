@@ -196,6 +196,25 @@ async function pickVideoFile(): Promise<string | null> {
   return typeof path === "string" ? path : null;
 }
 
+/** Левая половина экрана входа: экран, свет лампы и ряд кресел. */
+export function LoginArt() {
+  return (
+    <div className="login-art" aria-hidden="true">
+      <div className="lamp" />
+      <div className="screen" />
+      <div className="seats">
+        {SEAT_COLORS.slice(0, 6).map((c, i) => (
+          <span key={i} style={{ background: i === 2 || i === 3 ? c : undefined }} />
+        ))}
+      </div>
+      <div className="login-brand">
+        <span className="wordmark">BrotherWatch</span>
+        <p>Кинозал для своих: один фильм, одна пауза, общий голосовой чат.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [server, setServer] = useState(savedServer);
   const [name, setName] = useState(() => load("name", ""));
@@ -758,19 +777,7 @@ export default function App() {
   if (!joinedRoom) {
     return (
       <main className="login">
-        <div className="login-art" aria-hidden="true">
-          <div className="lamp" />
-          <div className="screen" />
-          <div className="seats">
-            {SEAT_COLORS.slice(0, 6).map((c, i) => (
-              <span key={i} style={{ background: i === 2 || i === 3 ? c : undefined }} />
-            ))}
-          </div>
-          <div className="login-brand">
-            <span className="wordmark">BrotherWatch</span>
-            <p>Кинозал для своих: один фильм, одна пауза, общий голосовой чат.</p>
-          </div>
-        </div>
+        <LoginArt />
 
         <div className="login-side">
           <form className="login-form" onSubmit={handleConnect}>

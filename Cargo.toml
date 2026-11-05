@@ -13,3 +13,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
 futures-util = "0.3"
+
+# Меньше exe: оптимизация по размеру, LTO, без отладочных символов.
+# Скорость для нашего кода (сеть, IPC с mpv) от этого не страдает.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

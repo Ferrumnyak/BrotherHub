@@ -7,6 +7,7 @@ mod player;
 mod ptt;
 mod session;
 mod sites;
+mod tools;
 mod video;
 
 use tauri::Manager;
@@ -45,7 +46,9 @@ fn main() {
             overlay::overlay_interactive,
             overlay::overlay_close,
             ptt::ptt_set_key,
-            ptt::ptt_capture
+            ptt::ptt_capture,
+            tools::player_tools,
+            tools::player_setup
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherWatch");

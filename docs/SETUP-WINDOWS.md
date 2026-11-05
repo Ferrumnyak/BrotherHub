@@ -53,6 +53,11 @@ scoop install mpv yt-dlp
 Если mpv лежит в другом месте, укажи путь к нему переменной окружения
 `BROTHERWATCH_MPV` (например, `C:\Tools\mpv\mpv.exe`).
 
+Можно ничего не ставить: если mpv или yt-dlp не найдутся, приложение при
+запуске покажет экран «Готовлю плеер» и скачает их само (как у друзей) —
+но только когда в `app/src-tauri/player-pack.json` уже вписан адрес архива
+(см. `docs/BUILD-INSTALLER.md`).
+
 ## 5. Голосовой сервер LiveKit (для проверки голоса на своём ПК)
 
 1. Открой https://github.com/livekit/livekit/releases и в последнем релизе

@@ -33,12 +33,16 @@ if (-not $server -or $server -match "127\.0\.0\.1|localhost|example\.com") {
 }
 
 # ---------- Плеер ----------
-$mpv = Join-Path $root "app\src-tauri\bin\mpv\mpv.exe"
-$ytdlp = Join-Path $root "app\src-tauri\bin\yt-dlp\yt-dlp.exe"
-if (-not (Test-Path $mpv) -or -not (Test-Path $ytdlp)) {
-    Write-Host "Нет mpv или yt-dlp — скачиваю..."
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "fetch-player.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "Не удалось скачать mpv и yt-dlp." }
+# mpv и yt-dlp не входят в сборку: приложение скачивает их при первом
+# запуске. Адрес архива mpv должен быть вписан в player-pack.json.
+$pack = Get-Content (Join-Path $root "app\src-tauri\player-pack.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $pack.url) {
+    throw "В player-pack.json нет адреса плеера. Сначала запусти scripts\pack-player.ps1 и выложи архив (см. docs\BUILD-INSTALLER.md)."
+}
+try {
+    Invoke-WebRequest -Method Head -UseBasicParsing -Uri $pack.url | Out-Null
+} catch {
+    Write-Warning "Архив плеера пока недоступен: $($pack.url)`nВыложи его в GitHub Releases до того, как раздавать сборку, иначе у друзей не скачается плеер."
 }
 
 # ---------- Сборка ----------

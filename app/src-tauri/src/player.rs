@@ -391,40 +391,34 @@ fn bind_to_app_lifetime(child: &Child) {
 #[cfg(not(windows))]
 fn bind_to_app_lifetime(_child: &Child) {}
 
-/// Обновить yt-dlp, который лежит рядом с приложением (из установщика).
+/// Обновить yt-dlp, который скачало или положило рядом с собой приложение.
 ///
 /// Сайты часто меняются, и старый yt-dlp перестаёт открывать ссылки,
 /// поэтому при каждом запуске приложения он тихо обновляет сам себя.
 /// yt-dlp, установленный отдельно (например, через Scoop), не трогаем.
 pub fn update_bundled_ytdlp() {
-    let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(PathBuf::from))
-    else {
-        return;
-    };
-    let exe = if cfg!(windows) {
-        "yt-dlp.exe"
-    } else {
-        "yt-dlp"
-    };
-    let ytdlp = dir.join("yt-dlp").join(exe);
-    if !ytdlp.is_file() {
-        return;
+    let exe = exe_name("yt-dlp");
+    let candidates = [
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("yt-dlp").join(&exe))),
+        crate::tools::tools_dir().map(|d| d.join("yt-dlp").join(&exe)),
+    ];
+    for ytdlp in candidates.into_iter().flatten().filter(|p| p.is_file()) {
+        std::thread::spawn(move || {
+            let mut cmd = std::process::Command::new(ytdlp);
+            cmd.arg("-U")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
+            let _ = cmd.status();
+        });
     }
-    std::thread::spawn(move || {
-        let mut cmd = std::process::Command::new(ytdlp);
-        cmd.arg("-U")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
-        let _ = cmd.status();
-    });
 }
 
 /// `script-message bw <действие>` из [`INPUT_CONF`].
@@ -460,11 +454,15 @@ fn first_existing(candidates: Vec<PathBuf>) -> Option<String> {
 #[cfg(windows)]
 fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
     let mut list = Vec::new();
-    // Рядом с BrotherWatch.exe — сюда будем класть mpv в установщике.
+    // Рядом с BrotherWatch.exe (так было в установщике до версии 0.2).
     if let Some(dir) = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(PathBuf::from))
     {
+        list.push(dir.join(app).join(exe));
+    }
+    // Скачанный при первом запуске (см. tools.rs).
+    if let Some(dir) = crate::tools::tools_dir() {
         list.push(dir.join(app).join(exe));
     }
     // Scoop: настоящий exe, а не «прослойка» из shims.
@@ -490,8 +488,43 @@ fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
 }
 
 #[cfg(not(windows))]
-fn install_locations(_app: &str, _exe: &str) -> Vec<PathBuf> {
-    Vec::new()
+fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
+    crate::tools::tools_dir()
+        .map(|dir| dir.join(app).join(exe))
+        .into_iter()
+        .collect()
+}
+
+/// Имя исполняемого файла программы: `mpv.exe` на Windows, `mpv` в других системах.
+pub fn exe_name(app: &str) -> String {
+    if cfg!(windows) {
+        format!("{app}.exe")
+    } else {
+        app.to_owned()
+    }
+}
+
+/// Есть ли программа `exe` в PATH.
+fn in_path(exe: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(exe).is_file()))
+        .unwrap_or(false)
+}
+
+/// Найдётся ли mpv (иначе его нужно скачать — см. tools.rs).
+pub fn mpv_available() -> bool {
+    let exe = exe_name("mpv");
+    std::env::var_os("BROTHERWATCH_MPV").is_some()
+        || first_existing(install_locations("mpv", &exe)).is_some()
+        || in_path(&exe)
+}
+
+/// Найдётся ли yt-dlp — у нас или в PATH, где его ищет mpv.
+pub fn ytdlp_available() -> bool {
+    let exe = exe_name("yt-dlp");
+    std::env::var_os("BROTHERWATCH_YTDLP").is_some()
+        || first_existing(install_locations("yt-dlp", &exe)).is_some()
+        || in_path(&exe)
 }
 
 /// Путь к mpv: переменная `BROTHERWATCH_MPV`, затем стандартные места
@@ -500,8 +533,7 @@ fn find_mpv() -> String {
     if let Ok(path) = std::env::var("BROTHERWATCH_MPV") {
         return path;
     }
-    let exe = if cfg!(windows) { "mpv.exe" } else { "mpv" };
-    first_existing(install_locations("mpv", exe)).unwrap_or_else(|| "mpv".into())
+    first_existing(install_locations("mpv", &exe_name("mpv"))).unwrap_or_else(|| "mpv".into())
 }
 
 /// Путь к yt-dlp, если он стоит в стандартном месте. Если нет — mpv
@@ -510,12 +542,7 @@ fn find_ytdlp() -> Option<String> {
     if let Ok(path) = std::env::var("BROTHERWATCH_YTDLP") {
         return Some(path);
     }
-    let exe = if cfg!(windows) {
-        "yt-dlp.exe"
-    } else {
-        "yt-dlp"
-    };
-    first_existing(install_locations("yt-dlp", exe))
+    first_existing(install_locations("yt-dlp", &exe_name("yt-dlp")))
 }
 
 #[cfg(windows)]

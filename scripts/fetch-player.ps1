@@ -1,10 +1,13 @@
-﻿# Скачивает плеер mpv и yt-dlp, которые кладутся в установщик BrotherWatch.
+﻿# Скачивает свежую сборку mpv, из которой scripts\pack-player.ps1 делает
+# архив плеера для BrotherWatch. Обычно отдельно запускать не нужно —
+# pack-player.ps1 вызывает его сам.
 #
 # Запуск из корня репозитория:
 #   powershell -ExecutionPolicy Bypass -File scripts\fetch-player.ps1
 #
-# Результат: app\src-tauri\bin\mpv\ и app\src-tauri\bin\yt-dlp\ (в git не попадают).
-# mpv — сборка shinchiro/mpv-winbuild-cmake (архив .7z), yt-dlp — официальный exe.
+# Результат: app\src-tauri\bin\mpv\ (в git не попадает).
+# mpv — сборка shinchiro/mpv-winbuild-cmake (архив .7z).
+# yt-dlp не нужен: приложение скачивает его само с официальной страницы.
 
 $ErrorActionPreference = "Stop"
 # Без этого Invoke-WebRequest качает в разы медленнее из-за полосы прогресса.
@@ -14,16 +17,9 @@ $ProgressPreference = "SilentlyContinue"
 $root = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $root "app\src-tauri\bin"
 $mpvDir = Join-Path $bin "mpv"
-$ytdlpDir = Join-Path $bin "yt-dlp"
 $headers = @{ "User-Agent" = "BrotherWatch-build" }
 
-New-Item -ItemType Directory -Force -Path $mpvDir, $ytdlpDir | Out-Null
-
-# ---------- yt-dlp ----------
-Write-Host "Скачиваю yt-dlp..."
-Invoke-WebRequest -Headers $headers `
-    -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" `
-    -OutFile (Join-Path $ytdlpDir "yt-dlp.exe")
+New-Item -ItemType Directory -Force -Path $mpvDir | Out-Null
 
 # ---------- mpv ----------
 Write-Host "Ищу последнюю сборку mpv..."
@@ -66,4 +62,3 @@ Remove-Item (Join-Path $mpvDir "installer") -Recurse -Force -ErrorAction Silentl
 Write-Host ""
 Write-Host "Готово:"
 Write-Host "  mpv    $((Get-Item (Join-Path $mpvDir 'mpv.exe')).VersionInfo.ProductVersion) ($($asset.name))"
-Write-Host "  yt-dlp $(& (Join-Path $ytdlpDir 'yt-dlp.exe') --version)"

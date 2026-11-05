@@ -1,5 +1,7 @@
-﻿# Собирает BrotherWatch без установщика: папка с BrotherWatch.exe, mpv и
-# yt-dlp, упакованная в zip. Распаковал — запустил, ничего не устанавливая.
+﻿# Собирает BrotherWatch без установщика: папка с BrotherWatch.exe,
+# упакованная в zip. Распаковал — запустил, ничего не устанавливая.
+# mpv и yt-dlp приложение скачает само при первом запуске (в
+# %LOCALAPPDATA%\com.ferrumnyak.brotherwatch\).
 #
 # Запуск из корня репозитория:
 #   powershell -ExecutionPolicy Bypass -File scripts\portable.ps1
@@ -23,11 +25,16 @@ if (Test-Path $envFile) {
 }
 
 # ---------- Плеер ----------
-$binDir = Join-Path $root "app\src-tauri\bin"
-if (-not (Test-Path (Join-Path $binDir "mpv\mpv.exe")) -or -not (Test-Path (Join-Path $binDir "yt-dlp\yt-dlp.exe"))) {
-    Write-Host "Нет mpv или yt-dlp — скачиваю..."
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "fetch-player.ps1")
-    if ($LASTEXITCODE -ne 0) { throw "Не удалось скачать mpv и yt-dlp." }
+# mpv и yt-dlp не входят в сборку: приложение скачивает их при первом
+# запуске. Адрес архива mpv должен быть вписан в player-pack.json.
+$pack = Get-Content (Join-Path $root "app\src-tauri\player-pack.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $pack.url) {
+    throw "В player-pack.json нет адреса плеера. Сначала запусти scripts\pack-player.ps1 и выложи архив (см. docs\BUILD-INSTALLER.md)."
+}
+try {
+    Invoke-WebRequest -Method Head -UseBasicParsing -Uri $pack.url | Out-Null
+} catch {
+    Write-Warning "Архив плеера пока недоступен: $($pack.url)`nВыложи его в GitHub Releases до того, как раздавать сборку, иначе у друзей не скачается плеер."
 }
 
 # ---------- Сборка exe (без установщика) ----------
@@ -59,8 +66,6 @@ if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 Copy-Item $exe (Join-Path $out "BrotherWatch.exe")
-Copy-Item (Join-Path $binDir "mpv") (Join-Path $out "mpv") -Recurse
-Copy-Item (Join-Path $binDir "yt-dlp") (Join-Path $out "yt-dlp") -Recurse
 Copy-Item (Join-Path $root "docs\THIRD-PARTY.md") $out
 
 # ---------- Zip ----------
@@ -73,3 +78,4 @@ Write-Host "Готово:" -ForegroundColor Green
 Write-Host "  папка  $out"
 Write-Host "  архив  $zip"
 Write-Host "Запуск — BrotherWatch.exe в папке. Нужна Windows 10/11 (WebView2 там уже есть)."
+Write-Host "При первом запуске приложение скачает плеер (~60 МБ)."

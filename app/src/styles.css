@@ -333,6 +333,53 @@ button.icon:hover {
   }
 }
 
+/* ---------- Первый запуск: скачивание плеера ---------- */
+
+.login-form.setup p {
+  line-height: 1.55;
+}
+
+.setup-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-stage {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.setup-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.setup-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  border-radius: 3px;
+  background: var(--lamp);
+  transition: width 0.2s ease-out;
+}
+
+/* Размер ещё неизвестен — полоска бегает. */
+.setup-bar.indeterminate span {
+  width: 30%;
+  animation: setup-run 1.2s ease-in-out infinite;
+}
+
+@keyframes setup-run {
+  from { left: -30%; }
+  to { left: 100%; }
+}
+
 /* ---------- Комната ---------- */
 
 .room {
