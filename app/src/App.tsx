@@ -56,6 +56,8 @@ function people(n: number): string {
 
 /** Высота панели плеера поверх видео в полном экране, CSS-пиксели. */
 const OVERLAY_HEIGHT = 150;
+/** Высота панели поверх видео в мини-окне. */
+const MINI_OVERLAY_HEIGHT = 84;
 /** Размер мини-окна (внутренняя часть, без заголовка). */
 const MINI_WIDTH = 480;
 const MINI_HEIGHT = 340;
@@ -68,6 +70,8 @@ const ERROR_HIDE_MS = 7_000;
 
 /** Что нужно панели плеера поверх видео (событие `overlay-state`). */
 interface OverlayState {
+  /** Панель поверх мини-окна, а не полного экрана. */
+  mini: boolean;
   canControl: boolean;
   controlHint: string;
   title: string;
@@ -739,12 +743,14 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [joinedRoom]);
 
-  // В полном экране панель плеера прячется через 3 секунды без движения мыши.
+  // В полном экране и в мини-окне панель плеера лежит поверх видео и
+  // прячется, если мышь не двигается (в мини-окне — и когда мышь ушла с окна).
   useEffect(() => {
-    if (!fullscreen) {
+    if (!fullscreen && !mini) {
       setControlsHidden(false);
       return;
     }
+    const win = getCurrentWindow();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const show = (visible: boolean) => {
       setControlsHidden(!visible);
@@ -754,15 +760,39 @@ export default function App() {
     const poke = () => {
       show(true);
       clearTimeout(timer);
-      timer = setTimeout(() => {
-        if (!overControlsRef.current) show(false);
-      }, 3000);
+      timer = setTimeout(
+        () => {
+          if (!overControlsRef.current) show(false);
+        },
+        mini ? 1800 : 3000,
+      );
+    };
+    const onCursor = async ([x, y]: [number, number]) => {
+      if (!mini) {
+        poke();
+        return;
+      }
+      try {
+        const pos = await win.outerPosition();
+        const size = await win.outerSize();
+        const inside =
+          x >= pos.x && y >= pos.y && x < pos.x + size.width && y < pos.y + size.height;
+        if (inside) poke();
+        else if (!overControlsRef.current) {
+          clearTimeout(timer);
+          show(false);
+        }
+      } catch {
+        poke();
+      }
     };
     poke();
     invoke("watch_cursor", { enabled: true }).catch(() => {});
     let unlisten: (() => void) | undefined;
     let active = true;
-    listen("cursor-moved", poke).then((u) => (active ? (unlisten = u) : u()));
+    listen<[number, number]>("cursor-moved", (e) => onCursor(e.payload)).then((u) =>
+      active ? (unlisten = u) : u(),
+    );
     window.addEventListener("mousemove", poke);
     window.addEventListener("keydown", poke);
     return () => {
@@ -774,7 +804,7 @@ export default function App() {
       window.removeEventListener("mousemove", poke);
       window.removeEventListener("keydown", poke);
     };
-  }, [fullscreen]);
+  }, [fullscreen, mini]);
 
   // Панель смайликов закрывается кликом мимо неё.
   useEffect(() => {
@@ -1074,10 +1104,12 @@ export default function App() {
           width: Math.round(r.width * k),
           height: Math.round(r.height * k),
         },
+        // Углы — как у области видео в интерфейсе.
+        radius: Math.round((fullscreen ? 0 : mini ? 10 : 14) * k),
       }).catch(() => {});
-      // В полном экране панель плеера — отдельное окно поверх низа видео.
-      if (fullscreen) {
-        const h = Math.min(OVERLAY_HEIGHT, r.height);
+      // В полном экране и в мини-окне панель плеера — отдельное окно поверх низа видео.
+      if (fullscreen || mini) {
+        const h = Math.min(mini ? MINI_OVERLAY_HEIGHT : OVERLAY_HEIGHT, r.height);
         invoke("overlay_place", {
           rect: {
             x: Math.round(r.left * k),
@@ -1103,6 +1135,7 @@ export default function App() {
   // ----- Связь с панелью поверх видео -----
 
   const overlayState: OverlayState = {
+    mini,
     canControl: isHost && player.running && player.loaded === (playback?.media ?? null),
     controlHint: isHost ? "Сначала открой видео" : `Управляет ${hostNameOf(members, host) ?? "ведущий"}`,
     title: playback?.media ? mediaTitle(playback.media) : "Ничего не выбрано",
@@ -1116,8 +1149,8 @@ export default function App() {
   overlayJsonRef.current = overlayJson;
 
   useEffect(() => {
-    if (fullscreen) emit("overlay-state", JSON.parse(overlayJson)).catch(() => {});
-  }, [overlayJson, fullscreen]);
+    if (fullscreen || mini) emit("overlay-state", JSON.parse(overlayJson)).catch(() => {});
+  }, [overlayJson, fullscreen, mini]);
 
   useEffect(() => {
     let active = true;
@@ -1254,6 +1287,16 @@ export default function App() {
               <p>{roomStatus}</p>
             </div>
             <div className="header-actions">
+              {isHost && media !== null && (
+                <button
+                  className="ghost close-media"
+                  onClick={() => run(() => invoke("close_media"))}
+                  title="Закрыть видео у всех"
+                >
+                  <Icon name="close" size={17} />
+                  Закрыть видео
+                </button>
+              )}
               <button
                 className={sharing ? "ghost sharing" : "ghost"}
                 onClick={toggleScreenShare}
@@ -1370,6 +1413,7 @@ export default function App() {
           )}
         </div>
 
+        {!mini && (
         <PlayerControls
           onHover={(over) => (overControlsRef.current = over)}
           info={info}
@@ -1386,12 +1430,9 @@ export default function App() {
           onError={(err) => setError(err)}
           fullscreen={fullscreen}
           onFullscreen={() => applyFullscreen(!fullscreen)}
-          mini={mini}
-          onMini={() => applyMini(!mini)}
-          onClose={
-            isHost && media !== null ? () => run(() => invoke("close_media")) : undefined
-          }
+          onMini={() => applyMini(true)}
         />
+        )}
         {error && !chatOpen && (
           <p className="error stage-error" onClick={() => setError(null)} title="Скрыть">
             {error}
@@ -2011,7 +2052,11 @@ export function ControlsOverlay() {
   if (!state) return null;
 
   return (
-    <div className={visible ? "overlay-panel" : "overlay-panel hidden"}>
+    <div
+      className={["overlay-panel", state.mini && "mini", !visible && "hidden"]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <PlayerControls
         onHover={(over) => emit("overlay-hover", over).catch(() => {})}
         info={info}
@@ -2029,8 +2074,12 @@ export function ControlsOverlay() {
           emit("overlay-quality", value).catch(() => {});
         }}
         onError={(message) => emit("overlay-error", message).catch(() => {})}
-        fullscreen
+        fullscreen={!state.mini}
         onFullscreen={() => emit("overlay-key", "exit-fullscreen").catch(() => {})}
+        mini={state.mini}
+        onMini={
+          state.mini ? () => emit("overlay-key", "exit-fullscreen").catch(() => {}) : undefined
+        }
       />
     </div>
   );

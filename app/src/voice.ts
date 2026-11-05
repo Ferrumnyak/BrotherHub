@@ -189,7 +189,8 @@ export class VoiceClient {
           suppressLocalAudioPlayback: false,
         },
         systemAudio: "include",
-        windowAudio: "system",
+        // Показываешь одно окно — берём звук только этого окна.
+        windowAudio: "window",
         selfBrowserSurface: "exclude",
         surfaceSwitching: "include",
       } as DisplayMediaStreamOptions);
@@ -231,6 +232,15 @@ export class VoiceClient {
         });
       } else {
         this.cb.onError("Экран показывается без звука: Windows не дал захватить звук.");
+      }
+      // Если браузер не умеет исключать собственный звук, в трансляцию
+      // попадают и голоса из чата, и звук самой трансляции у соседних
+      // окон — отсюда эхо.
+      const supported = navigator.mediaDevices.getSupportedConstraints() as Record<string, boolean>;
+      if (audio && !supported.restrictOwnAudio) {
+        this.cb.onError(
+          "Звук трансляции может давать эхо: показывай одно окно, а не весь экран, или пусть друзья будут в наушниках.",
+        );
       }
       this.cb.onLocalScreenShare(true);
     } catch (err) {

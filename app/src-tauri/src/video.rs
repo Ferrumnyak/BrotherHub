@@ -83,8 +83,9 @@ pub fn create(_window: &WebviewWindow, _host: &VideoHost) -> Result<(), String> 
 }
 
 #[cfg(windows)]
-fn place(hwnd: isize, rect: Option<Rect>) {
+fn place(hwnd: isize, rect: Option<Rect>, radius: u32) {
     use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         SetWindowPos, ShowWindow, HWND_TOP, SWP_NOACTIVATE, SWP_SHOWWINDOW, SW_HIDE,
     };
@@ -102,6 +103,15 @@ fn place(hwnd: isize, rect: Option<Rect>) {
                     r.height,
                     SWP_SHOWWINDOW | SWP_NOACTIVATE,
                 );
+                // Скруглённые углы, как у области видео в интерфейсе.
+                // Windows сама освобождает регион, отданный окну.
+                let region = if radius > 0 {
+                    let d = (radius * 2) as i32;
+                    CreateRoundRectRgn(0, 0, r.width + 1, r.height + 1, d, d)
+                } else {
+                    std::ptr::null_mut()
+                };
+                SetWindowRgn(hwnd, region, 1);
             }
             _ => {
                 ShowWindow(hwnd, SW_HIDE);
@@ -111,7 +121,7 @@ fn place(hwnd: isize, rect: Option<Rect>) {
 }
 
 #[cfg(not(windows))]
-fn place(_hwnd: isize, _rect: Option<Rect>) {}
+fn place(_hwnd: isize, _rect: Option<Rect>, _radius: u32) {}
 
 /// Следить за движением мыши (для автоскрытия панели в полном экране).
 ///
@@ -154,7 +164,8 @@ mod cursor {
                     }
                     if (p.x, p.y) != last {
                         if last.0 != i32::MIN {
-                            let _ = app.emit("cursor-moved", ());
+                            // Экранные координаты в физических пикселях.
+                            let _ = app.emit("cursor-moved", (p.x, p.y));
                         }
                         last = (p.x, p.y);
                     }
@@ -177,10 +188,12 @@ pub fn set_video_rect(
     app: AppHandle,
     host: State<'_, VideoHost>,
     rect: Option<Rect>,
+    radius: Option<u32>,
 ) -> Result<(), String> {
     let Some(hwnd) = host.wid() else {
         return Ok(());
     };
-    app.run_on_main_thread(move || place(hwnd, rect))
+    let radius = radius.unwrap_or(0);
+    app.run_on_main_thread(move || place(hwnd, rect, radius))
         .map_err(|e| e.to_string())
 }

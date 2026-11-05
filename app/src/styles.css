@@ -1532,41 +1532,49 @@ button.dock:hover:not(:disabled) {
 
 /* ---------- Мини-окно ---------- */
 
+/* Видео — на всё окно, с небольшим полем вокруг скруглённых углов.
+   Панель плеера — в отдельном окне поверх видео (как в полном экране)
+   и появляется, только когда мышь над окном. */
 .room.mini .video {
-  margin: 0;
-  border-radius: 0;
+  margin: 6px;
+  border-radius: 10px;
 }
 
-.room.mini .controls {
+.overlay-panel.mini .controls {
   gap: 4px;
-  padding: 6px 10px 8px;
+  padding: 0 14px 10px;
 }
 
-.room.mini .track-select,
-.room.mini .now-status,
-.room.mini .fullscreen-toggle {
+.overlay-panel.mini .track-select,
+.overlay-panel.mini .now-status,
+.overlay-panel.mini .fullscreen-toggle {
   display: none;
 }
 
-.room.mini .control-row {
+.overlay-panel.mini .control-row {
   flex-wrap: nowrap;
   gap: 8px;
 }
 
-.room.mini .now {
+.overlay-panel.mini .now {
   flex-basis: auto;
 }
 
-.room.mini .volume {
+.overlay-panel.mini .volume {
   margin-left: 0;
 }
 
-.room.mini .volume input {
+.overlay-panel.mini .volume input {
   width: 70px;
 }
 
-.room.mini .time {
+.overlay-panel.mini .time {
   width: 44px;
+}
+
+.overlay-panel.mini .play {
+  width: 36px;
+  height: 36px;
 }
 
 /* ---------- Трансляция экрана ---------- */
