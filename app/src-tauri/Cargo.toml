@@ -18,6 +18,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 # native-tls — шифрование (wss://) через встроенный в Windows SChannel.
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+# Загрузка страниц сайтов, которые yt-dlp не знает (см. sites.rs).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 # Только Windows: встраивание видео в окно и привязка mpv к жизни приложения.
 [target.'cfg(windows)'.dependencies]

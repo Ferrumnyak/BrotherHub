@@ -350,17 +350,16 @@ impl Session {
             player.set_pause(true);
         }
         if is_url(&media) && !self.is_host() {
-            match self.ensure_player().await {
-                Ok(()) => {
-                    if let Some(player) = &self.player {
-                        player.load(&media);
-                    }
-                    self.loaded = Some(media);
-                }
-                Err(e) => {
-                    let _ = self.app.emit("player-error", e);
-                }
+            let opened = match self.ensure_player().await {
+                Ok(()) => self.load_media(&media).await,
+                Err(e) => Err(e),
+            };
+            if let Err(e) = opened {
+                let _ = self.app.emit("player-error", e);
             }
+            // Даже если не открылось, второй раз сами не пробуем —
+            // можно открыть ссылку заново вручную.
+            self.loaded = Some(media);
         }
         self.emit_status();
     }
@@ -615,6 +614,20 @@ impl Session {
         let Some(player) = &self.player else {
             return;
         };
+        // Сайты из `sites`: качество выбираем сами — берём другой поток.
+        if let Some(media) = self.loaded.clone().filter(|m| crate::sites::handles(m)) {
+            let position = player.time_pos().await;
+            match crate::sites::resolve(&media, quality).await {
+                Ok(stream) => {
+                    player.load_at(&stream, position);
+                    self.reloading = true;
+                }
+                Err(e) => {
+                    let _ = self.app.emit("player-error", e);
+                }
+            }
+            return;
+        }
         if !self.loaded.as_deref().is_some_and(is_url) {
             // Новое качество подхватится при следующей ссылке.
             player.command(serde_json::json!([
@@ -708,6 +721,20 @@ impl Session {
         self.set_local(paused, position);
     }
 
+    /// Открыть ссылку в плеере. Ссылки с сайтов, которые yt-dlp не знает
+    /// (см. [`crate::sites`]), сначала превращаем в прямую ссылку на поток.
+    async fn load_media(&self, url: &str) -> Result<(), String> {
+        let target = if crate::sites::handles(url) {
+            crate::sites::resolve(url, self.quality).await?
+        } else {
+            url.to_string()
+        };
+        if let Some(player) = &self.player {
+            player.load(&target);
+        }
+        Ok(())
+    }
+
     // ---------- Действия из интерфейса ----------
 
     pub async fn open_file(&mut self, path: String) -> Result<(), String> {
@@ -755,9 +782,7 @@ impl Session {
                 return Err("Выбирать, что смотрим, может только ведущий".into());
             }
             self.ensure_player().await?;
-            if let Some(player) = &self.player {
-                player.load(&url);
-            }
+            self.load_media(&url).await?;
             self.loaded = Some(url);
             self.last_seek = None;
             self.emit_status();
@@ -769,8 +794,9 @@ impl Session {
         self.ensure_player().await?;
         if let Some(player) = &self.player {
             player.set_pause(true);
-            player.load(&url);
         }
+        // Если ссылку не разобрать, комнате её не отправляем.
+        self.load_media(&url).await?;
         self.send(ClientMsg::SetMedia { media: url.clone() });
         self.room = Some(RoomPlayback::new(PlaybackState {
             media: Some(url.clone()),

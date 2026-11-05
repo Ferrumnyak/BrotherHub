@@ -256,6 +256,15 @@ impl Player {
         self.command(json!(["loadfile", path_or_url, "replace"]));
     }
 
+    /// Открыть другую ссылку и начать с позиции `at` (сбросить потом
+    /// через [`Player::clear_start`]).
+    pub fn load_at(&self, url: &str, at: Option<f64>) {
+        if let Some(at) = at {
+            self.command(json!(["set_property", "start", format!("{at:.2}")]));
+        }
+        self.load(url);
+    }
+
     pub fn set_pause(&self, paused: bool) {
         self.command(json!(["set_property", "pause", paused]));
     }

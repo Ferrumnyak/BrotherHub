@@ -6,6 +6,7 @@ mod overlay;
 mod player;
 mod ptt;
 mod session;
+mod sites;
 mod video;
 
 use tauri::Manager;
