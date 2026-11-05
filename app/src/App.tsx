@@ -2,7 +2,7 @@ import { CSSProperties, FormEvent, ReactElement, useEffect, useRef, useState } f
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ask, open } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   isUrl,
   type ClientMsg,
@@ -256,7 +256,7 @@ export default function App() {
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
-  const [memberMenu, setMemberMenu] = useState<MemberId | null>(null);
+  const [memberMenu, setMemberMenu] = useState<MenuAnchor | null>(null);
   const [quality, setQuality] = useState(() => load("quality", ""));
   const [controlsHidden, setControlsHidden] = useState(false);
   const overControlsRef = useRef(false);
@@ -351,14 +351,17 @@ export default function App() {
           system(`${msg.member.name} зашёл в зал`, "enter");
           break;
         case "member_left":
-          system(`${nameOf(msg.id)} ${msg.kicked ? "исключён из зала" : "вышел"}`, "leave");
+          system(
+            msg.kicked ? `${nameOf(msg.id)} делал -вайб, поэтому вышел` : `${nameOf(msg.id)} вышел`,
+            "leave",
+          );
           setMembers((m) => m.filter((x) => x.id !== msg.id));
           break;
         case "kicked":
           invoke("disconnect");
           setVoiceAccess(null);
           setJoinedRoom(null);
-          setError(`${msg.by} исключил тебя из зала`);
+          setError(`${msg.by} выгнал тебя из зала`);
           break;
         case "host_changed":
           setHost(msg.host);
@@ -498,16 +501,13 @@ export default function App() {
     setUrl("");
   }
 
+  // Подтверждение — в самом меню участника (см. MemberMenu).
   async function handleTransfer(m: Member) {
-    if (await ask(`Передать ${m.name} управление просмотром?`, { title: "BrotherWatch" })) {
-      await run(() => send({ type: "transfer_host", to: m.id }));
-    }
+    await run(() => send({ type: "transfer_host", to: m.id }));
   }
 
   async function handleKick(m: Member) {
-    if (await ask(`Исключить ${m.name} из зала?`, { title: "BrotherWatch", kind: "warning" })) {
-      await run(() => send({ type: "kick", id: m.id }));
-    }
+    await run(() => send({ type: "kick", id: m.id }));
   }
 
   // ----- Полный экран и панель чата -----
@@ -606,15 +606,34 @@ export default function App() {
     save("quality", value);
   }
 
-  // Меню действий с участником закрывается кликом мимо него.
+  // Меню действий с участником закрывается кликом мимо него и клавишей Esc.
   useEffect(() => {
     if (memberMenu === null) return;
     const close = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest(".seat-menu")) setMemberMenu(null);
+      const target = e.target as HTMLElement;
+      if (!target.closest(".member-menu") && !target.closest(".hall li.clickable")) {
+        setMemberMenu(null);
+      }
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMemberMenu(null);
     };
     window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", esc);
+    };
   }, [memberMenu]);
+
+  function toggleMemberMenu(m: Member, row: HTMLElement) {
+    if (memberMenu?.id === m.id) {
+      setMemberMenu(null);
+      return;
+    }
+    const r = row.getBoundingClientRect();
+    setMemberMenu({ id: m.id, top: r.top, bottom: r.bottom, left: r.left, width: r.width });
+  }
 
   // ----- Голос -----
 
@@ -1001,11 +1020,33 @@ export default function App() {
         <aside className="side">
           <div className="hall">
             <h2>В зале</h2>
-            <ul>
+            <ul onScroll={() => setMemberMenu(null)}>
               {members.map((m) => {
                 const speaking = speakers.has(String(m.id));
+                const manageable = isHost && m.id !== me;
                 return (
-                  <li key={m.id}>
+                  <li
+                    key={m.id}
+                    className={[manageable && "clickable", memberMenu?.id === m.id && "open"]
+                      .filter(Boolean)
+                      .join(" ")}
+                    role={manageable ? "button" : undefined}
+                    tabIndex={manageable ? 0 : undefined}
+                    title={manageable ? "Передать управление или выгнать" : undefined}
+                    aria-haspopup={manageable ? "menu" : undefined}
+                    aria-expanded={manageable ? memberMenu?.id === m.id : undefined}
+                    onClick={manageable ? (e) => toggleMemberMenu(m, e.currentTarget) : undefined}
+                    onKeyDown={
+                      manageable
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              toggleMemberMenu(m, e.currentTarget);
+                            }
+                          }
+                        : undefined
+                    }
+                  >
                     <span
                       className={["seat", speaking && "speaking", !m.online && "offline"]
                         .filter(Boolean)
@@ -1026,45 +1067,32 @@ export default function App() {
                         m.id === host && <span className="seat-role">ведёт просмотр</span>
                       )}
                     </span>
-                    {isHost && m.id !== me && (
-                      <span className="seat-menu">
-                        <button
-                          className="icon"
-                          aria-label={`Действия с участником ${m.name}`}
-                          aria-expanded={memberMenu === m.id}
-                          onClick={() => setMemberMenu((id) => (id === m.id ? null : m.id))}
-                        >
-                          <Icon name="more" />
-                        </button>
-                        {memberMenu === m.id && (
-                          <span className="menu" role="menu">
-                            <button
-                              role="menuitem"
-                              onClick={() => {
-                                setMemberMenu(null);
-                                handleTransfer(m);
-                              }}
-                            >
-                              Передать управление
-                            </button>
-                            <button
-                              role="menuitem"
-                              className="danger"
-                              onClick={() => {
-                                setMemberMenu(null);
-                                handleKick(m);
-                              }}
-                            >
-                              Исключить из зала
-                            </button>
-                          </span>
-                        )}
+                    {manageable && (
+                      <span className="seat-more" aria-hidden="true">
+                        <Icon name="more" />
                       </span>
                     )}
                   </li>
                 );
               })}
             </ul>
+            {memberMenu &&
+              isHost &&
+              (() => {
+                const m = members.find((x) => x.id === memberMenu.id);
+                return (
+                  m && (
+                    <MemberMenu
+                      key={m.id}
+                      member={m}
+                      anchor={memberMenu}
+                      onClose={() => setMemberMenu(null)}
+                      onTransfer={() => handleTransfer(m)}
+                      onKick={() => handleKick(m)}
+                    />
+                  )
+                );
+              })()}
           </div>
 
           {voiceSettings ? (
@@ -1236,6 +1264,84 @@ export default function App() {
         </aside>
       )}
     </main>
+  );
+}
+
+/** Где открыть меню участника: строка, по которой кликнули. */
+type MenuAnchor = { id: MemberId; top: number; bottom: number; left: number; width: number };
+
+/**
+ * Меню участника для ведущего: передать управление или выгнать из зала.
+ * Действие подтверждается тут же, вторым нажатием, без системных окон.
+ */
+function MemberMenu({
+  member,
+  anchor,
+  onClose,
+  onTransfer,
+  onKick,
+}: {
+  member: Member;
+  anchor: MenuAnchor;
+  onClose: () => void;
+  onTransfer: () => void;
+  onKick: () => void;
+}) {
+  const [confirm, setConfirm] = useState<"transfer" | "kick" | null>(null);
+  // Под строкой, а если внизу не хватает места — над ней.
+  const below = window.innerHeight - anchor.bottom > 190;
+  const style: CSSProperties = {
+    left: anchor.left,
+    width: Math.max(anchor.width, 240),
+    ...(below ? { top: anchor.bottom + 6 } : { bottom: window.innerHeight - anchor.top + 6 }),
+  };
+
+  return (
+    <div className="member-menu" role="menu" style={style}>
+      <div className="member-menu-head">
+        <span className="seat small" style={{ background: SEAT_COLORS[colorIndex(member.name)] }}>
+          {initial(member.name)}
+        </span>
+        <span className="member-menu-name">{member.name}</span>
+      </div>
+
+      {confirm === null ? (
+        <>
+          <button role="menuitem" autoFocus onClick={() => setConfirm("transfer")}>
+            <Icon name="crown" />
+            Передать управление
+          </button>
+          <button role="menuitem" className="danger" onClick={() => setConfirm("kick")}>
+            <Icon name="leave" />
+            Выгнать из зала
+          </button>
+        </>
+      ) : (
+        <div className="member-menu-confirm">
+          <p>
+            {confirm === "kick"
+              ? `Выгнать ${member.name}? Зайти обратно он сможет сам.`
+              : `${member.name} будет ставить видео, паузу и перемотку за всех.`}
+          </p>
+          <div className="member-menu-actions">
+            <button className="ghost" onClick={() => setConfirm(null)}>
+              Отмена
+            </button>
+            <button
+              className={confirm === "kick" ? "danger-solid" : "lamp"}
+              autoFocus
+              onClick={() => {
+                onClose();
+                if (confirm === "kick") onKick();
+                else onTransfer();
+              }}
+            >
+              {confirm === "kick" ? "Выгнать" : "Передать"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -798,13 +798,15 @@ html.overlay body {
   margin-bottom: 12px;
 }
 
+/* Список прокручивается, поэтому у него есть поля: иначе подсветка
+   говорящего обрезалась бы по краю. */
 .hall ul {
-  margin: 0;
-  padding: 0;
+  margin: 0 -8px;
+  padding: 2px 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 2px;
   max-height: 35vh;
   overflow-y: auto;
 }
@@ -814,6 +816,38 @@ html.overlay body {
   align-items: center;
   gap: 10px;
   min-height: 34px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+}
+
+/* Ведущий может нажать на человека — откроется меню. */
+.hall li.clickable {
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.hall li.clickable:hover,
+.hall li.clickable.open {
+  background: var(--raised);
+}
+
+.hall li.clickable:focus-visible {
+  outline: 2px solid var(--lamp);
+  outline-offset: -2px;
+}
+
+.seat-more {
+  flex: none;
+  display: flex;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.hall li.clickable:hover .seat-more,
+.hall li.clickable.open .seat-more,
+.hall li.clickable:focus-visible .seat-more {
+  opacity: 1;
 }
 
 /* Кружок участника — «кресло». Говорит — светится, как лампа. */
@@ -835,8 +869,15 @@ html.overlay body {
   opacity: 0.4;
 }
 
+/* Говорит — тонкое кольцо лампы по краю кружка, внутри его границ. */
 .seat.speaking {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--lamp), 0 0 16px rgba(242, 200, 121, 0.45);
+  box-shadow: inset 0 0 0 2px var(--lamp), inset 0 0 0 3.5px rgba(25, 20, 22, 0.55);
+}
+
+.seat.small {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
 }
 
 .seat-name {
@@ -856,38 +897,106 @@ html.overlay body {
   font-weight: 500;
 }
 
-.seat-menu {
-  position: relative;
-  flex: none;
-}
-
-.menu {
-  position: absolute;
-  right: 0;
-  top: 34px;
-  z-index: 10;
-  min-width: 200px;
+/* Меню участника */
+.member-menu {
+  position: fixed;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   padding: 6px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: #2a2024;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  animation: menu-in 0.12s ease-out;
 }
 
-.menu button {
+@keyframes menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.member-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 10px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.member-menu-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-menu > button {
   justify-content: flex-start;
-  height: 34px;
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
   font-weight: 500;
+  color: var(--text);
 }
 
-.menu button:hover {
+.member-menu > button:hover,
+.member-menu > button:focus-visible {
   background: #352a2f;
 }
 
-.menu button.danger {
+.member-menu > button svg {
+  color: var(--muted);
+}
+
+.member-menu > button.danger,
+.member-menu > button.danger svg {
   color: var(--velvet);
+}
+
+.member-menu-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 8px 4px;
+}
+
+.member-menu-confirm p {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.member-menu-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.member-menu-actions button {
+  height: 34px;
+}
+
+button.lamp {
+  background: var(--lamp);
+  color: var(--lamp-ink);
+  font-weight: 700;
+}
+
+button.lamp:hover {
+  background: var(--lamp-soft);
+}
+
+button.danger-solid {
+  background: var(--velvet);
+  color: #fff;
+  font-weight: 700;
+}
+
+button.danger-solid:hover {
+  background: #d06a73;
 }
 
 /* Чат */
