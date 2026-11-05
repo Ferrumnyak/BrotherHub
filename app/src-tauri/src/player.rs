@@ -4,11 +4,11 @@
 //! на Windows это именованный канал (named pipe), на Linux — unix-сокет.
 //! Протокол: https://mpv.io/manual/stable/#json-ipc
 //!
-//! Путь к mpv можно задать переменной окружения `BROTHERWATCH_MPV`,
-//! иначе ищется команда `mpv` в PATH.
+//! Где искать mpv и yt-dlp — см. [`find_mpv`] и [`find_ytdlp`].
 
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -55,7 +55,7 @@ impl Player {
     pub async fn spawn(events: mpsc::UnboundedSender<PlayerEventMsg>) -> Result<Self, String> {
         let id = NEXT_PLAYER_ID.fetch_add(1, Ordering::Relaxed);
         let ipc = ipc_path(id);
-        let mpv = std::env::var("BROTHERWATCH_MPV").unwrap_or_else(|_| "mpv".into());
+        let mpv = find_mpv();
 
         let mut cmd = Command::new(&mpv);
         cmd.args([
@@ -69,6 +69,9 @@ impl Player {
         ])
         .arg(format!("--input-ipc-server={ipc}"))
         .kill_on_drop(true);
+        if let Some(ytdlp) = find_ytdlp() {
+            cmd.arg(format!("--script-opts=ytdl_hook-ytdl_path={ytdlp}"));
+        }
         // Не показывать чёрное консольное окно рядом с плеером.
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
@@ -193,6 +196,76 @@ impl Drop for Player {
         // Вежливо закрыть mpv; если не успеет — процесс убьётся kill_on_drop.
         self.command(json!(["quit"]));
     }
+}
+
+/// Первый существующий файл из списка.
+fn first_existing(candidates: Vec<PathBuf>) -> Option<String> {
+    candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Стандартные места, куда ставят программу `app` (имя exe — `exe`).
+#[cfg(windows)]
+fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
+    let mut list = Vec::new();
+    // Рядом с BrotherWatch.exe — сюда будем класть mpv в установщике.
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(PathBuf::from))
+    {
+        list.push(dir.join(app).join(exe));
+    }
+    // Scoop: настоящий exe, а не «прослойка» из shims.
+    if let Some(scoop) = std::env::var_os("SCOOP") {
+        list.push(
+            PathBuf::from(scoop)
+                .join("apps")
+                .join(app)
+                .join("current")
+                .join(exe),
+        );
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        let scoop = PathBuf::from(home).join("scoop");
+        list.push(scoop.join("apps").join(app).join("current").join(exe));
+        list.push(scoop.join("shims").join(exe));
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        list.push(PathBuf::from(local).join("Programs").join(app).join(exe));
+    }
+    list.push(PathBuf::from(r"C:\Program Files").join(app).join(exe));
+    list
+}
+
+#[cfg(not(windows))]
+fn install_locations(_app: &str, _exe: &str) -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// Путь к mpv: переменная `BROTHERWATCH_MPV`, затем стандартные места
+/// установки, иначе просто `mpv` из PATH.
+fn find_mpv() -> String {
+    if let Ok(path) = std::env::var("BROTHERWATCH_MPV") {
+        return path;
+    }
+    let exe = if cfg!(windows) { "mpv.exe" } else { "mpv" };
+    first_existing(install_locations("mpv", exe)).unwrap_or_else(|| "mpv".into())
+}
+
+/// Путь к yt-dlp, если он стоит в стандартном месте. Если нет — mpv
+/// сам поищет yt-dlp в PATH.
+fn find_ytdlp() -> Option<String> {
+    if let Ok(path) = std::env::var("BROTHERWATCH_YTDLP") {
+        return Some(path);
+    }
+    let exe = if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    };
+    first_existing(install_locations("yt-dlp", exe))
 }
 
 #[cfg(windows)]
