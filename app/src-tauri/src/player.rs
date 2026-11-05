@@ -354,6 +354,42 @@ fn bind_to_app_lifetime(child: &Child) {
 #[cfg(not(windows))]
 fn bind_to_app_lifetime(_child: &Child) {}
 
+/// Обновить yt-dlp, который лежит рядом с приложением (из установщика).
+///
+/// Сайты часто меняются, и старый yt-dlp перестаёт открывать ссылки,
+/// поэтому при каждом запуске приложения он тихо обновляет сам себя.
+/// yt-dlp, установленный отдельно (например, через Scoop), не трогаем.
+pub fn update_bundled_ytdlp() {
+    let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(PathBuf::from))
+    else {
+        return;
+    };
+    let exe = if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    };
+    let ytdlp = dir.join("yt-dlp").join(exe);
+    if !ytdlp.is_file() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut cmd = std::process::Command::new(ytdlp);
+        cmd.arg("-U")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let _ = cmd.status();
+    });
+}
+
 /// `script-message bw <действие>` из [`INPUT_CONF`].
 fn parse_key(v: &Value) -> Option<PlayerKey> {
     let args = v.get("args")?.as_array()?;

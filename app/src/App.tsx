@@ -25,7 +25,9 @@ type ChatLine =
   | { key: number; kind: "chat"; name: string; text: string; mine: boolean }
   | { key: number; kind: "system"; text: string };
 
-const DEFAULT_SERVER = "ws://127.0.0.1:8080";
+// При сборке установщика можно вшить адрес сервера друзей:
+//   $env:VITE_DEFAULT_SERVER = "wss://example.com"; npm run bundle
+const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER || "ws://127.0.0.1:8080";
 
 const VIDEO_EXTENSIONS = [
   "mkv", "mp4", "avi", "mov", "webm", "m4v", "wmv", "flv", "ts", "m2ts", "mpg", "mpeg",

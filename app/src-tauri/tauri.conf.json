@@ -25,7 +25,24 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.png", "icons/icon.ico"]
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "publisher": "Ferrumnyak",
+    "shortDescription": "Совместный просмотр фильмов и сериалов с друзьями",
+    "longDescription": "BrotherWatch — синхронный просмотр видео с друзьями, голосовая связь и текстовый чат.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Russian"
+        ],
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

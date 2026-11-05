@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "bin/mpv/": "mpv/",
+      "bin/yt-dlp/": "yt-dlp/",
+      "../../docs/THIRD-PARTY.md": "THIRD-PARTY.md"
+    }
+  }
+}

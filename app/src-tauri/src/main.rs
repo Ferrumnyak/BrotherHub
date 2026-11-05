@@ -21,6 +21,7 @@ fn main() {
                     eprintln!("видео будет в отдельном окне: {e}");
                 }
             }
+            player::update_bundled_ytdlp();
             let session = session::Session::start(app.handle().clone());
             app.manage(session);
             Ok(())
