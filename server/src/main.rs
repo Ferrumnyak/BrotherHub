@@ -4,6 +4,9 @@
 //! состояние воспроизведения каждой комнаты. Клиенты подключаются по
 //! WebSocket на `/ws`.
 //!
+//! В каждой комнате есть глава лобби: только он управляет
+//! воспроизведением, может передать роль или исключить участника.
+//!
 //! Адрес задаётся переменной окружения `BROTHERWATCH_ADDR`
 //! (по умолчанию `0.0.0.0:8080`).
 
@@ -25,7 +28,7 @@ use axum::{
     routing::get,
     Router,
 };
-use brotherwatch_shared::{ClientMsg, Member, MemberId, PlaybackState, ServerMsg};
+use brotherwatch_shared::{ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, Mutex};
 
@@ -43,6 +46,7 @@ struct Peer {
 
 struct Room {
     peers: HashMap<MemberId, Peer>,
+    host: MemberId,
     media: Option<String>,
     paused: bool,
     /// Позиция на момент `updated_at`.
@@ -51,9 +55,10 @@ struct Room {
 }
 
 impl Room {
-    fn new() -> Self {
+    fn new(host: MemberId) -> Self {
         Self {
             peers: HashMap::new(),
+            host,
             media: None,
             paused: true,
             position: 0.0,
@@ -77,7 +82,7 @@ impl Room {
     }
 
     fn set_position(&mut self, position: f64) {
-        self.position = position.max(0.0);
+        self.position = sanitize(position);
         self.updated_at = Instant::now();
     }
 
@@ -85,6 +90,14 @@ impl Room {
         for peer in self.peers.values() {
             let _ = peer.tx.send(msg.clone());
         }
+    }
+
+    fn broadcast_playback(&self, action: Option<PlaybackAction>, by: Option<String>) {
+        self.broadcast(&ServerMsg::Playback {
+            playback: self.playback(),
+            action,
+            by,
+        });
     }
 
     fn members(&self) -> Vec<Member> {
@@ -98,6 +111,20 @@ impl Room {
             .collect();
         members.sort_by_key(|m| m.id);
         members
+    }
+
+    /// Убрать участника. Если это был глава — роль переходит к тому,
+    /// кто дольше всех в комнате (у него самый маленький id).
+    fn remove_peer(&mut self, id: MemberId, kicked: bool) -> Option<Peer> {
+        let peer = self.peers.remove(&id)?;
+        self.broadcast(&ServerMsg::MemberLeft { id, kicked });
+        if self.host == id {
+            if let Some(&next) = self.peers.keys().min() {
+                self.host = next;
+                self.broadcast(&ServerMsg::HostChanged { host: next });
+            }
+        }
+        Some(peer)
     }
 }
 
@@ -200,7 +227,7 @@ async fn handle_command(
         }
 
         let mut rooms = state.rooms.lock().await;
-        let r = rooms.entry(room.clone()).or_insert_with(Room::new);
+        let r = rooms.entry(room.clone()).or_insert_with(|| Room::new(id));
         let member = Member {
             id,
             name: name.clone(),
@@ -208,10 +235,17 @@ async fn handle_command(
         r.broadcast(&ServerMsg::MemberJoined {
             member: member.clone(),
         });
-        r.peers.insert(id, Peer { name, tx: tx.clone() });
+        r.peers.insert(
+            id,
+            Peer {
+                name,
+                tx: tx.clone(),
+            },
+        );
         let _ = tx.send(ServerMsg::Welcome {
             you: id,
             room: room.clone(),
+            host: r.host,
             members: r.members(),
             playback: r.playback(),
         });
@@ -220,35 +254,43 @@ async fn handle_command(
         return;
     }
 
-    let Some(room_name) = current_room.as_ref() else {
+    let Some(room_name) = current_room.clone() else {
         return error("сначала нужно войти в комнату");
     };
     let mut rooms = state.rooms.lock().await;
-    let Some(room) = rooms.get_mut(room_name) else {
+    let Some(room) = rooms.get_mut(&room_name) else {
+        *current_room = None;
         return;
     };
-    let name = room
-        .peers
-        .get(&id)
-        .map(|p| p.name.clone())
-        .unwrap_or_default();
+    let Some(name) = room.peers.get(&id).map(|p| p.name.clone()) else {
+        // Нас исключили, а клиент ещё что-то шлёт.
+        *current_room = None;
+        return error("ты больше не в этой комнате");
+    };
+
+    if let ClientMsg::Chat { text } = cmd {
+        let text = text.trim();
+        if text.is_empty() {
+            return;
+        }
+        if text.chars().count() > MAX_CHAT_LEN {
+            return error("слишком длинное сообщение");
+        }
+        room.broadcast(&ServerMsg::Chat {
+            from: id,
+            name,
+            text: text.to_string(),
+        });
+        return;
+    }
+
+    // Всё остальное — только для главы лобби.
+    if room.host != id {
+        return error("это может делать только глава лобби");
+    }
 
     match cmd {
-        ClientMsg::Join { .. } => unreachable!("обработано выше"),
-        ClientMsg::Chat { text } => {
-            let text = text.trim();
-            if text.is_empty() {
-                return;
-            }
-            if text.chars().count() > MAX_CHAT_LEN {
-                return error("слишком длинное сообщение");
-            }
-            room.broadcast(&ServerMsg::Chat {
-                from: id,
-                name,
-                text: text.to_string(),
-            });
-        }
+        ClientMsg::Join { .. } | ClientMsg::Chat { .. } => unreachable!("обработано выше"),
         ClientMsg::SetMedia { media } => {
             let media = media.trim();
             if media.is_empty() || media.chars().count() > MAX_MEDIA_LEN {
@@ -257,21 +299,45 @@ async fn handle_command(
             room.media = Some(media.to_string());
             room.paused = true;
             room.set_position(0.0);
-            broadcast_playback(room, name);
+            room.broadcast_playback(Some(PlaybackAction::SetMedia), Some(name));
         }
         ClientMsg::Play { position } => {
             room.paused = false;
-            room.set_position(sanitize(position));
-            broadcast_playback(room, name);
+            room.set_position(position);
+            room.broadcast_playback(Some(PlaybackAction::Play), Some(name));
         }
         ClientMsg::Pause { position } => {
             room.paused = true;
-            room.set_position(sanitize(position));
-            broadcast_playback(room, name);
+            room.set_position(position);
+            room.broadcast_playback(Some(PlaybackAction::Pause), Some(name));
         }
         ClientMsg::Seek { position } => {
-            room.set_position(sanitize(position));
-            broadcast_playback(room, name);
+            room.set_position(position);
+            room.broadcast_playback(Some(PlaybackAction::Seek), Some(name));
+        }
+        ClientMsg::Sync { position, paused } => {
+            room.paused = paused;
+            room.set_position(position);
+            room.broadcast_playback(None, None);
+        }
+        ClientMsg::TransferHost { to } => {
+            if !room.peers.contains_key(&to) {
+                return error("такого участника нет в комнате");
+            }
+            room.host = to;
+            room.broadcast(&ServerMsg::HostChanged { host: to });
+        }
+        ClientMsg::Kick { id: target } => {
+            if target == id {
+                return error("нельзя исключить самого себя");
+            }
+            match room.remove_peer(target, true) {
+                Some(peer) => {
+                    let _ = peer.tx.send(ServerMsg::Kicked { by: name.clone() });
+                    tracing::info!("{name} исключил {} из «{room_name}»", peer.name);
+                }
+                None => error("такого участника нет в комнате"),
+            }
         }
     }
 }
@@ -284,21 +350,14 @@ fn sanitize(position: f64) -> f64 {
     }
 }
 
-fn broadcast_playback(room: &Room, by: String) {
-    let playback = room.playback();
-    room.broadcast(&ServerMsg::Playback { playback, by });
-}
-
 async fn leave_room(state: &AppState, id: MemberId, room_name: &str) {
     let mut rooms = state.rooms.lock().await;
     let Some(room) = rooms.get_mut(room_name) else {
         return;
     };
-    room.peers.remove(&id);
+    room.remove_peer(id, false);
     if room.peers.is_empty() {
         rooms.remove(room_name);
         tracing::info!("комната «{room_name}» опустела и удалена");
-    } else {
-        room.broadcast(&ServerMsg::MemberLeft { id });
     }
 }

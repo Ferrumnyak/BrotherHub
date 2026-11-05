@@ -13,6 +13,8 @@ use std::sync::{
 use brotherwatch_shared::{ClientMsg, ServerMsg};
 use futures_util::{SinkExt, StreamExt};
 use tauri::{AppHandle, Emitter, State};
+
+use crate::session::SharedSession;
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -28,6 +30,7 @@ pub struct Connection {
 pub async fn connect(
     app: AppHandle,
     conn: State<'_, Connection>,
+    session: State<'_, SharedSession>,
     server: String,
     room: String,
     name: String,
@@ -59,20 +62,28 @@ pub async fn connect(
         let _ = sink.close().await;
     });
 
-    // Приём: всё от сервера пересылаем в интерфейс.
+    session.lock().await.connected(tx.clone());
+
+    // Приём: всё от сервера отдаём синхронизации и пересылаем в интерфейс.
+    let session = session.inner().clone();
     tauri::async_runtime::spawn(async move {
         while let Some(Ok(msg)) = stream.next().await {
+            if generation.load(Ordering::SeqCst) != my_generation {
+                break; // это уже старое подключение
+            }
             let Message::Text(text) = msg else {
                 continue;
             };
             match serde_json::from_str::<ServerMsg>(text.as_str()) {
                 Ok(msg) => {
+                    session.lock().await.on_server_msg(&msg).await;
                     let _ = app.emit("server-message", msg);
                 }
                 Err(e) => eprintln!("непонятное сообщение от сервера: {e}"),
             }
         }
         if generation.load(Ordering::SeqCst) == my_generation {
+            session.lock().await.disconnected();
             let _ = app.emit("disconnected", ());
         }
     });
@@ -83,9 +94,13 @@ pub async fn connect(
 }
 
 #[tauri::command]
-pub async fn disconnect(conn: State<'_, Connection>) -> Result<(), String> {
+pub async fn disconnect(
+    conn: State<'_, Connection>,
+    session: State<'_, SharedSession>,
+) -> Result<(), String> {
     conn.generation.fetch_add(1, Ordering::SeqCst);
     conn.tx.lock().await.take();
+    session.lock().await.disconnected();
     Ok(())
 }
 

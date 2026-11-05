@@ -232,3 +232,52 @@ button.secondary {
   display: flex;
   gap: 8px;
 }
+
+/* Плеер и управление */
+.prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.prompt p {
+  margin: 0;
+}
+
+.host-controls {
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.host-controls form {
+  display: flex;
+  gap: 8px;
+}
+
+.small {
+  font-size: 12px;
+  margin: 0;
+}
+
+.member-actions {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 6px;
+}
+
+button.icon {
+  padding: 0 5px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+button.icon:hover {
+  color: var(--text);
+}

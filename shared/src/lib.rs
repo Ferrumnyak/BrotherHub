@@ -19,6 +19,8 @@ pub enum ClientMsg {
     Join { room: String, name: String },
     /// Сообщение в текстовый чат.
     Chat { text: String },
+
+    // --- Только для главы лобби ---
     /// Выбрать, что смотрим (название файла или ссылка).
     SetMedia { media: String },
     /// Запустить воспроизведение с позиции (в секундах).
@@ -27,6 +29,12 @@ pub enum ClientMsg {
     Pause { position: f64 },
     /// Перемотать на позицию (в секундах).
     Seek { position: f64 },
+    /// Регулярный отчёт главы о позиции, чтобы остальные не уезжали.
+    Sync { position: f64, paused: bool },
+    /// Передать роль главы другому участнику.
+    TransferHost { to: MemberId },
+    /// Исключить участника из комнаты.
+    Kick { id: MemberId },
 }
 
 /// Сообщения от сервера к клиенту.
@@ -37,22 +45,50 @@ pub enum ServerMsg {
     Welcome {
         you: MemberId,
         room: String,
+        host: MemberId,
         members: Vec<Member>,
         playback: PlaybackState,
     },
-    MemberJoined { member: Member },
-    MemberLeft { id: MemberId },
+    MemberJoined {
+        member: Member,
+    },
+    /// Участник ушёл сам (`kicked: false`) или его исключили.
+    MemberLeft {
+        id: MemberId,
+        kicked: bool,
+    },
+    /// Тебя исключили из комнаты.
+    Kicked {
+        by: String,
+    },
+    /// Сменился глава лобби.
+    HostChanged {
+        host: MemberId,
+    },
     Chat {
         from: MemberId,
         name: String,
         text: String,
     },
-    /// Состояние воспроизведения изменилось (кто-то нажал play/pause/перемотал).
+    /// Новое состояние воспроизведения.
+    /// `action` и `by` пустые, если это просто регулярная синхронизация.
     Playback {
         playback: PlaybackState,
-        by: String,
+        action: Option<PlaybackAction>,
+        by: Option<String>,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackAction {
+    SetMedia,
+    Play,
+    Pause,
+    Seek,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -64,7 +100,7 @@ pub struct Member {
 /// Общее для комнаты состояние воспроизведения.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaybackState {
-    /// Что смотрим. `None` — пока ничего не выбрано.
+    /// Что смотрим: имя файла или ссылка. `None` — пока ничего не выбрано.
     pub media: Option<String>,
     pub paused: bool,
     /// Позиция в секундах на момент отправки сообщения.
@@ -79,4 +115,10 @@ impl Default for PlaybackState {
             position: 0.0,
         }
     }
+}
+
+/// Является ли `media` ссылкой (а не именем локального файла).
+pub fn is_url(media: &str) -> bool {
+    let m = media.trim_start().to_ascii_lowercase();
+    m.starts_with("http://") || m.starts_with("https://")
 }

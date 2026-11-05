@@ -1,13 +1,26 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { ClientMsg, Member, MemberId, PlaybackState, ServerMsg } from "./protocol";
+import { ask, open } from "@tauri-apps/plugin-dialog";
+import {
+  isUrl,
+  type ClientMsg,
+  type Member,
+  type MemberId,
+  type PlaybackState,
+  type PlayerStatus,
+  type ServerMsg,
+} from "./protocol";
 
 type ChatLine =
   | { key: number; kind: "chat"; name: string; text: string; mine: boolean }
   | { key: number; kind: "system"; text: string };
 
 const DEFAULT_SERVER = "ws://127.0.0.1:8080";
+
+const VIDEO_EXTENSIONS = [
+  "mkv", "mp4", "avi", "mov", "webm", "m4v", "wmv", "flv", "ts", "m2ts", "mpg", "mpeg",
+];
 
 function load(key: string, fallback: string): string {
   try {
@@ -39,6 +52,19 @@ function formatTime(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** Выбрать видеофайл в стандартном окне Windows. */
+async function pickVideoFile(): Promise<string | null> {
+  const path = await open({
+    multiple: false,
+    directory: false,
+    filters: [
+      { name: "Видео", extensions: VIDEO_EXTENSIONS },
+      { name: "Все файлы", extensions: ["*"] },
+    ],
+  });
+  return typeof path === "string" ? path : null;
+}
+
 export default function App() {
   const [server, setServer] = useState(() => load("server", DEFAULT_SERVER));
   const [name, setName] = useState(() => load("name", ""));
@@ -47,10 +73,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [joinedRoom, setJoinedRoom] = useState<string | null>(null);
+  const [me, setMe] = useState<MemberId | null>(null);
+  const [host, setHost] = useState<MemberId | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [playback, setPlayback] = useState<PlaybackState | null>(null);
+  const [player, setPlayer] = useState<PlayerStatus>({ running: false, loaded: null });
   const [lines, setLines] = useState<ChatLine[]>([]);
   const [draft, setDraft] = useState("");
+  const [url, setUrl] = useState("");
 
   const meRef = useRef<MemberId | null>(null);
   const membersRef = useRef<Member[]>([]);
@@ -58,32 +88,50 @@ export default function App() {
   const keyRef = useRef(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const isHost = me !== null && me === host;
+
   // Подписка на события от Rust-части приложения.
   useEffect(() => {
     const nextKey = () => ++keyRef.current;
     const system = (text: string) =>
       setLines((l) => [...l, { key: nextKey(), kind: "system", text }]);
+    const nameOf = (id: MemberId) =>
+      membersRef.current.find((m) => m.id === id)?.name ?? "кто-то";
 
     const onMessage = (msg: ServerMsg) => {
       switch (msg.type) {
-        case "welcome":
+        case "welcome": {
           meRef.current = msg.you;
+          setMe(msg.you);
+          setHost(msg.host);
           setJoinedRoom(msg.room);
           setMembers(msg.members);
           setPlayback(msg.playback);
           setLines([]);
           system(`Ты в комнате «${msg.room}»`);
+          if (msg.host === msg.you) system("👑 Ты глава лобби");
           break;
+        }
         case "member_joined":
           setMembers((m) => [...m, msg.member]);
           system(`${msg.member.name} зашёл`);
           break;
         case "member_left":
-          {
-            const left = membersRef.current.find((x) => x.id === msg.id);
-            if (left) system(`${left.name} вышел`);
-            setMembers((m) => m.filter((x) => x.id !== msg.id));
-          }
+          system(`${nameOf(msg.id)} ${msg.kicked ? "исключён из комнаты" : "вышел"}`);
+          setMembers((m) => m.filter((x) => x.id !== msg.id));
+          break;
+        case "kicked":
+          invoke("disconnect");
+          setJoinedRoom(null);
+          setError(`Тебя исключил из комнаты ${msg.by}`);
+          break;
+        case "host_changed":
+          setHost(msg.host);
+          system(
+            msg.host === meRef.current
+              ? "👑 Теперь ты глава лобби"
+              : `👑 Теперь глава лобби — ${nameOf(msg.host)}`,
+          );
           break;
         case "chat":
           setLines((l) => [
@@ -97,9 +145,26 @@ export default function App() {
             },
           ]);
           break;
-        case "playback":
+        case "playback": {
           setPlayback(msg.playback);
+          const at = formatTime(msg.playback.position);
+          const by = msg.by ?? "";
+          switch (msg.action) {
+            case "set_media":
+              system(`${by} включил «${msg.playback.media ?? ""}»`);
+              break;
+            case "play":
+              system(`▶ ${by} запустил (${at})`);
+              break;
+            case "pause":
+              system(`⏸ ${by} поставил на паузу (${at})`);
+              break;
+            case "seek":
+              system(`⏩ ${by} перемотал на ${at}`);
+              break;
+          }
           break;
+        }
         case "error":
           setError(msg.message);
           break;
@@ -111,10 +176,14 @@ export default function App() {
     const keep = (unlisten: () => void) => (active ? unlisteners.push(unlisten) : unlisten());
 
     listen<ServerMsg>("server-message", (e) => onMessage(e.payload)).then(keep);
+    listen<PlayerStatus>("player-status", (e) => setPlayer(e.payload)).then(keep);
+    listen<string>("player-error", (e) => setError(e.payload)).then(keep);
     listen("disconnected", () => {
       setJoinedRoom(null);
       setError("Соединение с сервером потеряно");
     }).then(keep);
+
+    invoke<PlayerStatus>("player_status").then((s) => active && setPlayer(s));
 
     return () => {
       active = false;
@@ -125,6 +194,14 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines]);
+
+  async function run(action: () => Promise<unknown>) {
+    try {
+      await action();
+    } catch (err) {
+      setError(String(err));
+    }
+  }
 
   async function handleConnect(e: FormEvent) {
     e.preventDefault();
@@ -147,6 +224,7 @@ export default function App() {
     setJoinedRoom(null);
     setMembers([]);
     setPlayback(null);
+    setHost(null);
   }
 
   async function handleSend(e: FormEvent) {
@@ -154,10 +232,31 @@ export default function App() {
     const text = draft.trim();
     if (!text) return;
     setDraft("");
-    try {
-      await send({ type: "chat", text });
-    } catch (err) {
-      setError(String(err));
+    await run(() => send({ type: "chat", text }));
+  }
+
+  async function handleOpenFile() {
+    const path = await pickVideoFile();
+    if (path) await run(() => invoke("open_file", { path }));
+  }
+
+  async function handleOpenUrl(e: FormEvent) {
+    e.preventDefault();
+    const link = url.trim();
+    if (!link) return;
+    await run(() => invoke("open_url", { url: link }));
+    setUrl("");
+  }
+
+  async function handleTransfer(m: Member) {
+    if (await ask(`Передать роль главы лобби игроку ${m.name}?`, { title: "BrotherWatch" })) {
+      await run(() => send({ type: "transfer_host", to: m.id }));
+    }
+  }
+
+  async function handleKick(m: Member) {
+    if (await ask(`Исключить ${m.name} из комнаты?`, { title: "BrotherWatch", kind: "warning" })) {
+      await run(() => send({ type: "kick", id: m.id }));
     }
   }
 
@@ -195,6 +294,11 @@ export default function App() {
     );
   }
 
+  const media = playback?.media ?? null;
+  const hostName = members.find((m) => m.id === host)?.name;
+  const needsFile = !isHost && media !== null && !isUrl(media) && player.loaded !== media;
+  const needsReopen = !isHost && media !== null && isUrl(media) && !player.running;
+
   return (
     <main className="room">
       <header>
@@ -206,15 +310,56 @@ export default function App() {
 
       <section className="stage">
         <div className="now-playing">
-          {playback?.media ? (
+          {media ? (
             <>
-              <div className="media-title">{playback.media}</div>
+              <div className="media-title">{media}</div>
               <div className="muted">
-                {playback.paused ? "На паузе" : "Идёт"} · {formatTime(playback.position)}
+                {playback?.paused ? "⏸ На паузе" : "▶ Идёт"}
+                {player.running ? "" : " · плеер закрыт"}
               </div>
             </>
           ) : (
-            <div className="muted">Пока ничего не выбрано. Плеер появится на следующем шаге.</div>
+            <div className="muted">
+              {isHost
+                ? "Выбери, что смотрим: файл или ссылку"
+                : `Ждём, пока ${hostName ?? "глава лобби"} выберет, что смотрим`}
+            </div>
+          )}
+
+          {needsFile && (
+            <div className="prompt">
+              <p>Открой у себя этот же фильм или серию</p>
+              <button onClick={handleOpenFile}>Выбрать файл</button>
+            </div>
+          )}
+          {needsReopen && (
+            <div className="prompt">
+              <button onClick={() => run(() => invoke("open_url", { url: media }))}>
+                Открыть плеер снова
+              </button>
+            </div>
+          )}
+          {!isHost && media && !isUrl(media) && player.loaded === media && !player.running && (
+            <div className="prompt">
+              <button onClick={handleOpenFile}>Открыть файл снова</button>
+            </div>
+          )}
+
+          {isHost && (
+            <div className="host-controls">
+              <button onClick={handleOpenFile}>📁 Открыть файл</button>
+              <form onSubmit={handleOpenUrl}>
+                <input
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="Ссылка: YouTube, VK Видео, Rutube…"
+                />
+                <button type="submit">Открыть</button>
+              </form>
+              <p className="muted small">
+                Управляй просмотром прямо в окне плеера: пробел — пауза, стрелки — перемотка.
+              </p>
+            </div>
           )}
         </div>
 
@@ -223,8 +368,23 @@ export default function App() {
           <ul>
             {members.map((m) => (
               <li key={m.id}>
+                {m.id === host && <span title="Глава лобби">👑 </span>}
                 {m.name}
-                {m.id === meRef.current && <span className="muted"> (ты)</span>}
+                {m.id === me && <span className="muted"> (ты)</span>}
+                {isHost && m.id !== me && (
+                  <span className="member-actions">
+                    <button
+                      className="icon"
+                      title="Сделать главой лобби"
+                      onClick={() => handleTransfer(m)}
+                    >
+                      👑
+                    </button>
+                    <button className="icon" title="Исключить" onClick={() => handleKick(m)}>
+                      ✕
+                    </button>
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -248,7 +408,7 @@ export default function App() {
           <div ref={chatEndRef} />
         </div>
         {error && (
-          <p className="error" onClick={() => setError(null)}>
+          <p className="error" onClick={() => setError(null)} title="Скрыть">
             {error}
           </p>
         )}

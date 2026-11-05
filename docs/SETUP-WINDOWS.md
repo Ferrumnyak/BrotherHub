@@ -31,11 +31,33 @@ winget install --id OpenJS.NodeJS.LTS
 
 Перезапусти PowerShell и проверь: `node --version`.
 
-## 4. WebView2
+Разреши PowerShell запускать скрипты (иначе `npm` выдаст ошибку
+«выполнение сценариев отключено в этой системе»):
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+## 4. Плеер mpv и yt-dlp
+
+Через [Scoop](https://scoop.sh):
+
+```powershell
+irm get.scoop.sh | iex
+scoop bucket add extras
+scoop install mpv yt-dlp
+```
+
+Проверь: `mpv --version`. yt-dlp нужен для ссылок на YouTube, VK Видео, Rutube.
+
+Если mpv лежит в другом месте, укажи путь к нему переменной окружения
+`BROTHERWATCH_MPV` (например, `C:\Tools\mpv\mpv.exe`).
+
+## 5. WebView2
 
 Уже встроен в Windows 10 и 11, ставить не нужно.
 
-## 5. (Удобно) редактор
+## 6. (Удобно) редактор
 
 VS Code с расширениями **rust-analyzer** и **Tauri**.
 
@@ -66,6 +88,11 @@ npm run tauri dev
 **Как проверить чат вдвоём на одном ПК:** пока `npm run tauri dev` запущен,
 открой ещё один экземпляр приложения файлом `target\debug\brotherwatch.exe`
 и войди в ту же комнату под другим ником.
+
+
+**Как проверить синхронизацию на одном ПК:** войди в обоих окнах в одну
+комнату. В окне главы лобби (👑) нажми «Открыть файл», во втором окне выбери
+тот же файл. Пауза и перемотка в плеере главы повторятся во втором плеере.
 
 # Сборка установщика
 
