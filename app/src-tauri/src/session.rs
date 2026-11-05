@@ -152,6 +152,10 @@ pub struct Session {
     player_paused: bool,
     loaded: Option<String>,
     last_seek: Option<Instant>,
+    /// Качество ссылок: высота кадра (`None` — авто, до 1080p).
+    quality: Option<u32>,
+    /// После смены качества ждём загрузки, чтобы сбросить начальную позицию.
+    reloading: bool,
     /// Показывать сообщения чата поверх видео (когда панель чата скрыта).
     overlay_enabled: bool,
     overlay: VecDeque<(Instant, String, String)>,
@@ -172,6 +176,8 @@ impl Session {
             player_paused: true,
             loaded: None,
             last_seek: None,
+            quality: None,
+            reloading: false,
             overlay_enabled: false,
             overlay: VecDeque::new(),
         }));
@@ -270,7 +276,7 @@ impl Session {
     async fn ensure_player(&mut self) -> Result<(), String> {
         if self.player.is_none() {
             let wid = self.app.state::<VideoHost>().wid();
-            let player = Player::spawn(self.player_events.clone(), wid).await?;
+            let player = Player::spawn(self.player_events.clone(), wid, self.quality).await?;
             self.player = Some(player);
             self.player_paused = true;
             self.loaded = None;
@@ -411,6 +417,23 @@ impl Session {
             PlayerEvent::Key(key) => {
                 let _ = self.app.emit("player-key", key);
             }
+            PlayerEvent::FileLoaded if self.reloading => {
+                self.reloading = false;
+                if let Some(player) = &self.player {
+                    player.clear_start();
+                }
+                if self.is_host() {
+                    // Пока ссылка перезагружалась, общий фильм шёл дальше —
+                    // догоняем комнату, а не откатываем всех назад.
+                    if let (Some(player), Some(room)) = (&self.player, &self.room) {
+                        player.seek(room.expected_position());
+                    }
+                    self.last_seek = Some(Instant::now());
+                } else {
+                    self.last_seek = None;
+                    self.apply().await;
+                }
+            }
             PlayerEvent::FileLoaded => {
                 if !self.is_host() {
                     self.last_seek = None;
@@ -442,6 +465,13 @@ impl Session {
 
     async fn host_seeked(&mut self) {
         if !self.in_sync_media() {
+            return;
+        }
+        // Сразу после перезагрузки в другом качестве — это не перемотка ведущего.
+        if self
+            .last_seek
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
+        {
             return;
         }
         let (Some(player), Some(room)) = (&self.player, &self.room) else {
@@ -519,6 +549,30 @@ impl Session {
     }
 
     // ---------- Панель управления ----------
+
+    /// Выбрать качество ссылок. Если сейчас открыта ссылка — перезапустить
+    /// её в новом качестве с того же места.
+    pub async fn set_quality(&mut self, quality: Option<u32>) {
+        if self.quality == quality {
+            return;
+        }
+        self.quality = quality;
+        let Some(player) = &self.player else {
+            return;
+        };
+        if !self.loaded.as_deref().is_some_and(is_url) {
+            // Новое качество подхватится при следующей ссылке.
+            player.command(serde_json::json!([
+                "set_property",
+                "ytdl-format",
+                crate::player::ytdl_format(quality)
+            ]));
+            return;
+        }
+        let position = player.time_pos().await;
+        player.reload_with_quality(quality, position);
+        self.reloading = true;
+    }
 
     /// Отправить интерфейсу список дорожек.
     async fn emit_tracks(&self) {
@@ -733,4 +787,13 @@ pub async fn player_control(
     control: Control,
 ) -> Result<(), String> {
     session.lock().await.control(control)
+}
+
+#[tauri::command]
+pub async fn set_quality(
+    session: State<'_, SharedSession>,
+    height: Option<u32>,
+) -> Result<(), String> {
+    session.lock().await.set_quality(height).await;
+    Ok(())
 }

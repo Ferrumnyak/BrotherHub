@@ -116,6 +116,17 @@ async function pickSubtitleFile(): Promise<string | null> {
   return typeof path === "string" ? path : null;
 }
 
+/** Качество ссылок: высота кадра; пусто — авто (до 1080p). */
+const QUALITIES: Array<{ value: string; label: string }> = [
+  { value: "", label: "авто" },
+  { value: "2160", label: "4K" },
+  { value: "1440", label: "1440p" },
+  { value: "1080", label: "1080p" },
+  { value: "720", label: "720p" },
+  { value: "480", label: "480p" },
+  { value: "360", label: "360p" },
+];
+
 const CHANNEL_NAMES: Record<number, string> = { 1: "1.0", 2: "2.0", 6: "5.1", 8: "7.1" };
 
 /** «Дубляж · RU · AC3 5.1 · внешняя» */
@@ -168,6 +179,7 @@ export default function App() {
   const [scrub, setScrub] = useState<number | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
   const [memberMenu, setMemberMenu] = useState<MemberId | null>(null);
+  const [quality, setQuality] = useState(() => load("quality", ""));
 
   // Голос
   const [voiceAccess, setVoiceAccess] = useState<VoiceAccess | null>(null);
@@ -452,6 +464,16 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [joinedRoom]);
+
+  // Качество ссылок: запоминается и применяется сразу, даже к открытому видео.
+  useEffect(() => {
+    invoke("set_quality", { height: quality ? Number(quality) : null }).catch(() => {});
+  }, [quality]);
+
+  function changeQuality(value: string) {
+    setQuality(value);
+    save("quality", value);
+  }
 
   // Меню действий с участником закрывается кликом мимо него.
   useEffect(() => {
@@ -793,6 +815,9 @@ export default function App() {
           scrub={scrub}
           onScrub={setScrub}
           tracks={tracks}
+          quality={quality}
+          qualityEnabled={media !== null && isUrl(media)}
+          onQuality={changeQuality}
           onError={(err) => setError(err)}
           fullscreen={fullscreen}
           onFullscreen={() => applyFullscreen(!fullscreen)}
@@ -1053,6 +1078,9 @@ function PlayerControls({
   scrub,
   onScrub,
   tracks,
+  quality,
+  qualityEnabled,
+  onQuality,
   onError,
   fullscreen,
   onFullscreen,
@@ -1065,6 +1093,9 @@ function PlayerControls({
   scrub: number | null;
   onScrub: (value: number | null) => void;
   tracks: Track[];
+  quality: string;
+  qualityEnabled: boolean;
+  onQuality: (value: string) => void;
   onError: (message: string) => void;
   fullscreen: boolean;
   onFullscreen: () => void;
@@ -1164,6 +1195,28 @@ function PlayerControls({
               </option>
             ))}
             <option value="file">Загрузить из файла…</option>
+          </select>
+        </label>
+
+        <label
+          className="track-select"
+          title={
+            qualityEnabled
+              ? "Качество у каждого своё. Если интернет слабый — выбери пониже"
+              : "Качество выбирается только для ссылок"
+          }
+        >
+          <span>Качество</span>
+          <select
+            value={quality}
+            disabled={!qualityEnabled}
+            onChange={(e) => onQuality(e.target.value)}
+          >
+            {QUALITIES.map((q) => (
+              <option key={q.value} value={q.value}>
+                {q.label}
+              </option>
+            ))}
           </select>
         </label>
 

@@ -36,6 +36,7 @@ fn main() {
             session::set_chat_overlay,
             session::player_info,
             session::player_control,
+            session::set_quality,
             video::set_video_rect,
             ptt::ptt_set_key,
             ptt::ptt_capture

@@ -85,6 +85,7 @@ impl Player {
     pub async fn spawn(
         events: mpsc::UnboundedSender<PlayerEventMsg>,
         wid: Option<isize>,
+        quality: Option<u32>,
     ) -> Result<Self, String> {
         let id = NEXT_PLAYER_ID.fetch_add(1, Ordering::Relaxed);
         let ipc = ipc_path(id);
@@ -98,7 +99,6 @@ impl Player {
             "--pause=yes",
             "--title=BrotherWatch",
             "--no-terminal",
-            "--ytdl-format=bestvideo[height<=?1080]+bestaudio/best",
             // Встроенный mpv по умолчанию не принимает клавиатуру — включаем.
             "--input-vo-keyboard=yes",
             // Управление — панелью приложения, свою панель mpv прячем.
@@ -120,6 +120,7 @@ impl Player {
         ])
         .arg(format!("--input-ipc-server={ipc}"))
         .kill_on_drop(true);
+        cmd.arg(format!("--ytdl-format={}", ytdl_format(quality)));
         if let Some(wid) = wid {
             cmd.arg(format!("--wid={wid}"));
         }
@@ -295,6 +296,21 @@ impl Player {
         self.get(property).await.and_then(|v| v.as_f64())
     }
 
+    /// Сменить качество ссылки и перезапустить её с позиции `resume_at`.
+    pub fn reload_with_quality(&self, quality: Option<u32>, resume_at: Option<f64>) {
+        self.command(json!(["set_property", "ytdl-format", ytdl_format(quality)]));
+        if let Some(at) = resume_at {
+            // `start` действует на следующую загрузку; после неё сбрасываем.
+            self.command(json!(["set_property", "start", format!("{at:.2}")]));
+        }
+        self.command(json!(["playlist-play-index", "current"]));
+    }
+
+    /// Убрать начальную позицию, заданную для перезагрузки.
+    pub fn clear_start(&self) {
+        self.command(json!(["set_property", "start", "none"]));
+    }
+
     /// Текущая позиция в секундах (если файл загружен).
     pub async fn time_pos(&self) -> Option<f64> {
         self.get("time-pos").await.and_then(|v| v.as_f64())
@@ -402,6 +418,13 @@ fn parse_key(v: &Value) -> Option<PlayerKey> {
         "toggle-chat" => Some(PlayerKey::ToggleChat),
         _ => None,
     }
+}
+
+/// Формат для yt-dlp: лучшее видео не выше `quality` строк (по умолчанию —
+/// 1080p) плюс лучший звук; если такого нет — лучшее, что есть.
+pub fn ytdl_format(quality: Option<u32>) -> String {
+    let h = quality.unwrap_or(1080);
+    format!("bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best")
 }
 
 /// Первый существующий файл из списка.
