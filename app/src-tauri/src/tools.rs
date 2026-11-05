@@ -101,18 +101,31 @@ pub async fn player_setup(app: AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| format!("Не удалось подготовить загрузку: {e}"))?;
 
-    if need_mpv {
-        install_mpv(&app, &client, &dir).await?;
+    crate::logs::info(format!(
+        "скачиваю плеер в {} (mpv: {need_mpv}, yt-dlp: {need_ytdlp})",
+        dir.display()
+    ));
+    let result = async {
+        if need_mpv {
+            install_mpv(&app, &client, &dir).await?;
+        }
+        if need_ytdlp {
+            install_ytdlp(&app, &client, &dir).await?;
+        }
+        Ok::<(), String>(())
     }
-    if need_ytdlp {
-        install_ytdlp(&app, &client, &dir).await?;
+    .await;
+    match &result {
+        Ok(()) => crate::logs::info("плеер скачан"),
+        Err(e) => crate::logs::error(format!("не удалось скачать плеер: {e}")),
     }
-    Ok(())
+    result
 }
 
 async fn install_mpv(app: &AppHandle, client: &reqwest::Client, dir: &Path) -> Result<(), String> {
     let pack: MpvPack = serde_json::from_str(MPV_PACK)
         .map_err(|e| format!("Испорчен player-pack.json: {e}"))?;
+    crate::logs::info(format!("mpv: {}", pack.url));
     if pack.url.is_empty() || pack.sha256.is_empty() {
         return Err(
             "В эту сборку не вписан адрес плеера (player-pack.json). Собери её заново после scripts\\pack-player.ps1."
@@ -197,12 +210,13 @@ async fn download(
     stage: &'static str,
     expected_size: Option<u64>,
 ) -> Result<String, String> {
-    let mut resp = client
-        .get(url)
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-        .map_err(net_error)?;
+    let resp = client.get(url).send().await.map_err(net_error)?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(format!(
+            "Файл {stage} не найден на GitHub (404) — похоже, его ещё не выложили или удалили: {url}"
+        ));
+    }
+    let mut resp = resp.error_for_status().map_err(net_error)?;
     let total = resp.content_length().or(expected_size);
 
     let mut file = tokio::fs::File::create(dest)

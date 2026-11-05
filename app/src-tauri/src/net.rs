@@ -61,9 +61,12 @@ pub async fn connect(
     }
 
     let url = format!("{}/ws", server.trim().trim_end_matches('/'));
-    let (ws, _) = connect_async(url.as_str())
-        .await
-        .map_err(|e| format!("не удалось подключиться к {url}: {e}"))?;
+    crate::logs::info(format!("подключаюсь к {url}, комната «{room}», имя «{name}»"));
+    let (ws, _) = connect_async(url.as_str()).await.map_err(|e| {
+        let msg = format!("не удалось подключиться к {url}: {e}");
+        crate::logs::error(&msg);
+        msg
+    })?;
 
     let (tx, rx) = mpsc::unbounded_channel::<ClientMsg>();
     session.lock().await.connected(tx.clone());
@@ -156,6 +159,7 @@ async fn supervise(mut s: Supervisor) {
         }
 
         // Связь пропала — плеер не трогаем, пробуем вернуться.
+        crate::logs::warn("связь с сервером пропала, переподключаюсь");
         let _ = s.app.emit("reconnecting", ());
         let lost_at = Instant::now();
         let mut attempt = 0u32;
@@ -168,10 +172,12 @@ async fn supervise(mut s: Supervisor) {
             }
             match connect_async(s.url.as_str()).await {
                 Ok((stream, _)) => {
+                    crate::logs::info("связь с сервером восстановлена");
                     ws = Some(stream);
                     break;
                 }
-                Err(_) if lost_at.elapsed() > GIVE_UP_AFTER => {
+                Err(e) if lost_at.elapsed() > GIVE_UP_AFTER => {
+                    crate::logs::error(format!("не удалось вернуться на сервер: {e}"));
                     s.session.lock().await.disconnected();
                     let _ = s.app.emit("disconnected", ());
                     return;
@@ -233,7 +239,7 @@ async fn run_connection(s: &mut Supervisor, ws: Ws, token: &mut Option<String>) 
                                 s.session.lock().await.on_server_msg(&msg).await;
                                 let _ = s.app.emit("server-message", msg);
                             }
-                            Err(e) => eprintln!("непонятное сообщение от сервера: {e}"),
+                            Err(e) => crate::logs::warn(format!("непонятное сообщение от сервера: {e}")),
                         }
                     }
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return Ended::Lost,

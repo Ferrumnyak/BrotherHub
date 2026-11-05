@@ -196,6 +196,23 @@ async function pickVideoFile(): Promise<string | null> {
   return typeof path === "string" ? path : null;
 }
 
+/**
+ * Открыть папку с логами. В ней папка «1» — этот запуск, «2» — предыдущий
+ * и так далее: её и нужно прислать, если что-то сломалось.
+ */
+export function LogsButton() {
+  return (
+    <button
+      type="button"
+      className="quiet"
+      title="Папка «1» — этот запуск, «2» — предыдущий. Пришли её, если что-то не работает."
+      onClick={() => invoke("open_logs").catch(() => {})}
+    >
+      Открыть папку с логами
+    </button>
+  );
+}
+
 /** Левая половина экрана входа: экран, свет лампы и ряд кресел. */
 export function LoginArt() {
   return (
@@ -825,6 +842,7 @@ export default function App() {
                   autoComplete="off"
                 />
               </label>
+              <LogsButton />
             </details>
           </form>
         </div>
@@ -1123,6 +1141,11 @@ export default function App() {
                     ))}
                 </div>
               )}
+
+              <div className="setting">
+                <span className="setting-label">Если что-то не работает</span>
+                <LogsButton />
+              </div>
 
               <button className="primary" onClick={() => setVoiceSettings(false)}>
                 Готово

@@ -135,23 +135,44 @@ impl Player {
         if std::fs::write(&input_conf, INPUT_CONF).is_ok() {
             cmd.arg(format!("--input-conf={}", input_conf.display()));
         }
-        if let Some(ytdlp) = find_ytdlp() {
+        let ytdlp = find_ytdlp();
+        if let Some(ytdlp) = &ytdlp {
             cmd.arg(format!("--script-opts=ytdl_hook-ytdl_path={ytdlp}"));
         }
+        // Сертификаты Mozilla + Windows, иначе часть сайтов не открывается
+        // (см. certs.rs).
+        if let Some(ca) = crate::certs::ca_bundle() {
+            cmd.arg(format!("--tls-ca-file={}", ca.display()));
+        }
+        // Подробный журнал плеера и yt-dlp (см. logs.rs).
+        let log_file = crate::logs::mpv_log_path(id);
+        if let Some(log) = &log_file {
+            cmd.arg(format!("--log-file={}", log.display()));
+        }
+        crate::logs::info(format!(
+            "запускаю плеер #{id}: {mpv}; yt-dlp: {}; журнал: {}",
+            ytdlp.as_deref().unwrap_or("из PATH"),
+            log_file
+                .as_deref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "нет".into())
+        ));
         // Не показывать чёрное консольное окно рядом с плеером.
         #[cfg(windows)]
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         let mut child = cmd.spawn().map_err(|e| {
-            format!(
+            let msg = format!(
                 "не удалось запустить mpv ({mpv}): {e}. \
                      Установи mpv и проверь, что команда `mpv --version` работает в терминале."
-            )
+            );
+            crate::logs::error(&msg);
+            msg
         })?;
 
         // mpv завершится вместе с приложением, как бы оно ни закрылось.
         bind_to_app_lifetime(&child);
 
-        let stream = connect_ipc(&ipc, &mut child).await?;
+        let stream = connect_ipc(&ipc, &mut child).await.inspect_err(|e| crate::logs::error(e))?;
         let (read, mut write) = tokio::io::split(stream);
 
         // Запись команд в mpv.

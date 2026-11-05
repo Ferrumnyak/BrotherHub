@@ -20,6 +20,14 @@ BrotherWatch использует программы других авторов
 
 - Исходный код: https://github.com/yt-dlp/yt-dlp
 
+## Корневые сертификаты Mozilla
+
+Список доверенных центров сертификации из проекта certifi
+(`app/src-tauri/certs/mozilla-roots.pem`), лицензия MPL-2.0. Приложение
+передаёт его mpv вместе с сертификатами из хранилища Windows.
+
+- Источник: https://github.com/certifi/python-certifi
+
 ## Библиотеки
 
 Приложение собрано на Tauri, React и livekit-client; полный список зависимостей

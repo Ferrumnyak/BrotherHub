@@ -44,6 +44,25 @@
   Образ сервера собирает GitHub Actions (`.github/workflows/server-image.yml`)
   и публикует в `ghcr.io/ferrumnyak/brotherwatch-server`.
 
+## Логи
+
+`app/src-tauri/src/logs.rs`. Всё лежит в `%LOCALAPPDATA%\com.ferrumnyak.brotherwatch\logs\`:
+папка `1` — последний запуск, `2`…`5` — предыдущие (старше удаляются). Внутри —
+`brotherwatch.log` (подключение, ссылки, ошибки, скачивание плеера) и
+`mpv-<n>.log` (журнал mpv по `--log-file`, вместе с выводом yt-dlp). Пароли и
+токены в журнал не пишутся. В интерфейсе — кнопка «Открыть папку с логами».
+
+В `npm run tauri dev` записи приложения дублируются в консоль.
+
+## Сертификаты для mpv
+
+libcurl внутри mpv проверяет HTTPS по своему списку, а не по хранилищу Windows,
+поэтому сайты с корнями, которые есть только в Windows (например, «Russian
+Trusted Root CA» у части серверов VK), в mpv не открывались. `certs.rs` при
+запуске собирает `ca-bundle.pem` в папке приложения: корни Mozilla
+(`app/src-tauri/certs/mozilla-roots.pem`) + корни из Windows — и передаёт его
+mpv через `--tls-ca-file`. Список Mozilla стоит изредка обновлять.
+
 ## Тесты
 
 ```powershell

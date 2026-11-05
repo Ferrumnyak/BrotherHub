@@ -1,6 +1,8 @@
 // В релизной сборке не открывать лишнее консольное окно на Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod certs;
+mod logs;
 mod net;
 mod overlay;
 mod player;
@@ -13,6 +15,7 @@ mod video;
 use tauri::Manager;
 
 fn main() {
+    logs::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(net::Connection::default())
@@ -21,7 +24,7 @@ fn main() {
             // Окно для встроенного видео (setup выполняется в главном потоке).
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {
-                    eprintln!("видео будет в отдельном окне: {e}");
+                    logs::warn(format!("видео будет в отдельном окне: {e}"));
                 }
             }
             player::update_bundled_ytdlp();
@@ -48,7 +51,8 @@ fn main() {
             ptt::ptt_set_key,
             ptt::ptt_capture,
             tools::player_tools,
-            tools::player_setup
+            tools::player_setup,
+            logs::open_logs
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherWatch");

@@ -355,6 +355,7 @@ impl Session {
                 Err(e) => Err(e),
             };
             if let Err(e) = opened {
+                crate::logs::error(format!("не открылось видео комнаты: {e}"));
                 let _ = self.app.emit("player-error", e);
             }
             // Даже если не открылось, второй раз сами не пробуем —
@@ -416,6 +417,7 @@ impl Session {
         }
         match ev {
             PlayerEvent::Shutdown => {
+                crate::logs::info("плеер закрылся");
                 self.player = None;
                 self.loaded = None;
                 self.emit_status();
@@ -438,6 +440,10 @@ impl Session {
             }
             PlayerEvent::TracksChanged => self.emit_tracks().await,
             PlayerEvent::LoadFailed => {
+                crate::logs::warn(format!(
+                    "плеер не смог открыть {} — подробности в журнале mpv",
+                    self.loaded.as_deref().unwrap_or("видео")
+                ));
                 self.load_failed_at = Some(Instant::now());
             }
             PlayerEvent::Key(key) => {
@@ -462,6 +468,7 @@ impl Session {
                 }
             }
             PlayerEvent::FileLoaded => {
+                crate::logs::info("видео загрузилось");
                 self.load_failed_at = None;
                 self.reset_speed();
                 if !self.is_host() {
@@ -623,6 +630,7 @@ impl Session {
                     self.reloading = true;
                 }
                 Err(e) => {
+                    crate::logs::error(format!("не удалось сменить качество: {e}"));
                     let _ = self.app.emit("player-error", e);
                 }
             }
@@ -724,8 +732,11 @@ impl Session {
     /// Открыть ссылку в плеере. Ссылки с сайтов, которые yt-dlp не знает
     /// (см. [`crate::sites`]), сначала превращаем в прямую ссылку на поток.
     async fn load_media(&self, url: &str) -> Result<(), String> {
+        crate::logs::info(format!("открываю ссылку: {url}"));
         let target = if crate::sites::handles(url) {
-            crate::sites::resolve(url, self.quality).await?
+            crate::sites::resolve(url, self.quality)
+                .await
+                .inspect_err(|e| crate::logs::error(format!("не удалось разобрать ссылку: {e}")))?
         } else {
             url.to_string()
         };
@@ -745,6 +756,7 @@ impl Session {
         }
 
         self.ensure_player().await?;
+        crate::logs::info(format!("открываю файл: {path}"));
         if let Some(player) = &self.player {
             player.set_pause(true);
             player.load(&path);

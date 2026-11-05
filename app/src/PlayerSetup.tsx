@@ -1,7 +1,7 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { LoginArt } from "./App";
+import { LoginArt, LogsButton } from "./App";
 
 /** Что из плеера уже есть на компьютере (команда `player_tools`). */
 type ToolsStatus = { mpv: boolean; ytdlp: boolean };
@@ -103,6 +103,7 @@ export default function PlayerSetup({ children }: { children: ReactNode }) {
               <button type="button" className="primary" onClick={install}>
                 Повторить
               </button>
+              <LogsButton />
             </>
           )}
         </div>
