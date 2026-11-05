@@ -857,10 +857,6 @@ export default function App() {
                 <Icon name="panel" size={17} />
                 {chatOpen ? "Скрыть чат" : "Показать чат"}
               </button>
-              <button className="ghost" onClick={() => applyFullscreen(true)} title="F">
-                <Icon name="fullscreen" size={17} />
-                На весь экран
-              </button>
               <button className="ghost" onClick={handleLeave}>
                 Выйти из зала
               </button>
@@ -1454,16 +1450,15 @@ function PlayerControls({
             onChange={(e) => onVolume(Number(e.target.value))}
           />
         </label>
-        {fullscreen && (
-          <button
-            className="ghost icon"
-            onClick={onFullscreen}
-            title="Выйти из полного экрана: Esc"
-            aria-label="Выйти из полного экрана"
-          >
-            <Icon name="exit-fullscreen" size={18} />
-          </button>
-        )}
+        {/* В правом нижнем углу, на одной линии с краем видео. */}
+        <button
+          className="ghost icon fullscreen-toggle"
+          onClick={onFullscreen}
+          title={fullscreen ? "Выйти из полного экрана: Esc" : "На весь экран: F"}
+          aria-label={fullscreen ? "Выйти из полного экрана" : "На весь экран"}
+        >
+          <Icon name={fullscreen ? "exit-fullscreen" : "fullscreen"} size={20} />
+        </button>
       </div>
     </div>
   );

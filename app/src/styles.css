@@ -643,6 +643,15 @@ button.play:disabled {
   padding: 0 24px 12px;
 }
 
+.room button.fullscreen-toggle,
+.overlay-panel button.fullscreen-toggle {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  margin-right: -7px; /* значок — ровно по правому краю видео */
+  color: var(--text-2);
+}
+
 /* В полном экране панель плеера живёт в отдельном окне поверх видео,
    а в главном окне остаётся только видео — без полос и прыжков. */
 .fullscreen .stage > .controls,
