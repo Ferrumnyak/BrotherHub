@@ -26,3 +26,7 @@ node_modules/
 
 # mpv и yt-dlp для установщика (скачивает scripts/fetch-player.ps1)
 /app/src-tauri/bin/
+
+# Установщики для друзей и адрес сервера (scripts/release.ps1)
+/release/
+/release.env
