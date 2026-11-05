@@ -170,6 +170,12 @@ impl Session {
         self.me = None;
         self.host = None;
         self.room = None;
+        // Вне комнаты видео не видно — закрываем плеер, чтобы не играл звук.
+        if self.player.take().is_some() {
+            self.loaded = None;
+            self.overlay.clear();
+            self.emit_status();
+        }
     }
 
     fn is_host(&self) -> bool {

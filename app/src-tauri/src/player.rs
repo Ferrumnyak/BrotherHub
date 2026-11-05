@@ -128,6 +128,9 @@ impl Player {
             )
         })?;
 
+        // mpv завершится вместе с приложением, как бы оно ни закрылось.
+        bind_to_app_lifetime(&child);
+
         let stream = connect_ipc(&ipc, &mut child).await?;
         let (read, mut write) = tokio::io::split(stream);
 
@@ -269,6 +272,52 @@ impl Drop for Player {
         self.command(json!(["quit"]));
     }
 }
+
+/// Привязать процесс mpv к жизни приложения.
+///
+/// На Windows процесс кладётся в Job Object с флагом
+/// `KILL_ON_JOB_CLOSE`: когда BrotherWatch завершается (крестик, Alt+F4,
+/// диспетчер задач, падение), Windows закрывает задание и убивает mpv
+/// вместе с запущенным им yt-dlp.
+#[cfg(windows)]
+fn bind_to_app_lifetime(child: &Child) {
+    use std::sync::OnceLock;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    // Одно задание на всё приложение; его handle не закрываем до выхода.
+    static JOB: OnceLock<isize> = OnceLock::new();
+    let job = *JOB.get_or_init(|| unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return 0;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        job as isize
+    });
+    if job == 0 {
+        return;
+    }
+    if let Some(process) = child.raw_handle() {
+        unsafe {
+            AssignProcessToJobObject(job as HANDLE, process as HANDLE);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn bind_to_app_lifetime(_child: &Child) {}
 
 /// `script-message bw <действие>` из [`INPUT_CONF`].
 fn parse_key(v: &Value) -> Option<PlayerKey> {
