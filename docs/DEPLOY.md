@@ -88,6 +88,37 @@ docker compose logs -f      # выйти — Ctrl+C
 
 Адрес сервера для установщика друзей — `wss://DOMAIN`.
 
+## Если уже есть свой прокси (Nginx Proxy Manager и т.п.)
+
+Если на 80/443 уже работает свой обратный прокси (например, для других
+сайтов на том же домене), Caddy не нужен: шифрование сделает прокси.
+
+1. На сервере BrotherWatch остановить и переключиться:
+
+   ```bash
+   cd ~/Brotherwatch && git pull && cd deploy
+   docker compose down
+   echo 'COMPOSE_FILE=docker-compose.yml:behind-proxy.yml' >> .env
+   docker compose up -d
+   ```
+
+   Теперь наш сервер слушает порт `8080`, а LiveKit — `7880` в локальной сети.
+
+2. В прокси добавить два хоста (в Nginx Proxy Manager — **Proxy Hosts** →
+   **Add Proxy Host**), где `IP` — локальный адрес сервера BrotherWatch
+   (`hostname -I`, первый адрес):
+
+   | Домен | Куда | Порт |
+   |-------|------|------|
+   | `DOMAIN` | `http://IP` | 8080 |
+   | `VOICE_DOMAIN` | `http://IP` | 7880 |
+
+   В обоих включить **Websockets Support**, на вкладке **SSL** —
+   **Request a new SSL Certificate** (Let's Encrypt) и **Force SSL**.
+
+3. На роутере 80 и 443 остаются на прокси, а **7881/TCP и 7882/UDP** —
+   напрямую на сервер BrotherWatch (звук голоса идёт мимо прокси).
+
 ## Обновление
 
 После каждого `git push` с изменениями сервера GitHub собирает новый образ.
