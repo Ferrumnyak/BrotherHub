@@ -11,6 +11,8 @@
     "bundle": "tauri build --config src-tauri/tauri.bundle.json"
   },
   "dependencies": {
+    "@fontsource/manrope": "^5.0.0",
+    "@fontsource/unbounded": "^5.0.0",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "livekit-client": "^2.0.0",

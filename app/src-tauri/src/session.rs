@@ -497,13 +497,13 @@ impl Session {
             return;
         }
         // ASS-разметка: левый нижний угол, ник янтарным, текст белым.
-        // Цвета в ASS пишутся как BGR: e0a63a → 3AA6E0.
+        // Цвета в ASS пишутся как BGR: f2c879 → 79C8F2.
         let lines: Vec<String> = self
             .overlay
             .iter()
             .map(|(at, name, text)| {
                 format!(
-                    "{{\\alpha&H{:02X}&\\c&H3AA6E0&\\fnSegoe UI Semibold}}{}{{\\c&HFFFFFF&\\fnSegoe UI}}  {}",
+                    "{{\\alpha&H{:02X}&\\c&H79C8F2&\\fnSegoe UI Semibold}}{}{{\\c&HFFFFFF&\\fnSegoe UI}}  {}",
                     overlay_alpha(at.elapsed().as_secs_f64()),
                     ass_escape(name),
                     ass_escape(text)
@@ -564,7 +564,7 @@ impl Session {
             Control::TogglePause | Control::Seek { .. } | Control::SeekBy { .. }
         );
         if shared && !self.is_host() {
-            return Err("Паузой и перемоткой управляет глава лобби".into());
+            return Err("Паузой и перемоткой управляет ведущий".into());
         }
         match control {
             Control::TogglePause => player.set_pause(!self.player_paused),
@@ -604,7 +604,7 @@ impl Session {
         let host = self.is_host();
         let room_media = self.room_media();
         if !host && !room_media.as_deref().is_some_and(|m| !is_url(m)) {
-            return Err("Глава лобби ещё не выбрал файл".into());
+            return Err("Ведущий ещё не выбрал файл".into());
         }
 
         self.ensure_player().await?;
@@ -642,7 +642,7 @@ impl Session {
             // Не-глава может только заново открыть ссылку, которую смотрит комната
             // (например, если случайно закрыл окно плеера).
             if self.room_media().as_deref() != Some(url.as_str()) {
-                return Err("Выбирать, что смотрим, может только глава лобби".into());
+                return Err("Выбирать, что смотрим, может только ведущий".into());
             }
             self.ensure_player().await?;
             if let Some(player) = &self.player {

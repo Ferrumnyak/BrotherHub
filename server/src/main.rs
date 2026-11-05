@@ -344,7 +344,7 @@ async fn handle_command(
 
     // Всё остальное — только для главы лобби.
     if room.host != id {
-        return error("это может делать только глава лобби");
+        return error("это может делать только ведущий");
     }
 
     match cmd {
