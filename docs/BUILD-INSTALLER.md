@@ -57,6 +57,16 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1
 ведёт на последнюю версию. Там же README объясняет, как установить
 и что делать с предупреждением Windows SmartScreen.
 
+## Без установщика (portable)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\portable.ps1
+```
+
+Собирает папку `release\BrotherWatch\` (BrotherWatch.exe, mpv, yt-dlp) и
+архив `release\BrotherWatch-<версия>-portable.zip`. Распаковал — запустил
+`BrotherWatch.exe`, ничего не устанавливая. Нужна Windows 10/11.
+
 ## Что делает установщик
 
 - Ставит BrotherWatch для текущего пользователя (права администратора не
