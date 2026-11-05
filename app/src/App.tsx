@@ -558,7 +558,7 @@ export default function App() {
               <span className={media ? "dot on" : "dot"} />
               <span className="media-name">{media ?? "Ничего не выбрано"}</span>
               {media && (
-                <span className="muted">· {playback?.paused ? "на паузе" : "идёт"}</span>
+                <span className="muted nowrap">· {playback?.paused ? "на паузе" : "идёт"}</span>
               )}
               <span className="spacer" />
               {error && !chatOpen ? (
@@ -566,7 +566,9 @@ export default function App() {
                   {error}
                 </span>
               ) : (
-                <span className="muted small">Пробел — пауза · ← → — перемотка · F — полный экран · Tab — чат</span>
+                <span className="muted small hints">
+                  Пробел — пауза · ← → — перемотка · F — полный экран · Tab — чат
+                </span>
               )}
             </div>
           )}
@@ -711,22 +713,24 @@ function PlayerControls({
       >
         <Icon name={paused ? "play" : "pause"} size={18} />
       </button>
-      <span className="time">{formatTime(position)}</span>
-      <input
-        className="seek"
-        type="range"
-        min={0}
-        max={duration || 1}
-        step={0.5}
-        value={Math.min(position, duration || 1)}
-        disabled={!canControl || !duration}
-        title={canControl ? "Перемотка (← →)" : controlHint}
-        aria-label="Перемотка"
-        onChange={(e) => onScrub(Number(e.target.value))}
-        onPointerUp={commitScrub}
-        onKeyUp={commitScrub}
-      />
-      <span className="time">{duration ? formatTime(duration) : "--:--"}</span>
+      <div className="seek-row">
+        <span className="time">{formatTime(position)}</span>
+        <input
+          className="seek"
+          type="range"
+          min={0}
+          max={duration || 1}
+          step={0.5}
+          value={Math.min(position, duration || 1)}
+          disabled={!canControl || !duration}
+          title={canControl ? "Перемотка (← →)" : controlHint}
+          aria-label="Перемотка"
+          onChange={(e) => onScrub(Number(e.target.value))}
+          onPointerUp={commitScrub}
+          onKeyUp={commitScrub}
+        />
+        <span className="time">{duration ? formatTime(duration) : "--:--"}</span>
+      </div>
       <label className="track-select" title="Озвучка (у каждого своя)">
         <Icon name="audio-track" />
         <select

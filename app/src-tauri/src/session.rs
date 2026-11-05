@@ -398,6 +398,16 @@ impl Session {
                 }
             }
             PlayerEvent::TracksChanged => self.emit_tracks().await,
+            PlayerEvent::LoadFailed => {
+                let what = match self.loaded.as_deref() {
+                    Some(m) if is_url(m) => {
+                        "Не удалось открыть ссылку: сайт не поддерживается, \
+                         видео защищено от копирования или недоступно"
+                    }
+                    _ => "Не удалось открыть файл: формат не поддерживается или файл повреждён",
+                };
+                let _ = self.app.emit("player-error", what);
+            }
             PlayerEvent::Key(key) => {
                 let _ = self.app.emit("player-key", key);
             }

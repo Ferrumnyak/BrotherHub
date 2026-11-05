@@ -32,6 +32,8 @@ pub enum PlayerEvent {
     Restart,
     /// Файл загружен.
     FileLoaded,
+    /// Файл или ссылку не удалось открыть.
+    LoadFailed,
     /// Изменился список дорожек (загрузился файл, подхватились внешние).
     TracksChanged,
     /// Нажата клавиша, которую обрабатывает приложение (см. [`INPUT_CONF`]).
@@ -179,6 +181,9 @@ impl Player {
                         }
                         "playback-restart" => Some(PlayerEvent::Restart),
                         "file-loaded" => Some(PlayerEvent::FileLoaded),
+                        "end-file" if v.get("reason").and_then(Value::as_str) == Some("error") => {
+                            Some(PlayerEvent::LoadFailed)
+                        }
                         "client-message" => parse_key(&v).map(PlayerEvent::Key),
                         _ => None,
                     };
