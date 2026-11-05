@@ -1320,17 +1320,36 @@ img.emoji3d {
 
 /* Колесо рулетки */
 .wheel {
-  display: flex;
-  justify-content: center;
-  padding: 4px 0;
+  position: relative;
+  align-self: center;
+  width: 220px;
+  height: 220px;
+  margin: 6px 0 2px;
+  flex: none;
 }
 
 .wheel-disk {
-  transform-origin: 110px 110px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.wheel-disk svg {
+  display: block;
 }
 
 .wheel-disk.spinning {
   transition: transform 5.2s cubic-bezier(0.12, 0.8, 0.2, 1);
+}
+
+.wheel-pointer {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  margin-left: -12px;
 }
 
 .wheel-label {
@@ -1361,16 +1380,30 @@ img.emoji3d {
 
 .admin-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 90px 38px;
+  grid-template-columns: minmax(0, 1fr) 84px 14px;
   align-items: center;
   gap: 8px;
   font-size: 12px;
 }
 
-.admin-row .pct {
+.admin-row input {
+  height: 30px;
+  padding: 0 8px;
   text-align: right;
-  color: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+
+.admin-row .pct {
+  color: var(--text-2);
+}
+
+.admin-total {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.admin-total.warn {
+  color: var(--velvet);
 }
 
 button.roulette {

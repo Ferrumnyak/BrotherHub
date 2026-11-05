@@ -1679,12 +1679,7 @@ export default function App() {
                 onRemove={(x) => run(() => send({ type: "remove_suggestion", id: x.id }))}
                 onSpin={() =>
                   run(() =>
-                    send({
-                      type: "spin",
-                      weights: [...weights.entries()].filter(
-                        ([id, w]) => w !== 1 && suggestions.some((x) => x.id === id),
-                      ),
-                    }),
+                    send({ type: "spin", weights: spinWeights(suggestions, weights) }),
                   )
                 }
                 wheel={
@@ -1699,7 +1694,14 @@ export default function App() {
                     <AdminPanel
                       list={suggestions}
                       weights={weights}
-                      onChange={(id, w) => setWeights((m) => new Map(m).set(id, w))}
+                      onChange={(id, percent) =>
+                        setWeights((m) => {
+                          const next = new Map(m);
+                          if (percent === null) next.delete(id);
+                          else next.set(id, percent);
+                          return next;
+                        })
+                      }
                       onReset={() => setWeights(new Map())}
                       onClose={() => setAdminOpen(false)}
                       isHost={isHost}
@@ -1885,7 +1887,10 @@ export default function App() {
   );
 }
 
-/** Секретный пульт админа: шансы предложений в рулетке. */
+/**
+ * Секретный пульт админа: шанс каждого предложения в процентах.
+ * Пустое поле — «как у всех»: остаток процентов делится поровну между ними.
+ */
 function AdminPanel({
   list,
   weights,
@@ -1896,13 +1901,16 @@ function AdminPanel({
 }: {
   list: Suggestion[];
   weights: Map<number, number>;
-  onChange: (id: number, weight: number) => void;
+  onChange: (id: number, percent: number | null) => void;
   onReset: () => void;
   onClose: () => void;
   isHost: boolean;
 }) {
-  const weightOf = (id: number) => weights.get(id) ?? 1;
-  const total = list.reduce((sum, x) => sum + weightOf(x.id), 0);
+  const fixed = list.filter((x) => weights.has(x.id));
+  const fixedSum = fixed.reduce((sum, x) => sum + (weights.get(x.id) ?? 0), 0);
+  const free = list.length - fixed.length;
+  const share = free > 0 ? Math.max(0, 100 - fixedSum) / free : 0;
+  const total = fixedSum + share * free;
   return (
     <div className="admin-panel" role="dialog" aria-label="Пульт админа">
       <div className="admin-head">
@@ -1914,25 +1922,33 @@ function AdminPanel({
       {list.length === 0 ? (
         <p className="suggestions-empty">Список пуст — подкручивать нечего.</p>
       ) : (
-        list.map((x) => {
-          const w = weightOf(x.id);
-          const pct = total > 0 ? Math.round((w / total) * 100) : 0;
-          return (
+        <>
+          {list.map((x) => (
             <label key={x.id} className="admin-row">
               <span className="suggestion-title">{mediaTitle(x.media)}</span>
               <input
-                type="range"
+                type="number"
                 min={0}
-                max={10}
-                step={1}
-                value={w}
-                style={{ "--progress": `${w * 10}%` } as CSSProperties}
-                onChange={(e) => onChange(x.id, Number(e.target.value))}
+                max={100}
+                step="any"
+                inputMode="decimal"
+                placeholder={share.toFixed(share < 10 ? 2 : 1)}
+                value={weights.has(x.id) ? String(weights.get(x.id)) : ""}
+                onChange={(e) => {
+                  const v = e.target.value.replace(",", ".").trim();
+                  const n = Number(v);
+                  onChange(x.id, v === "" || !Number.isFinite(n) ? null : Math.min(Math.max(n, 0), 100));
+                }}
               />
-              <span className="pct">{pct}%</span>
+              <span className="pct">%</span>
             </label>
-          );
-        })
+          ))}
+          <span className={Math.abs(total - 100) > 0.0001 ? "admin-total warn" : "admin-total"}>
+            {Math.abs(total - 100) > 0.0001
+              ? `В сумме ${+total.toFixed(4)}% — шансы посчитаются пропорционально.`
+              : "В сумме 100%."}
+          </span>
+        </>
       )}
       <div className="admin-foot">
         <span className="suggestion-by">
@@ -1944,6 +1960,16 @@ function AdminPanel({
       </div>
     </div>
   );
+}
+
+/** Шансы для сервера: у каждого предложения свой вес (проценты). */
+function spinWeights(list: Suggestion[], percents: Map<number, number>): Array<[number, number]> {
+  const fixed = list.filter((x) => percents.has(x.id));
+  if (fixed.length === 0) return [];
+  const fixedSum = fixed.reduce((sum, x) => sum + (percents.get(x.id) ?? 0), 0);
+  const free = list.length - fixed.length;
+  const share = free > 0 ? Math.max(0, 100 - fixedSum) / free : 0;
+  return list.map((x) => [x.id, percents.get(x.id) ?? share]);
 }
 
 /** Список «Что посмотреть» и рулетка по нему. */

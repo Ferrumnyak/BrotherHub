@@ -53,12 +53,15 @@ export function RouletteWheel({
   }, [winner]);
 
   return (
-    <div className="wheel">
-      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE} role="img" aria-label="Рулетка">
-        <g
-          className={winner === null ? "wheel-disk" : "wheel-disk spinning"}
-          style={{ transform: `rotate(${rotation}deg)` }}
-        >
+    <div className="wheel" role="img" aria-label="Рулетка">
+      {/* Крутится весь слой целиком (видеокартой), а не отдельные фигуры SVG —
+          так колесо идёт плавно. */}
+      <div
+        className={winner === null ? "wheel-disk" : "wheel-disk spinning"}
+        style={{ transform: `rotate(${rotation}deg)` }}
+      >
+      <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE}>
+        <g>
           {list.length <= 1 ? (
             <circle cx={C} cy={C} r={R} fill={COLORS[0]} />
           ) : (
@@ -96,8 +99,11 @@ export function RouletteWheel({
           })}
           <circle cx={C} cy={C} r="14" fill="#191416" stroke="#f2c879" strokeWidth="3" />
         </g>
-        {/* Стрелка сверху */}
-        <path d={`M${C - 10} 2L${C + 10} 2L${C} 22Z`} fill="#f2c879" stroke="#191416" strokeWidth="2" />
+      </svg>
+      </div>
+      {/* Стрелка сверху — отдельно, она не крутится */}
+      <svg className="wheel-pointer" viewBox="0 0 24 24" width="24" height="24">
+        <path d="M2 2L22 2L12 22Z" fill="#f2c879" stroke="#191416" strokeWidth="2" />
       </svg>
     </div>
   );
