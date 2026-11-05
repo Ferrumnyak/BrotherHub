@@ -180,6 +180,8 @@ export default function App() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [memberMenu, setMemberMenu] = useState<MemberId | null>(null);
   const [quality, setQuality] = useState(() => load("quality", ""));
+  const [controlsHidden, setControlsHidden] = useState(false);
+  const overControlsRef = useRef(false);
 
   // Голос
   const [voiceAccess, setVoiceAccess] = useState<VoiceAccess | null>(null);
@@ -465,6 +467,37 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [joinedRoom]);
 
+  // В полном экране панель плеера прячется через 3 секунды без движения мыши.
+  useEffect(() => {
+    if (!fullscreen) {
+      setControlsHidden(false);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poke = () => {
+      setControlsHidden(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!overControlsRef.current) setControlsHidden(true);
+      }, 3000);
+    };
+    poke();
+    invoke("watch_cursor", { enabled: true }).catch(() => {});
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    listen("cursor-moved", poke).then((u) => (active ? (unlisten = u) : u()));
+    window.addEventListener("mousemove", poke);
+    window.addEventListener("keydown", poke);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      unlisten?.();
+      invoke("watch_cursor", { enabled: false }).catch(() => {});
+      window.removeEventListener("mousemove", poke);
+      window.removeEventListener("keydown", poke);
+    };
+  }, [fullscreen]);
+
   // Качество ссылок: запоминается и применяется сразу, даже к открытому видео.
   useEffect(() => {
     invoke("set_quality", { height: quality ? Number(quality) : null }).catch(() => {});
@@ -607,7 +640,7 @@ export default function App() {
       window.removeEventListener("resize", update);
       invoke("set_video_rect", { rect: null }).catch(() => {});
     };
-  }, [joinedRoom, player.running, chatOpen, fullscreen]);
+  }, [joinedRoom, player.running, chatOpen, fullscreen, controlsHidden]);
 
   if (!joinedRoom) {
     return (
@@ -715,7 +748,12 @@ export default function App() {
             ? "Микрофон включён"
             : "Микрофон выключен";
 
-  const roomClass = ["room", fullscreen && "fullscreen", !chatOpen && "chat-hidden"]
+  const roomClass = [
+    "room",
+    fullscreen && "fullscreen",
+    !chatOpen && "chat-hidden",
+    fullscreen && controlsHidden && "controls-hidden",
+  ]
     .filter(Boolean)
     .join(" ");
 
@@ -797,6 +835,7 @@ export default function App() {
         </div>
 
         <PlayerControls
+          onHover={(over) => (overControlsRef.current = over)}
           info={info}
           canControl={isHost && player.running && player.loaded === media}
           controlHint={isHost ? "Сначала открой видео" : `Управляет ${hostName ?? "ведущий"}`}
@@ -1070,6 +1109,7 @@ const EVENT_ICONS: Record<EventIcon, IconName> = {
 };
 
 function PlayerControls({
+  onHover,
   info,
   canControl,
   controlHint,
@@ -1085,6 +1125,7 @@ function PlayerControls({
   fullscreen,
   onFullscreen,
 }: {
+  onHover: (over: boolean) => void;
   info: PlaybackInfo | null;
   canControl: boolean;
   controlHint: string;
@@ -1103,8 +1144,20 @@ function PlayerControls({
   const duration = info?.duration ?? 0;
   const position = scrub ?? info?.position ?? 0;
   const paused = info?.paused ?? true;
-  const volume = info?.volume ?? 100;
+  // Пока тянешь ползунок громкости, он слушается только тебя, а не
+  // значения, которое приходит из плеера раз в 0,4 секунды.
+  const [volumeDrag, setVolumeDrag] = useState<number | null>(null);
+  const volumeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const volume = volumeDrag ?? info?.volume ?? 100;
   const send = (c: Control) => control(c).catch((err) => onError(String(err)));
+
+  const onVolume = (value: number) => {
+    setVolumeDrag(value);
+    send({ type: "volume", value });
+    clearTimeout(volumeTimer.current);
+    // Отдаём управление обратно плееру, когда mpv точно применил громкость.
+    volumeTimer.current = setTimeout(() => setVolumeDrag(null), 800);
+  };
 
   const audioTracks = tracks.filter((t) => t.kind === "audio");
   const subTracks = tracks.filter((t) => t.kind === "sub");
@@ -1134,7 +1187,11 @@ function PlayerControls({
   const progress = duration ? Math.min(position / duration, 1) * 100 : 0;
 
   return (
-    <div className="controls">
+    <div
+      className="controls"
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+    >
       <div className="seek-row">
         <span className="time">{formatTime(position)}</span>
         <input
@@ -1231,7 +1288,7 @@ function PlayerControls({
             style={{ "--progress": `${Math.min(volume, 100)}%` } as CSSProperties}
             disabled={!info}
             aria-label="Громкость фильма"
-            onChange={(e) => send({ type: "volume", value: Number(e.target.value) })}
+            onChange={(e) => onVolume(Number(e.target.value))}
           />
         </label>
         {fullscreen && (

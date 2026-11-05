@@ -599,6 +599,8 @@ button.play:disabled {
 }
 
 .track-select select {
+  /* Ширина по выбранному пункту, а не по самому длинному в списке. */
+  field-sizing: content;
   max-width: 150px;
   min-width: 40px;
   padding: 4px 2px;
@@ -639,6 +641,21 @@ button.play:disabled {
 
 .stage-error {
   padding: 0 24px 12px;
+}
+
+/* Полный экран без движения мыши: только видео. */
+.controls-hidden .controls,
+.controls-hidden .stage-error {
+  display: none;
+}
+
+.controls-hidden {
+  cursor: none;
+}
+
+.fullscreen .controls {
+  padding-top: 10px;
+  padding-bottom: 14px;
 }
 
 /* Узкая сцена: дорожки и громкость переносятся на свою строку. */

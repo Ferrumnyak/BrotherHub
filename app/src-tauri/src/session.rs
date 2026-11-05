@@ -152,6 +152,11 @@ pub struct Session {
     player_paused: bool,
     loaded: Option<String>,
     last_seek: Option<Instant>,
+    /// Когда mpv сообщил об ошибке загрузки. Ошибку показываем, только если
+    /// за пару секунд так ничего и не загрузилось: при смене качества и у
+    /// некоторых сайтов mpv сообщает о промежуточных ошибках, а видео
+    /// потом всё равно открывается.
+    load_failed_at: Option<Instant>,
     /// Качество ссылок: высота кадра (`None` — авто, до 1080p).
     quality: Option<u32>,
     /// После смены качества ждём загрузки, чтобы сбросить начальную позицию.
@@ -176,6 +181,7 @@ impl Session {
             player_paused: true,
             loaded: None,
             last_seek: None,
+            load_failed_at: None,
             quality: None,
             reloading: false,
             overlay_enabled: false,
@@ -405,19 +411,13 @@ impl Session {
             }
             PlayerEvent::TracksChanged => self.emit_tracks().await,
             PlayerEvent::LoadFailed => {
-                let what = match self.loaded.as_deref() {
-                    Some(m) if is_url(m) => {
-                        "Не удалось открыть ссылку: сайт не поддерживается, \
-                         видео защищено от копирования или недоступно"
-                    }
-                    _ => "Не удалось открыть файл: формат не поддерживается или файл повреждён",
-                };
-                let _ = self.app.emit("player-error", what);
+                self.load_failed_at = Some(Instant::now());
             }
             PlayerEvent::Key(key) => {
                 let _ = self.app.emit("player-key", key);
             }
             PlayerEvent::FileLoaded if self.reloading => {
+                self.load_failed_at = None;
                 self.reloading = false;
                 if let Some(player) = &self.player {
                     player.clear_start();
@@ -435,6 +435,7 @@ impl Session {
                 }
             }
             PlayerEvent::FileLoaded => {
+                self.load_failed_at = None;
                 if !self.is_host() {
                     self.last_seek = None;
                     self.apply().await;
@@ -548,6 +549,31 @@ impl Session {
         player.set_overlay(&ass);
     }
 
+    /// Сообщить об ошибке загрузки, если видео так и не открылось.
+    async fn report_load_failure(&mut self) {
+        let Some(at) = self.load_failed_at else {
+            return;
+        };
+        if at.elapsed() < Duration::from_millis(2500) {
+            return;
+        }
+        self.load_failed_at = None;
+        // Что-то всё-таки играет — значит, ошибка была промежуточной.
+        if let Some(player) = &self.player {
+            if player.get_f64("duration").await.is_some() {
+                return;
+            }
+        }
+        let what = match self.loaded.as_deref() {
+            Some(m) if is_url(m) => {
+                "Не удалось открыть ссылку: сайт не поддерживается, \
+                 видео защищено от копирования или недоступно"
+            }
+            _ => "Не удалось открыть файл: формат не поддерживается или файл повреждён",
+        };
+        let _ = self.app.emit("player-error", what);
+    }
+
     // ---------- Панель управления ----------
 
     /// Выбрать качество ссылок. Если сейчас открыта ссылка — перезапустить
@@ -634,6 +660,7 @@ impl Session {
 
     /// Раз в [`SYNC_INTERVAL`]: глава сообщает позицию, остальные сверяются.
     async fn tick(&mut self) {
+        self.report_load_failure().await;
         if !self.is_host() {
             self.apply().await;
             return;

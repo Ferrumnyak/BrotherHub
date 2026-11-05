@@ -38,6 +38,7 @@ fn main() {
             session::player_control,
             session::set_quality,
             video::set_video_rect,
+            video::watch_cursor,
             ptt::ptt_set_key,
             ptt::ptt_capture
         ])
