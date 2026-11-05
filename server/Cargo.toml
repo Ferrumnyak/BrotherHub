@@ -13,3 +13,9 @@ futures-util.workspace = true
 axum = { version = "0.8", features = ["ws"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+# Пропуска (JWT) для голосового сервера LiveKit.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+# Запросы к API LiveKit (исключение из голосового канала).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

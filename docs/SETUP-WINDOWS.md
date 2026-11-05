@@ -53,11 +53,26 @@ scoop install mpv yt-dlp
 Если mpv лежит в другом месте, укажи путь к нему переменной окружения
 `BROTHERWATCH_MPV` (например, `C:\Tools\mpv\mpv.exe`).
 
-## 5. WebView2
+## 5. Голосовой сервер LiveKit (для проверки голоса на своём ПК)
+
+1. Открой https://github.com/livekit/livekit/releases и в последнем релизе
+   скачай архив `livekit_<версия>_windows_amd64.zip`.
+2. Распакуй `livekit-server.exe` в удобную папку, например `C:\Tools\livekit`.
+3. Запускай его в отдельном окне PowerShell:
+
+   ```powershell
+   C:\Tools\livekit\livekit-server.exe --dev --bind 127.0.0.1
+   ```
+
+   `--dev` — режим разработки с готовыми ключами (`devkey` / `secret`),
+   `--bind 127.0.0.1` — доступен только с этого ПК. Если Windows спросит
+   про доступ в сеть — разреши только для частных сетей.
+
+## 6. WebView2
 
 Уже встроен в Windows 10 и 11, ставить не нужно.
 
-## 6. (Удобно) редактор
+## 7. (Удобно) редактор
 
 VS Code с расширениями **rust-analyzer** и **Tauri**.
 
@@ -70,7 +85,17 @@ VS Code с расширениями **rust-analyzer** и **Tauri**.
 **Окно 1 — сервер:**
 
 ```powershell
-cargo run -p brotherwatch-server
+cargo run -p brotherwatch-server -- --dev
+```
+
+`--dev` включает голос через локальный LiveKit (см. раздел 5). Без LiveKit
+сервер тоже работает, просто без голоса.
+
+Чтобы проверить вход по паролю:
+
+```powershell
+$env:BROTHERWATCH_PASSWORD = "придумай-пароль"
+cargo run -p brotherwatch-server -- --dev
 ```
 
 **Окно 2 — приложение:**
@@ -88,6 +113,14 @@ npm run tauri dev
 **Как проверить чат вдвоём на одном ПК:** пока `npm run tauri dev` запущен,
 открой ещё один экземпляр приложения файлом `target\debug\brotherwatch.exe`
 и войди в ту же комнату под другим ником.
+
+> `target\debug\brotherwatch.exe` — отладочная сборка: интерфейс она берёт
+> у `npm run tauri dev`, поэтому без него не откроется. Самостоятельный exe —
+> после `npm run tauri build` (см. ниже).
+
+**Как проверить голос на одном ПК:** запусти LiveKit и сервер с `--dev`,
+зайди с двух окон приложения. Чтобы не было эха, в одном окне выключи
+микрофон или звук (кнопка с наушниками).
 
 
 **Как проверить синхронизацию на одном ПК:** войди в обоих окнах в одну

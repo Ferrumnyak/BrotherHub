@@ -7,8 +7,14 @@
 //! В каждой комнате есть глава лобби: только он управляет
 //! воспроизведением, может передать роль или исключить участника.
 //!
-//! Адрес задаётся переменной окружения `BROTHERWATCH_ADDR`
-//! (по умолчанию `0.0.0.0:8080`).
+//! Настройки — переменные окружения:
+//! - `BROTHERWATCH_ADDR` — адрес (по умолчанию `0.0.0.0:8080`);
+//! - `BROTHERWATCH_PASSWORD` — пароль для входа (по умолчанию без пароля);
+//! - `LIVEKIT_*` — голосовая связь, см. [`voice`].
+//!
+//! `--dev` — режим разработки: голос через `livekit-server --dev` на этом ПК.
+
+mod voice;
 
 use std::{
     collections::HashMap,
@@ -28,7 +34,9 @@ use axum::{
     routing::get,
     Router,
 };
-use brotherwatch_shared::{ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg};
+use brotherwatch_shared::{
+    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg, VoiceAccess,
+};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, Mutex};
 
@@ -128,18 +136,52 @@ impl Room {
     }
 }
 
-#[derive(Default)]
 struct AppState {
     rooms: Mutex<HashMap<String, Room>>,
     next_id: AtomicU64,
+    password: Option<String>,
+    livekit: Option<voice::LiveKit>,
+}
+
+impl AppState {
+    /// Выкинуть участника из голосового канала (в фоне).
+    fn remove_from_voice(&self, room: &str, id: MemberId) {
+        if let Some(livekit) = self.livekit.clone() {
+            let room = room.to_string();
+            tokio::spawn(async move { livekit.remove_participant(&room, id).await });
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
+    let dev = std::env::args().any(|a| a == "--dev");
     let addr = std::env::var("BROTHERWATCH_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into());
-    let state = Arc::new(AppState::default());
+    let password = std::env::var("BROTHERWATCH_PASSWORD")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let livekit = voice::LiveKit::from_env(dev);
+
+    if password.is_none() {
+        tracing::warn!(
+            "пароль не задан (BROTHERWATCH_PASSWORD) — войти может любой, кто знает адрес"
+        );
+    }
+    match &livekit {
+        Some(lk) => tracing::info!("голосовая связь: {}", lk.url),
+        None => tracing::warn!(
+            "голосовая связь выключена (нет LIVEKIT_URL; для разработки — флаг --dev)"
+        ),
+    }
+
+    let state = Arc::new(AppState {
+        rooms: Mutex::default(),
+        next_id: AtomicU64::new(0),
+        password,
+        livekit,
+    });
 
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -213,9 +255,20 @@ async fn handle_command(
         });
     };
 
-    if let ClientMsg::Join { room, name } = cmd {
+    if let ClientMsg::Join {
+        room,
+        name,
+        password,
+    } = cmd
+    {
         if current_room.is_some() {
             return error("ты уже в комнате");
+        }
+        if let Some(expected) = &state.password {
+            if password.as_deref() != Some(expected.as_str()) {
+                tracing::warn!("участник {id}: неверный пароль");
+                return error("неверный пароль сервера");
+            }
         }
         let room = room.trim().to_string();
         let name = name.trim().to_string();
@@ -242,12 +295,17 @@ async fn handle_command(
                 tx: tx.clone(),
             },
         );
+        let voice = state.livekit.as_ref().map(|lk| VoiceAccess {
+            url: lk.url.clone(),
+            token: lk.join_token(&room, id, &member.name),
+        });
         let _ = tx.send(ServerMsg::Welcome {
             you: id,
             room: room.clone(),
             host: r.host,
             members: r.members(),
             playback: r.playback(),
+            voice,
         });
         tracing::info!("участник {id} ({}) вошёл в комнату «{room}»", member.name);
         *current_room = Some(room);
@@ -334,6 +392,7 @@ async fn handle_command(
             match room.remove_peer(target, true) {
                 Some(peer) => {
                     let _ = peer.tx.send(ServerMsg::Kicked { by: name.clone() });
+                    state.remove_from_voice(&room_name, target);
                     tracing::info!("{name} исключил {} из «{room_name}»", peer.name);
                 }
                 None => error("такого участника нет в комнате"),
@@ -355,7 +414,10 @@ async fn leave_room(state: &AppState, id: MemberId, room_name: &str) {
     let Some(room) = rooms.get_mut(room_name) else {
         return;
     };
-    room.remove_peer(id, false);
+    // Голос — только для тех, кто в комнате.
+    if room.remove_peer(id, false).is_some() {
+        state.remove_from_voice(room_name, id);
+    }
     if room.peers.is_empty() {
         rooms.remove(room_name);
         tracing::info!("комната «{room_name}» опустела и удалена");

@@ -34,6 +34,7 @@ pub async fn connect(
     server: String,
     room: String,
     name: String,
+    password: Option<String>,
 ) -> Result<(), String> {
     let url = format!("{}/ws", server.trim().trim_end_matches('/'));
     let (ws, _) = connect_async(url.as_str())
@@ -45,8 +46,13 @@ pub async fn connect(
     let generation = conn.generation.clone();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<ClientMsg>();
-    tx.send(ClientMsg::Join { room, name })
-        .map_err(|e| e.to_string())?;
+    let password = password.filter(|p| !p.is_empty());
+    tx.send(ClientMsg::Join {
+        room,
+        name,
+        password,
+    })
+    .map_err(|e| e.to_string())?;
 
     // Отправка: всё из канала уходит на сервер.
     tauri::async_runtime::spawn(async move {

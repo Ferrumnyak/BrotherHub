@@ -545,3 +545,129 @@ button.secondary {
     max-width: 90px;
   }
 }
+
+/* ----- Голос ----- */
+
+.voice-bar {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #252a34;
+}
+
+.voice-bar button:first-child {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.room .voice-bar button.icon-only {
+  width: 36px;
+  padding: 0;
+  flex: none;
+}
+
+.room .voice-bar button.off {
+  color: var(--error);
+}
+
+.room .voice-bar button.talking {
+  background: #1d3a27;
+  color: #7ee0a0;
+}
+
+.room .voice-bar button.active {
+  background: #2c313c;
+}
+
+.voice-status {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* Подсветка того, кто говорит. */
+.member-name.speaking {
+  color: #7ee0a0;
+  text-shadow: 0 0 10px rgba(94, 194, 122, 0.45);
+}
+
+.voice-settings {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 4px;
+}
+
+.voice-settings h3 {
+  font-size: 15px;
+}
+
+.voice-settings fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice-settings legend {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.voice-settings .radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.voice-settings .radio input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.voice-settings .setting {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.voice-settings select {
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #2c313c;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.volume-row {
+  display: grid;
+  grid-template-columns: 1fr 110px 40px;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.volume-row input[type="range"] {
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+.volume-row .pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

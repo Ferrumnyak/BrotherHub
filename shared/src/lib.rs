@@ -16,7 +16,13 @@ pub type MemberId = u64;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
     /// Войти в комнату (создаётся автоматически, если её нет).
-    Join { room: String, name: String },
+    Join {
+        room: String,
+        name: String,
+        /// Пароль сервера, если он задан.
+        #[serde(default)]
+        password: Option<String>,
+    },
     /// Сообщение в текстовый чат.
     Chat { text: String },
 
@@ -48,6 +54,8 @@ pub enum ServerMsg {
         host: MemberId,
         members: Vec<Member>,
         playback: PlaybackState,
+        /// Пропуск в голосовой канал комнаты (`None` — голос на сервере не настроен).
+        voice: Option<VoiceAccess>,
     },
     MemberJoined {
         member: Member,
@@ -89,6 +97,14 @@ pub enum PlaybackAction {
     Play,
     Pause,
     Seek,
+}
+
+/// Куда и с каким пропуском подключаться к голосовому серверу LiveKit.
+/// Участник голосового канала опознаётся по `MemberId` (строкой).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct VoiceAccess {
+    pub url: String,
+    pub token: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

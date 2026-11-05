@@ -8,6 +8,12 @@ export interface Member {
   name: string;
 }
 
+/** Пропуск в голосовой канал LiveKit. */
+export interface VoiceAccess {
+  url: string;
+  token: string;
+}
+
 export interface PlaybackState {
   media: string | null;
   paused: boolean;
@@ -17,7 +23,7 @@ export interface PlaybackState {
 export type PlaybackAction = "set_media" | "play" | "pause" | "seek";
 
 export type ClientMsg =
-  | { type: "join"; room: string; name: string }
+  | { type: "join"; room: string; name: string; password?: string | null }
   | { type: "chat"; text: string }
   | { type: "set_media"; media: string }
   | { type: "play"; position: number }
@@ -35,6 +41,7 @@ export type ServerMsg =
       host: MemberId;
       members: Member[];
       playback: PlaybackState;
+      voice: VoiceAccess | null;
     }
   | { type: "member_joined"; member: Member }
   | { type: "member_left"; id: MemberId; kicked: boolean }

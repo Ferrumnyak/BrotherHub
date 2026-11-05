@@ -15,7 +15,11 @@ import {
   type PlayerStatus,
   type ServerMsg,
   type Track,
+  type VoiceAccess,
 } from "./protocol";
+import { keyName, listMicrophones, VoiceClient, type VoiceStatus } from "./voice";
+
+type VoiceMode = "open" | "ptt";
 
 type ChatLine =
   | { key: number; kind: "chat"; name: string; text: string; mine: boolean }
@@ -105,6 +109,7 @@ export default function App() {
   const [server, setServer] = useState(() => load("server", DEFAULT_SERVER));
   const [name, setName] = useState(() => load("name", ""));
   const [room, setRoom] = useState(() => load("room", "brotherhood"));
+  const [password, setPassword] = useState(() => load("password", ""));
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -122,6 +127,45 @@ export default function App() {
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
+
+  // Голос
+  const [voiceAccess, setVoiceAccess] = useState<VoiceAccess | null>(null);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>("off");
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [speakers, setSpeakers] = useState<Set<string>>(new Set());
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>(() =>
+    load("voiceMode", "open") === "ptt" ? "ptt" : "open",
+  );
+  const [micOn, setMicOn] = useState(true);
+  const [deafened, setDeafened] = useState(false);
+  const [pttKey, setPttKey] = useState<number | null>(() => {
+    const v = Number(load("pttKey", ""));
+    return v > 0 ? v : null;
+  });
+  const [pttPressed, setPttPressed] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const [voiceSettings, setVoiceSettings] = useState(false);
+  const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+  const [micDevice, setMicDevice] = useState(() => load("micDevice", ""));
+  const [volumes, setVolumes] = useState<Record<string, number>>(() => {
+    try {
+      return JSON.parse(load("volumes", "{}")) as Record<string, number>;
+    } catch {
+      return {};
+    }
+  });
+  const voiceRef = useRef<VoiceClient | null>(null);
+  if (voiceRef.current === null) {
+    voiceRef.current = new VoiceClient({
+      onStatus: (status, err) => {
+        setVoiceStatus(status);
+        setVoiceError(err ?? null);
+      },
+      onSpeakers: setSpeakers,
+      onError: (message) => setVoiceError(message),
+    });
+  }
+  const voice = voiceRef.current;
 
   const meRef = useRef<MemberId | null>(null);
   const membersRef = useRef<Member[]>([]);
@@ -151,6 +195,7 @@ export default function App() {
           setJoinedRoom(msg.room);
           setMembers(msg.members);
           setPlayback(msg.playback);
+          setVoiceAccess(msg.voice);
           setLines([]);
           system(`Ты в комнате «${msg.room}»`);
           if (msg.host === msg.you) system("👑 Ты глава лобби");
@@ -166,6 +211,7 @@ export default function App() {
           break;
         case "kicked":
           invoke("disconnect");
+          setVoiceAccess(null);
           setJoinedRoom(null);
           setError(`Тебя исключил из комнаты ${msg.by}`);
           break;
@@ -222,9 +268,16 @@ export default function App() {
     listen<ServerMsg>("server-message", (e) => onMessage(e.payload)).then(keep);
     listen<PlayerStatus>("player-status", (e) => setPlayer(e.payload)).then(keep);
     listen<string>("player-error", (e) => setError(e.payload)).then(keep);
+    listen<boolean>("ptt", (e) => setPttPressed(e.payload)).then(keep);
+    listen<number>("ptt-captured", (e) => {
+      setPttKey(e.payload);
+      save("pttKey", String(e.payload));
+      setCapturing(false);
+    }).then(keep);
     listen<Track[]>("player-tracks", (e) => setTracks(e.payload)).then(keep);
     listen<PlayerKey>("player-key", (e) => onKeyRef.current(e.payload)).then(keep);
     listen("disconnected", () => {
+      setVoiceAccess(null);
       setJoinedRoom(null);
       setError("Соединение с сервером потеряно");
     }).then(keep);
@@ -256,8 +309,9 @@ export default function App() {
     save("server", server);
     save("name", name);
     save("room", room);
+    save("password", password);
     try {
-      await invoke("connect", { server, room, name });
+      await invoke("connect", { server, room, name, password: password || null });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -267,6 +321,7 @@ export default function App() {
 
   async function handleLeave() {
     if (fullscreen) await applyFullscreen(false);
+    setVoiceAccess(null);
     await invoke("disconnect");
     setJoinedRoom(null);
     setMembers([]);
@@ -356,6 +411,73 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [joinedRoom]);
 
+  // ----- Голос -----
+
+  // Подключение к голосовому каналу комнаты.
+  useEffect(() => {
+    if (!voiceAccess) {
+      voice.disconnect();
+      setVoiceStatus("off");
+      return;
+    }
+    voice.connect(voiceAccess.url, voiceAccess.token, micDevice);
+    return () => {
+      voice.disconnect();
+    };
+    // Микрофон переключается отдельно, без переподключения.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceAccess]);
+
+  // Передаём ли свой голос.
+  useEffect(() => {
+    if (voiceStatus !== "connected") return;
+    const talking = voiceMode === "open" ? micOn : pttPressed;
+    voice.setMic(talking && !deafened);
+  }, [voiceStatus, voiceMode, micOn, pttPressed, deafened, voice]);
+
+  useEffect(() => voice.setDeafened(deafened), [deafened, voice]);
+
+  // Громкость каждого участника (запоминается по нику).
+  useEffect(() => {
+    for (const m of members) {
+      if (m.id !== me) voice.setVolume(String(m.id), volumes[m.name] ?? 1);
+    }
+  }, [members, volumes, me, voice]);
+
+  // Глобальная кнопка «нажми и говори» работает, только пока мы в комнате.
+  useEffect(() => {
+    const active = joinedRoom !== null && voiceMode === "ptt" && pttKey !== null;
+    invoke("ptt_set_key", { key: active ? pttKey : null }).catch(() => {});
+    if (!active) setPttPressed(false);
+  }, [joinedRoom, voiceMode, pttKey]);
+
+  useEffect(() => {
+    invoke("ptt_capture", { enabled: capturing }).catch(() => {});
+  }, [capturing]);
+
+  useEffect(() => {
+    if (voiceSettings) listMicrophones().then(setMics);
+  }, [voiceSettings]);
+
+  function changeVoiceMode(mode: VoiceMode) {
+    setVoiceMode(mode);
+    save("voiceMode", mode);
+  }
+
+  function changeMic(deviceId: string) {
+    setMicDevice(deviceId);
+    save("micDevice", deviceId);
+    voice.switchMic(deviceId);
+  }
+
+  function changeVolume(name: string, value: number) {
+    setVolumes((v) => {
+      const next = { ...v, [name]: value };
+      save("volumes", JSON.stringify(next));
+      return next;
+    });
+  }
+
   // Позиция и длительность для панели управления.
   useEffect(() => {
     if (!joinedRoom || !player.running) {
@@ -426,6 +548,16 @@ export default function App() {
           <label>
             Комната
             <input value={room} onChange={(e) => setRoom(e.target.value)} maxLength={32} required />
+          </label>
+          <label>
+            Пароль сервера
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Если сервер с паролем"
+              autoComplete="off"
+            />
           </label>
           <label>
             Ник
@@ -584,7 +716,12 @@ export default function App() {
                     <span className="crown-slot">
                       {m.id === host && <Icon name="crown" label="Глава лобби" accent />}
                     </span>
-                    <span className="member-name">{m.name}</span>
+                    <span
+                      className={speakers.has(String(m.id)) ? "member-name speaking" : "member-name"}
+                      title={speakers.has(String(m.id)) ? "Говорит" : undefined}
+                    >
+                      {m.name}
+                    </span>
                     {m.id === me && <span className="muted"> (ты)</span>}
                     {isHost && m.id !== me && (
                       <span className="member-actions">
@@ -611,6 +748,138 @@ export default function App() {
               </ul>
             </div>
 
+            <div className="voice-bar">
+              {voiceMode === "open" ? (
+                <button
+                  className={micOn && !deafened ? "secondary" : "secondary off"}
+                  onClick={() => setMicOn((on) => !on)}
+                  disabled={voiceStatus !== "connected" || deafened}
+                  aria-label={micOn ? "Выключить микрофон" : "Включить микрофон"}
+                  title={micOn ? "Выключить микрофон" : "Включить микрофон"}
+                >
+                  <Icon name={micOn && !deafened ? "mic" : "mic-off"} />
+                  {micOn && !deafened ? "Микрофон" : "Микрофон выкл"}
+                </button>
+              ) : (
+                <button
+                  className={pttPressed && !deafened ? "secondary talking" : "secondary"}
+                  onClick={() => setVoiceSettings(true)}
+                  disabled={voiceStatus !== "connected"}
+                  title="Нажми и говори — настроить кнопку"
+                >
+                  <Icon name={pttPressed && !deafened ? "mic" : "mic-off"} />
+                  {pttKey !== null ? `Держи: ${keyName(pttKey)}` : "Назначь кнопку"}
+                </button>
+              )}
+              <button
+                className={deafened ? "secondary icon-only off" : "secondary icon-only"}
+                onClick={() => setDeafened((d) => !d)}
+                disabled={voiceStatus !== "connected"}
+                aria-label={deafened ? "Включить звук" : "Выключить звук от всех"}
+                title={deafened ? "Включить звук" : "Выключить звук от всех"}
+              >
+                <Icon name={deafened ? "headphones-off" : "headphones"} />
+              </button>
+              <button
+                className={voiceSettings ? "secondary icon-only active" : "secondary icon-only"}
+                onClick={() => setVoiceSettings((v) => !v)}
+                aria-label="Настройки голоса"
+                title="Настройки голоса"
+              >
+                <Icon name="settings" />
+              </button>
+            </div>
+            {(voiceStatus !== "connected" || voiceError) && (
+              <p className={voiceStatus === "error" || voiceError ? "voice-status error" : "voice-status muted"}>
+                {voiceError ??
+                  (voiceStatus === "connecting"
+                    ? "Подключаюсь к голосу…"
+                    : voiceAccess
+                      ? "Голос отключён"
+                      : "На сервере не настроена голосовая связь")}
+              </p>
+            )}
+
+            {voiceSettings ? (
+              <div className="voice-settings">
+                <h3>Голос</h3>
+                <fieldset>
+                  <legend>Режим микрофона</legend>
+                  <label className="radio">
+                    <input
+                      type="radio"
+                      name="voice-mode"
+                      checked={voiceMode === "open"}
+                      onChange={() => changeVoiceMode("open")}
+                    />
+                    Всегда включён (кнопка для выключения)
+                  </label>
+                  <label className="radio">
+                    <input
+                      type="radio"
+                      name="voice-mode"
+                      checked={voiceMode === "ptt"}
+                      onChange={() => changeVoiceMode("ptt")}
+                    />
+                    Нажми и говори
+                  </label>
+                </fieldset>
+
+                {voiceMode === "ptt" && (
+                  <div className="setting">
+                    <span className="muted small">Кнопка (работает и в других окнах)</span>
+                    <button className="secondary" onClick={() => setCapturing((c) => !c)}>
+                      {capturing
+                        ? "Нажми клавишу или кнопку мыши… (отмена)"
+                        : pttKey !== null
+                          ? `${keyName(pttKey)} — изменить`
+                          : "Назначить кнопку"}
+                    </button>
+                  </div>
+                )}
+
+                <label className="setting">
+                  <span className="muted small">Микрофон</span>
+                  <select value={micDevice} onChange={(e) => changeMic(e.target.value)}>
+                    <option value="">По умолчанию (как в Windows)</option>
+                    {mics
+                      .filter((d) => d.deviceId && d.deviceId !== "default")
+                      .map((d) => (
+                        <option key={d.deviceId} value={d.deviceId}>
+                          {d.label || "Микрофон"}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+
+                {members.some((m) => m.id !== me) && (
+                  <div className="setting">
+                    <span className="muted small">Громкость участников</span>
+                    {members
+                      .filter((m) => m.id !== me)
+                      .map((m) => (
+                        <label key={m.id} className="volume-row">
+                          <span className="member-name">{m.name}</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={1}
+                            step={0.05}
+                            value={volumes[m.name] ?? 1}
+                            onChange={(e) => changeVolume(m.name, Number(e.target.value))}
+                            aria-label={`Громкость ${m.name}`}
+                          />
+                          <span className="small muted pct">
+                            {Math.round((volumes[m.name] ?? 1) * 100)}%
+                          </span>
+                        </label>
+                      ))}
+                  </div>
+                )}
+
+                <button onClick={() => setVoiceSettings(false)}>Готово</button>
+              </div>
+            ) : (
             <div className="lines">
               {lines.map((l) =>
                 l.kind === "system" ? (
@@ -626,6 +895,7 @@ export default function App() {
               )}
               <div ref={chatEndRef} />
             </div>
+            )}
             {error && (
               <p className="error" onClick={() => setError(null)} title="Скрыть">
                 {error}
@@ -804,7 +1074,12 @@ type IconName =
   | "volume"
   | "mute"
   | "audio-track"
-  | "subtitles";
+  | "subtitles"
+  | "mic"
+  | "mic-off"
+  | "headphones"
+  | "headphones-off"
+  | "settings";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
   panel: (
@@ -830,6 +1105,45 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
     </>
   ),
   play: <polygon points="7 4 20 12 7 20 7 4" />,
+  mic: (
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <line x1="12" y1="18" x2="12" y2="21" />
+    </>
+  ),
+  "mic-off": (
+    <>
+      <path d="M15 10V6a3 3 0 0 0-5.7-1.3" />
+      <path d="M9 9v2a3 3 0 0 0 4.6 2.5" />
+      <path d="M5 11a7 7 0 0 0 11.4 5.4" />
+      <path d="M19 11a7 7 0 0 1-.6 2.8" />
+      <line x1="12" y1="18" x2="12" y2="21" />
+      <line x1="3" y1="3" x2="21" y2="21" />
+    </>
+  ),
+  headphones: (
+    <>
+      <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+      <rect x="3" y="15" width="4" height="6" rx="1" />
+      <rect x="17" y="15" width="4" height="6" rx="1" />
+    </>
+  ),
+  "headphones-off": (
+    <>
+      <path d="M3 18v-6a9 9 0 0 1 15.4-6.4" />
+      <path d="M21 12v6" />
+      <rect x="3" y="15" width="4" height="6" rx="1" />
+      <rect x="17" y="15" width="4" height="6" rx="1" />
+      <line x1="3" y1="3" x2="21" y2="21" />
+    </>
+  ),
+  settings: (
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" />
+    </>
+  ),
   "audio-track": (
     <>
       <path d="M3 18v-6a9 9 0 0 1 18 0v6" />

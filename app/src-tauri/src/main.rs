@@ -3,6 +3,7 @@
 
 mod net;
 mod player;
+mod ptt;
 mod session;
 mod video;
 
@@ -34,7 +35,9 @@ fn main() {
             session::set_chat_overlay,
             session::player_info,
             session::player_control,
-            video::set_video_rect
+            video::set_video_rect,
+            ptt::ptt_set_key,
+            ptt::ptt_capture
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherWatch");
