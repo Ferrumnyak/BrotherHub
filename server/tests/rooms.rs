@@ -171,15 +171,16 @@ async fn host_can_transfer_role_and_kick() {
 async fn member_can_come_back_after_connection_loss() {
     let url = start(Config::default()).await;
     let (a, wa) = Client::join(&url, "r", "Аня").await;
-    let (mut b, _) = Client::join(&url, "r", "Боря").await;
+    let (mut b, wb) = Client::join(&url, "r", "Боря").await;
 
-    // Связь у Ани пропала (без «leave»).
+    // Связь у Ани пропала (без «leave»): место держится, а пульт сразу у Бори.
     drop(a);
     let status = b.expect("member_status").await;
     assert_eq!(status["id"], wa["you"]);
     assert_eq!(status["online"], false);
+    assert_eq!(b.expect("host_changed").await["host"], wb["you"]);
 
-    // Аня вернулась со своим пропуском — тот же id, она всё ещё ведущая.
+    // Аня вернулась со своим пропуском — тот же id, но пульт остался у Бори.
     let mut a = Client::connect(&url).await;
     a.send(json!({
         "type": "join", "room": "r", "name": "Аня", "resume": wa["token"]
@@ -188,7 +189,7 @@ async fn member_can_come_back_after_connection_loss() {
     let back = a.expect("welcome").await;
     assert_eq!(back["resumed"], true);
     assert_eq!(back["you"], wa["you"]);
-    assert_eq!(back["host"], wa["you"]);
+    assert_eq!(back["host"], wb["you"]);
 
     let status = b.expect("member_status").await;
     assert_eq!(status["online"], true);
@@ -206,9 +207,10 @@ async fn place_is_freed_after_grace_period() {
 
     drop(a);
     b.expect("member_status").await;
+    // Пульт переходит сразу, место освобождается после grace.
+    assert_eq!(b.expect("host_changed").await["host"], wb["you"]);
     let left = b.expect("member_left").await;
     assert_eq!(left["id"], wa["you"]);
-    assert_eq!(b.expect("host_changed").await["host"], wb["you"]);
 
     // Старый пропуск больше не действует — заходим как новый участник.
     let mut a = Client::connect(&url).await;
