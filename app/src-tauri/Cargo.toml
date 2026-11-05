@@ -16,7 +16,8 @@ tokio = { workspace = true, features = ["io-util", "process"] }
 futures-util.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-tokio-tungstenite = "0.26"
+# native-tls — шифрование (wss://) через встроенный в Windows SChannel.
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 
 # Только Windows: встраивание видео в окно и привязка mpv к жизни приложения.
 [target.'cfg(windows)'.dependencies]
