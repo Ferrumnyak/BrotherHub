@@ -152,6 +152,18 @@ pub struct Session {
     player_paused: bool,
     loaded: Option<String>,
     last_seek: Option<Instant>,
+    /// Текущая скорость плеера: не-ведущий слегка ускоряется или
+    /// замедляется, чтобы незаметно догнать ведущего.
+    speed: f64,
+    /// Когда mpv сообщил об ошибке загрузки. Ошибку показываем, только если
+    /// за пару секунд так ничего и не загрузилось: при смене качества и у
+    /// некоторых сайтов mpv сообщает о промежуточных ошибках, а видео
+    /// потом всё равно открывается.
+    load_failed_at: Option<Instant>,
+    /// Качество ссылок: высота кадра (`None` — авто, до 1080p).
+    quality: Option<u32>,
+    /// После смены качества ждём загрузки, чтобы сбросить начальную позицию.
+    reloading: bool,
     /// Показывать сообщения чата поверх видео (когда панель чата скрыта).
     overlay_enabled: bool,
     overlay: VecDeque<(Instant, String, String)>,
@@ -172,6 +184,10 @@ impl Session {
             player_paused: true,
             loaded: None,
             last_seek: None,
+            speed: 1.0,
+            load_failed_at: None,
+            quality: None,
+            reloading: false,
             overlay_enabled: false,
             overlay: VecDeque::new(),
         }));
@@ -270,8 +286,9 @@ impl Session {
     async fn ensure_player(&mut self) -> Result<(), String> {
         if self.player.is_none() {
             let wid = self.app.state::<VideoHost>().wid();
-            let player = Player::spawn(self.player_events.clone(), wid).await?;
+            let player = Player::spawn(self.player_events.clone(), wid, self.quality).await?;
             self.player = Some(player);
+            self.speed = 1.0;
             self.player_paused = true;
             self.loaded = None;
             self.emit_status();
@@ -295,6 +312,10 @@ impl Session {
             }
             ServerMsg::HostChanged { host } => {
                 self.host = Some(*host);
+                // Ведущий — эталон времени, он всегда идёт с обычной скоростью.
+                if self.is_host() {
+                    self.reset_speed();
+                }
             }
             ServerMsg::Playback { playback, .. } => {
                 // Глава сам источник истины: свои же сообщения, вернувшиеся
@@ -359,12 +380,31 @@ impl Session {
         if recently_seeked {
             return;
         }
-        if let Some(position) = player.time_pos().await {
-            let expected = room.expected_position();
-            if (position - expected).abs() > TOLERANCE {
-                player.seek(expected);
-                self.last_seek = Some(Instant::now());
+        let Some(position) = player.time_pos().await else {
+            return;
+        };
+        let expected = room.expected_position();
+        // > 0 — мы впереди ведущего, < 0 — отстаём.
+        let drift = position - expected;
+
+        let (seek, speed) = catch_up(drift, room.state.paused, self.speed);
+        if seek {
+            player.seek(expected);
+            self.last_seek = Some(Instant::now());
+        }
+        if (speed - self.speed).abs() > f64::EPSILON {
+            player.set_speed(speed);
+            self.speed = speed;
+        }
+    }
+
+    /// Вернуть обычную скорость (новый файл, стали ведущим и т.п.).
+    fn reset_speed(&mut self) {
+        if (self.speed - 1.0).abs() > f64::EPSILON {
+            if let Some(player) = &self.player {
+                player.set_speed(1.0);
             }
+            self.speed = 1.0;
         }
     }
 
@@ -399,19 +439,32 @@ impl Session {
             }
             PlayerEvent::TracksChanged => self.emit_tracks().await,
             PlayerEvent::LoadFailed => {
-                let what = match self.loaded.as_deref() {
-                    Some(m) if is_url(m) => {
-                        "Не удалось открыть ссылку: сайт не поддерживается, \
-                         видео защищено от копирования или недоступно"
-                    }
-                    _ => "Не удалось открыть файл: формат не поддерживается или файл повреждён",
-                };
-                let _ = self.app.emit("player-error", what);
+                self.load_failed_at = Some(Instant::now());
             }
             PlayerEvent::Key(key) => {
                 let _ = self.app.emit("player-key", key);
             }
+            PlayerEvent::FileLoaded if self.reloading => {
+                self.load_failed_at = None;
+                self.reloading = false;
+                if let Some(player) = &self.player {
+                    player.clear_start();
+                }
+                if self.is_host() {
+                    // Пока ссылка перезагружалась, общий фильм шёл дальше —
+                    // догоняем комнату, а не откатываем всех назад.
+                    if let (Some(player), Some(room)) = (&self.player, &self.room) {
+                        player.seek(room.expected_position());
+                    }
+                    self.last_seek = Some(Instant::now());
+                } else {
+                    self.last_seek = None;
+                    self.apply().await;
+                }
+            }
             PlayerEvent::FileLoaded => {
+                self.load_failed_at = None;
+                self.reset_speed();
                 if !self.is_host() {
                     self.last_seek = None;
                     self.apply().await;
@@ -442,6 +495,13 @@ impl Session {
 
     async fn host_seeked(&mut self) {
         if !self.in_sync_media() {
+            return;
+        }
+        // Сразу после перезагрузки в другом качестве — это не перемотка ведущего.
+        if self
+            .last_seek
+            .is_some_and(|t| t.elapsed() < Duration::from_millis(1500))
+        {
             return;
         }
         let (Some(player), Some(room)) = (&self.player, &self.room) else {
@@ -497,13 +557,13 @@ impl Session {
             return;
         }
         // ASS-разметка: левый нижний угол, ник янтарным, текст белым.
-        // Цвета в ASS пишутся как BGR: e0a63a → 3AA6E0.
+        // Цвета в ASS пишутся как BGR: f2c879 → 79C8F2.
         let lines: Vec<String> = self
             .overlay
             .iter()
             .map(|(at, name, text)| {
                 format!(
-                    "{{\\alpha&H{:02X}&\\c&H3AA6E0&\\fnSegoe UI Semibold}}{}{{\\c&HFFFFFF&\\fnSegoe UI}}  {}",
+                    "{{\\alpha&H{:02X}&\\c&H79C8F2&\\fnSegoe UI Semibold}}{}{{\\c&HFFFFFF&\\fnSegoe UI}}  {}",
                     overlay_alpha(at.elapsed().as_secs_f64()),
                     ass_escape(name),
                     ass_escape(text)
@@ -518,7 +578,56 @@ impl Session {
         player.set_overlay(&ass);
     }
 
+    /// Сообщить об ошибке загрузки, если видео так и не открылось.
+    async fn report_load_failure(&mut self) {
+        let Some(at) = self.load_failed_at else {
+            return;
+        };
+        if at.elapsed() < Duration::from_millis(2500) {
+            return;
+        }
+        self.load_failed_at = None;
+        // Что-то всё-таки играет — значит, ошибка была промежуточной.
+        if let Some(player) = &self.player {
+            if player.get_f64("duration").await.is_some() {
+                return;
+            }
+        }
+        let what = match self.loaded.as_deref() {
+            Some(m) if is_url(m) => {
+                "Не удалось открыть ссылку: сайт не поддерживается, \
+                 видео защищено от копирования или недоступно"
+            }
+            _ => "Не удалось открыть файл: формат не поддерживается или файл повреждён",
+        };
+        let _ = self.app.emit("player-error", what);
+    }
+
     // ---------- Панель управления ----------
+
+    /// Выбрать качество ссылок. Если сейчас открыта ссылка — перезапустить
+    /// её в новом качестве с того же места.
+    pub async fn set_quality(&mut self, quality: Option<u32>) {
+        if self.quality == quality {
+            return;
+        }
+        self.quality = quality;
+        let Some(player) = &self.player else {
+            return;
+        };
+        if !self.loaded.as_deref().is_some_and(is_url) {
+            // Новое качество подхватится при следующей ссылке.
+            player.command(serde_json::json!([
+                "set_property",
+                "ytdl-format",
+                crate::player::ytdl_format(quality)
+            ]));
+            return;
+        }
+        let position = player.time_pos().await;
+        player.reload_with_quality(quality, position);
+        self.reloading = true;
+    }
 
     /// Отправить интерфейсу список дорожек.
     async fn emit_tracks(&self) {
@@ -564,7 +673,7 @@ impl Session {
             Control::TogglePause | Control::Seek { .. } | Control::SeekBy { .. }
         );
         if shared && !self.is_host() {
-            return Err("Паузой и перемоткой управляет глава лобби".into());
+            return Err("Паузой и перемоткой управляет ведущий".into());
         }
         match control {
             Control::TogglePause => player.set_pause(!self.player_paused),
@@ -580,6 +689,7 @@ impl Session {
 
     /// Раз в [`SYNC_INTERVAL`]: глава сообщает позицию, остальные сверяются.
     async fn tick(&mut self) {
+        self.report_load_failure().await;
         if !self.is_host() {
             self.apply().await;
             return;
@@ -604,7 +714,7 @@ impl Session {
         let host = self.is_host();
         let room_media = self.room_media();
         if !host && !room_media.as_deref().is_some_and(|m| !is_url(m)) {
-            return Err("Глава лобби ещё не выбрал файл".into());
+            return Err("Ведущий ещё не выбрал файл".into());
         }
 
         self.ensure_player().await?;
@@ -642,7 +752,7 @@ impl Session {
             // Не-глава может только заново открыть ссылку, которую смотрит комната
             // (например, если случайно закрыл окно плеера).
             if self.room_media().as_deref() != Some(url.as_str()) {
-                return Err("Выбирать, что смотрим, может только глава лобби".into());
+                return Err("Выбирать, что смотрим, может только ведущий".into());
             }
             self.ensure_player().await?;
             if let Some(player) = &self.player {
@@ -671,6 +781,39 @@ impl Session {
         self.emit_status();
         Ok(())
     }
+}
+
+/// Расхождение, после которого догоняем перемоткой, а не скоростью.
+const SEEK_DRIFT: f64 = 3.0;
+/// Расхождение, с которого начинаем подгонять скорость.
+const NUDGE_START: f64 = 0.25;
+/// Расхождение, при котором возвращаем обычную скорость.
+const NUDGE_DONE: f64 = 0.06;
+/// На сколько ускоряемся/замедляемся: 5 % на слух почти незаметно
+/// (mpv сохраняет высоту звука).
+const NUDGE: f64 = 0.05;
+
+/// Как догнать ведущего: `(перемотать?, скорость)`.
+///
+/// Большое расхождение — перемотка. Небольшое — плавно: чуть быстрее, если
+/// отстаём, чуть медленнее, если убежали вперёд, пока не сравняемся.
+fn catch_up(drift: f64, paused: bool, current_speed: f64) -> (bool, f64) {
+    if paused {
+        return (drift.abs() > TOLERANCE, 1.0);
+    }
+    if drift.abs() > SEEK_DRIFT {
+        return (true, 1.0);
+    }
+    let speed = if drift < -NUDGE_START {
+        1.0 + NUDGE
+    } else if drift > NUDGE_START {
+        1.0 - NUDGE
+    } else if drift.abs() < NUDGE_DONE {
+        1.0
+    } else {
+        current_speed // почти догнали — продолжаем как шли
+    };
+    (false, speed)
 }
 
 /// Прозрачность сообщения по его возрасту: 0x00 — видно, 0xFF — нет.
@@ -733,4 +876,57 @@ pub async fn player_control(
     control: Control,
 ) -> Result<(), String> {
     session.lock().await.control(control)
+}
+
+#[tauri::command]
+pub async fn set_quality(
+    session: State<'_, SharedSession>,
+    height: Option<u32>,
+) -> Result<(), String> {
+    session.lock().await.set_quality(height).await;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_lag_is_caught_up_by_speed_not_seek() {
+        assert_eq!(catch_up(-1.0, false, 1.0), (false, 1.0 + NUDGE));
+        assert_eq!(catch_up(1.0, false, 1.0), (false, 1.0 - NUDGE));
+    }
+
+    #[test]
+    fn big_lag_is_fixed_by_seek() {
+        assert_eq!(catch_up(-10.0, false, 1.0 + NUDGE), (true, 1.0));
+    }
+
+    #[test]
+    fn speed_returns_to_normal_when_in_sync() {
+        assert_eq!(catch_up(0.01, false, 1.0 + NUDGE), (false, 1.0));
+        // Между «начать» и «закончить» — продолжаем догонять.
+        assert_eq!(catch_up(-0.1, false, 1.0 + NUDGE), (false, 1.0 + NUDGE));
+        assert_eq!(catch_up(-0.1, false, 1.0), (false, 1.0));
+    }
+
+    #[test]
+    fn on_pause_only_seek_when_far() {
+        assert_eq!(catch_up(-0.3, true, 1.0 + NUDGE), (false, 1.0));
+        assert_eq!(catch_up(-2.0, true, 1.0), (true, 1.0));
+    }
+
+    #[test]
+    fn chat_overlay_fades_in_and_out() {
+        assert_eq!(overlay_alpha(0.0), 0xFF);
+        assert_eq!(overlay_alpha(2.0), 0x00);
+        let ttl = OVERLAY_TTL.as_secs_f64();
+        assert_eq!(overlay_alpha(ttl), 0xFF);
+        assert!(overlay_alpha(ttl - 0.5) > 0x00);
+    }
+
+    #[test]
+    fn ass_markup_is_escaped() {
+        assert_eq!(ass_escape("{\\b1}жирный\nтекст"), "(/b1)жирный текст");
+    }
 }

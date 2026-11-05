@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod net;
+mod overlay;
 mod player;
 mod ptt;
 mod session;
@@ -36,7 +37,12 @@ fn main() {
             session::set_chat_overlay,
             session::player_info,
             session::player_control,
+            session::set_quality,
             video::set_video_rect,
+            video::watch_cursor,
+            overlay::overlay_place,
+            overlay::overlay_interactive,
+            overlay::overlay_close,
             ptt::ptt_set_key,
             ptt::ptt_capture
         ])

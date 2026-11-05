@@ -85,6 +85,7 @@ impl Player {
     pub async fn spawn(
         events: mpsc::UnboundedSender<PlayerEventMsg>,
         wid: Option<isize>,
+        quality: Option<u32>,
     ) -> Result<Self, String> {
         let id = NEXT_PLAYER_ID.fetch_add(1, Ordering::Relaxed);
         let ipc = ipc_path(id);
@@ -98,7 +99,13 @@ impl Player {
             "--pause=yes",
             "--title=BrotherWatch",
             "--no-terminal",
-            "--ytdl-format=bestvideo[height<=?1080]+bestaudio/best",
+            // Декодировать видео на видеокарте, если она умеет (4K и HEVC
+            // без нагрузки на процессор); иначе — процессором, как раньше.
+            "--hwdec=auto-safe",
+            // Запас для онлайн-видео, чтобы не подтормаживало.
+            "--cache=yes",
+            "--demuxer-max-bytes=150MiB",
+            "--demuxer-readahead-secs=30",
             // Встроенный mpv по умолчанию не принимает клавиатуру — включаем.
             "--input-vo-keyboard=yes",
             // Управление — панелью приложения, свою панель mpv прячем.
@@ -120,6 +127,7 @@ impl Player {
         ])
         .arg(format!("--input-ipc-server={ipc}"))
         .kill_on_drop(true);
+        cmd.arg(format!("--ytdl-format={}", ytdl_format(quality)));
         if let Some(wid) = wid {
             cmd.arg(format!("--wid={wid}"));
         }
@@ -286,6 +294,11 @@ impl Player {
         self.command(json!(["sub-add", path, "select"]));
     }
 
+    /// Скорость воспроизведения (1.0 — обычная).
+    pub fn set_speed(&self, speed: f64) {
+        self.command(json!(["set_property", "speed", speed]));
+    }
+
     pub fn set_volume(&self, volume: f64) {
         self.command(json!(["set_property", "volume", volume.clamp(0.0, 130.0)]));
     }
@@ -293,6 +306,21 @@ impl Player {
     /// Прочитать числовое свойство.
     pub async fn get_f64(&self, property: &str) -> Option<f64> {
         self.get(property).await.and_then(|v| v.as_f64())
+    }
+
+    /// Сменить качество ссылки и перезапустить её с позиции `resume_at`.
+    pub fn reload_with_quality(&self, quality: Option<u32>, resume_at: Option<f64>) {
+        self.command(json!(["set_property", "ytdl-format", ytdl_format(quality)]));
+        if let Some(at) = resume_at {
+            // `start` действует на следующую загрузку; после неё сбрасываем.
+            self.command(json!(["set_property", "start", format!("{at:.2}")]));
+        }
+        self.command(json!(["playlist-play-index", "current"]));
+    }
+
+    /// Убрать начальную позицию, заданную для перезагрузки.
+    pub fn clear_start(&self) {
+        self.command(json!(["set_property", "start", "none"]));
     }
 
     /// Текущая позиция в секундах (если файл загружен).
@@ -404,6 +432,13 @@ fn parse_key(v: &Value) -> Option<PlayerKey> {
     }
 }
 
+/// Формат для yt-dlp: лучшее видео не выше `quality` строк (по умолчанию —
+/// 1080p) плюс лучший звук; если такого нет — лучшее, что есть.
+pub fn ytdl_format(quality: Option<u32>) -> String {
+    let h = quality.unwrap_or(1080);
+    format!("bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best")
+}
+
 /// Первый существующий файл из списка.
 fn first_existing(candidates: Vec<PathBuf>) -> Option<String> {
     candidates
@@ -511,4 +546,29 @@ async fn open_ipc(path: &str) -> std::io::Result<tokio::net::windows::named_pipe
 #[cfg(unix)]
 async fn open_ipc(path: &str) -> std::io::Result<tokio::net::UnixStream> {
     tokio::net::UnixStream::connect(path).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quality_format() {
+        assert_eq!(
+            ytdl_format(None),
+            "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
+        );
+        assert!(ytdl_format(Some(480)).contains("height<=?480"));
+    }
+
+    #[test]
+    fn keys_from_mpv() {
+        let v: Value =
+            serde_json::from_str(r#"{"event":"client-message","args":["bw","toggle-chat"]}"#)
+                .unwrap();
+        assert!(matches!(parse_key(&v), Some(PlayerKey::ToggleChat)));
+        let other: Value =
+            serde_json::from_str(r#"{"event":"client-message","args":["x","y"]}"#).unwrap();
+        assert!(parse_key(&other).is_none());
+    }
 }

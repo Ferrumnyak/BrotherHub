@@ -113,6 +113,64 @@ fn place(hwnd: isize, rect: Option<Rect>) {
 #[cfg(not(windows))]
 fn place(_hwnd: isize, _rect: Option<Rect>) {}
 
+/// Следить за движением мыши (для автоскрытия панели в полном экране).
+///
+/// Над видео мышь «принадлежит» окну mpv, и интерфейс её движения не видит,
+/// поэтому положение курсора проверяется напрямую у Windows. При движении
+/// приходит событие `cursor-moved`.
+#[tauri::command]
+pub fn watch_cursor(app: AppHandle, enabled: bool) {
+    cursor::watch(app, enabled);
+}
+
+#[cfg(windows)]
+mod cursor {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        OnceLock,
+    };
+    use std::time::Duration;
+
+    use tauri::{AppHandle, Emitter};
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+    static STARTED: OnceLock<()> = OnceLock::new();
+
+    pub fn watch(app: AppHandle, enabled: bool) {
+        WATCHING.store(enabled, Ordering::SeqCst);
+        STARTED.get_or_init(|| {
+            std::thread::spawn(move || {
+                let mut last = (i32::MIN, i32::MIN);
+                loop {
+                    std::thread::sleep(Duration::from_millis(120));
+                    if !WATCHING.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    let mut p = POINT { x: 0, y: 0 };
+                    if unsafe { GetCursorPos(&mut p) } == 0 {
+                        continue;
+                    }
+                    if (p.x, p.y) != last {
+                        if last.0 != i32::MIN {
+                            let _ = app.emit("cursor-moved", ());
+                        }
+                        last = (p.x, p.y);
+                    }
+                }
+            });
+        });
+    }
+}
+
+#[cfg(not(windows))]
+mod cursor {
+    use tauri::AppHandle;
+
+    pub fn watch(_app: AppHandle, _enabled: bool) {}
+}
+
 /// Интерфейс сообщает, где показать видео (`None` — спрятать).
 #[tauri::command]
 pub fn set_video_rect(

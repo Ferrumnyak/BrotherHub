@@ -1,6 +1,6 @@
-import { FormEvent, ReactElement, useEffect, useRef, useState } from "react";
+import { CSSProperties, FormEvent, ReactElement, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import {
@@ -21,9 +21,75 @@ import { keyName, listMicrophones, VoiceClient, type VoiceStatus } from "./voice
 
 type VoiceMode = "open" | "ptt";
 
+/** Значок у события в чате. */
+type EventIcon = "enter" | "leave" | "play" | "pause" | "seek" | "media" | "host";
+
 type ChatLine =
   | { key: number; kind: "chat"; name: string; text: string; mine: boolean }
-  | { key: number; kind: "system"; text: string };
+  | { key: number; kind: "system"; text: string; icon: EventIcon };
+
+// Цвета кружков участников и их имён в чате — по нику, чтобы у каждого был свой.
+const SEAT_COLORS = ["#6E4A3A", "#3F5260", "#4E5A3C", "#5B3F5C", "#6A5130", "#3E4E4A", "#5E3A40", "#46466A"];
+const NAME_COLORS = ["#E0A07C", "#8FB3C8", "#B7C48E", "#C79AC8", "#E3B871", "#93BDB4", "#D98E96", "#A9A9E0"];
+
+function colorIndex(name: string): number {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)!) >>> 0;
+  return h % SEAT_COLORS.length;
+}
+
+function initial(name: string): string {
+  return [...name.trim()][0]?.toUpperCase() ?? "?";
+}
+
+/** «1 человек», «2 человека», «5 человек». */
+function people(n: number): string {
+  const d = n % 10;
+  const dd = n % 100;
+  const word = d >= 2 && d <= 4 && (dd < 12 || dd > 14) ? "человека" : "человек";
+  return `${n} ${word}`;
+}
+
+/** Высота панели плеера поверх видео в полном экране, CSS-пиксели. */
+const OVERLAY_HEIGHT = 150;
+
+/** Что нужно панели плеера поверх видео (событие `overlay-state`). */
+interface OverlayState {
+  canControl: boolean;
+  controlHint: string;
+  title: string;
+  status: string;
+  tracks: Track[];
+  quality: string;
+  qualityEnabled: boolean;
+}
+
+function hostNameOf(members: Member[], host: MemberId | null): string | undefined {
+  return members.find((m) => m.id === host)?.name;
+}
+
+/** Подпись под названием фильма в панели плеера. */
+function playbackStatus(
+  playback: PlaybackState | null,
+  isHost: boolean,
+  hostName: string | undefined,
+): string {
+  if (!playback?.media) return isHost ? "Выбери, что смотрим" : "Ждём ведущего";
+  if (playback.paused) return isHost ? "На паузе" : `${hostName ?? "Ведущий"} поставил на паузу`;
+  return "Смотрите вместе";
+}
+
+/** Ссылку показываем коротко: сайт и начало пути. */
+function mediaTitle(media: string): string {
+  if (!isUrl(media)) return media;
+  try {
+    const u = new URL(media);
+    const path = u.pathname.length > 24 ? `${u.pathname.slice(0, 24)}…` : u.pathname;
+    return `${u.hostname.replace(/^www\./, "")}${path === "/" ? "" : path}`;
+  } catch {
+    return media;
+  }
+}
 
 // При сборке установщика можно вшить адрес сервера друзей:
 //   $env:VITE_DEFAULT_SERVER = "wss://example.com"; npm run bundle
@@ -79,6 +145,17 @@ async function pickSubtitleFile(): Promise<string | null> {
   return typeof path === "string" ? path : null;
 }
 
+/** Качество ссылок: высота кадра; пусто — авто (до 1080p). */
+const QUALITIES: Array<{ value: string; label: string }> = [
+  { value: "", label: "авто" },
+  { value: "2160", label: "4K" },
+  { value: "1440", label: "1440p" },
+  { value: "1080", label: "1080p" },
+  { value: "720", label: "720p" },
+  { value: "480", label: "480p" },
+  { value: "360", label: "360p" },
+];
+
 const CHANNEL_NAMES: Record<number, string> = { 1: "1.0", 2: "2.0", 6: "5.1", 8: "7.1" };
 
 /** «Дубляж · RU · AC3 5.1 · внешняя» */
@@ -113,6 +190,8 @@ export default function App() {
   const [room, setRoom] = useState(() => load("room", "brotherhood"));
   const [password, setPassword] = useState(() => load("password", ""));
   const [connecting, setConnecting] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [showServer, setShowServer] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [joinedRoom, setJoinedRoom] = useState<string | null>(null);
@@ -129,6 +208,10 @@ export default function App() {
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [memberMenu, setMemberMenu] = useState<MemberId | null>(null);
+  const [quality, setQuality] = useState(() => load("quality", ""));
+  const [controlsHidden, setControlsHidden] = useState(false);
+  const overControlsRef = useRef(false);
 
   // Голос
   const [voiceAccess, setVoiceAccess] = useState<VoiceAccess | null>(null);
@@ -168,6 +251,8 @@ export default function App() {
     });
   }
   const voice = voiceRef.current;
+  const voiceStatusRef = useRef(voiceStatus);
+  voiceStatusRef.current = voiceStatus;
 
   const meRef = useRef<MemberId | null>(null);
   const membersRef = useRef<Member[]>([]);
@@ -183,8 +268,8 @@ export default function App() {
   // Подписка на события от Rust-части приложения.
   useEffect(() => {
     const nextKey = () => ++keyRef.current;
-    const system = (text: string) =>
-      setLines((l) => [...l, { key: nextKey(), kind: "system", text }]);
+    const system = (text: string, icon: EventIcon) =>
+      setLines((l) => [...l, { key: nextKey(), kind: "system", text, icon }]);
     const nameOf = (id: MemberId) =>
       membersRef.current.find((m) => m.id === id)?.name ?? "кто-то";
 
@@ -197,32 +282,43 @@ export default function App() {
           setJoinedRoom(msg.room);
           setMembers(msg.members);
           setPlayback(msg.playback);
+          setReconnecting(false);
+          if (msg.resumed) {
+            // Вернулись на своё место: чат и голос оставляем как были.
+            system("Связь восстановлена", "enter");
+            if (voiceStatusRef.current !== "connected") setVoiceAccess(msg.voice);
+            break;
+          }
           setVoiceAccess(msg.voice);
           setLines([]);
-          system(`Ты в комнате «${msg.room}»`);
-          if (msg.host === msg.you) system("👑 Ты глава лобби");
+          system(`Ты в зале «${msg.room}»`, "enter");
+          if (msg.host === msg.you) system("Ты ведёшь просмотр: выбирай, что смотрим", "host");
           break;
         }
+        case "member_status":
+          setMembers((m) => m.map((x) => (x.id === msg.id ? { ...x, online: msg.online } : x)));
+          break;
         case "member_joined":
           setMembers((m) => [...m, msg.member]);
-          system(`${msg.member.name} зашёл`);
+          system(`${msg.member.name} зашёл в зал`, "enter");
           break;
         case "member_left":
-          system(`${nameOf(msg.id)} ${msg.kicked ? "исключён из комнаты" : "вышел"}`);
+          system(`${nameOf(msg.id)} ${msg.kicked ? "исключён из зала" : "вышел"}`, "leave");
           setMembers((m) => m.filter((x) => x.id !== msg.id));
           break;
         case "kicked":
           invoke("disconnect");
           setVoiceAccess(null);
           setJoinedRoom(null);
-          setError(`Тебя исключил из комнаты ${msg.by}`);
+          setError(`${msg.by} исключил тебя из зала`);
           break;
         case "host_changed":
           setHost(msg.host);
           system(
             msg.host === meRef.current
-              ? "👑 Теперь ты глава лобби"
-              : `👑 Теперь глава лобби — ${nameOf(msg.host)}`,
+              ? "Теперь просмотр ведёшь ты"
+              : `Теперь просмотр ведёт ${nameOf(msg.host)}`,
+            "host",
           );
           break;
         case "chat":
@@ -243,16 +339,16 @@ export default function App() {
           const by = msg.by ?? "";
           switch (msg.action) {
             case "set_media":
-              system(`${by} включил «${msg.playback.media ?? ""}»`);
+              system(`${by} включил «${mediaTitle(msg.playback.media ?? "")}»`, "media");
               break;
             case "play":
-              system(`▶ ${by} запустил (${at})`);
+              system(`${by} запустил на ${at}`, "play");
               break;
             case "pause":
-              system(`⏸ ${by} поставил на паузу (${at})`);
+              system(`${by} поставил на паузу на ${at}`, "pause");
               break;
             case "seek":
-              system(`⏩ ${by} перемотал на ${at}`);
+              system(`${by} перемотал на ${at}`, "seek");
               break;
           }
           break;
@@ -278,10 +374,12 @@ export default function App() {
     }).then(keep);
     listen<Track[]>("player-tracks", (e) => setTracks(e.payload)).then(keep);
     listen<PlayerKey>("player-key", (e) => onKeyRef.current(e.payload)).then(keep);
+    listen("reconnecting", () => setReconnecting(true)).then(keep);
     listen("disconnected", () => {
+      setReconnecting(false);
       setVoiceAccess(null);
       setJoinedRoom(null);
-      setError("Соединение с сервером потеряно");
+      setError("Не получилось восстановить связь с сервером. Проверь интернет и зайди снова");
     }).then(keep);
 
     invoke<PlayerStatus>("player_status").then((s) => active && setPlayer(s));
@@ -353,13 +451,13 @@ export default function App() {
   }
 
   async function handleTransfer(m: Member) {
-    if (await ask(`Передать роль главы лобби игроку ${m.name}?`, { title: "BrotherWatch" })) {
+    if (await ask(`Передать ${m.name} управление просмотром?`, { title: "BrotherWatch" })) {
       await run(() => send({ type: "transfer_host", to: m.id }));
     }
   }
 
   async function handleKick(m: Member) {
-    if (await ask(`Исключить ${m.name} из комнаты?`, { title: "BrotherWatch", kind: "warning" })) {
+    if (await ask(`Исключить ${m.name} из зала?`, { title: "BrotherWatch", kind: "warning" })) {
       await run(() => send({ type: "kick", id: m.id }));
     }
   }
@@ -412,6 +510,63 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [joinedRoom]);
+
+  // В полном экране панель плеера прячется через 3 секунды без движения мыши.
+  useEffect(() => {
+    if (!fullscreen) {
+      setControlsHidden(false);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const show = (visible: boolean) => {
+      setControlsHidden(!visible);
+      emit("overlay-visible", visible).catch(() => {});
+      invoke("overlay_interactive", { interactive: visible }).catch(() => {});
+    };
+    const poke = () => {
+      show(true);
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!overControlsRef.current) show(false);
+      }, 3000);
+    };
+    poke();
+    invoke("watch_cursor", { enabled: true }).catch(() => {});
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    listen("cursor-moved", poke).then((u) => (active ? (unlisten = u) : u()));
+    window.addEventListener("mousemove", poke);
+    window.addEventListener("keydown", poke);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      unlisten?.();
+      invoke("overlay_close").catch(() => {});
+      invoke("watch_cursor", { enabled: false }).catch(() => {});
+      window.removeEventListener("mousemove", poke);
+      window.removeEventListener("keydown", poke);
+    };
+  }, [fullscreen]);
+
+  // Качество ссылок: запоминается и применяется сразу, даже к открытому видео.
+  useEffect(() => {
+    invoke("set_quality", { height: quality ? Number(quality) : null }).catch(() => {});
+  }, [quality]);
+
+  function changeQuality(value: string) {
+    setQuality(value);
+    save("quality", value);
+  }
+
+  // Меню действий с участником закрывается кликом мимо него.
+  useEffect(() => {
+    if (memberMenu === null) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".seat-menu")) setMemberMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [memberMenu]);
 
   // ----- Голос -----
 
@@ -524,6 +679,18 @@ export default function App() {
           height: Math.round(r.height * k),
         },
       }).catch(() => {});
+      // В полном экране панель плеера — отдельное окно поверх низа видео.
+      if (fullscreen) {
+        const h = Math.min(OVERLAY_HEIGHT, r.height);
+        invoke("overlay_place", {
+          rect: {
+            x: Math.round(r.left * k),
+            y: Math.round((r.bottom - h) * k),
+            width: Math.round(r.width * k),
+            height: Math.round(h * k),
+          },
+        }).catch((err) => setError(String(err)));
+      }
     };
     update();
     if (!show || !el) return;
@@ -537,46 +704,111 @@ export default function App() {
     };
   }, [joinedRoom, player.running, chatOpen, fullscreen]);
 
+  // ----- Связь с панелью поверх видео -----
+
+  const overlayState: OverlayState = {
+    canControl: isHost && player.running && player.loaded === (playback?.media ?? null),
+    controlHint: isHost ? "Сначала открой видео" : `Управляет ${hostNameOf(members, host) ?? "ведущий"}`,
+    title: playback?.media ? mediaTitle(playback.media) : "Ничего не выбрано",
+    status: playbackStatus(playback, isHost, hostNameOf(members, host)),
+    tracks,
+    quality,
+    qualityEnabled: playback?.media != null && isUrl(playback.media),
+  };
+  const overlayJson = JSON.stringify(overlayState);
+  const overlayJsonRef = useRef(overlayJson);
+  overlayJsonRef.current = overlayJson;
+
+  useEffect(() => {
+    if (fullscreen) emit("overlay-state", JSON.parse(overlayJson)).catch(() => {});
+  }, [overlayJson, fullscreen]);
+
+  useEffect(() => {
+    let active = true;
+    const unlisteners: Array<() => void> = [];
+    const keep = (u: () => void) => (active ? unlisteners.push(u) : u());
+    listen("overlay-ready", () => {
+      emit("overlay-state", JSON.parse(overlayJsonRef.current)).catch(() => {});
+    }).then(keep);
+    listen<boolean>("overlay-hover", (e) => (overControlsRef.current = e.payload)).then(keep);
+    listen<PlayerKey>("overlay-key", (e) => onKeyRef.current(e.payload)).then(keep);
+    listen<string>("overlay-quality", (e) => {
+      setQuality(e.payload);
+      save("quality", e.payload);
+    }).then(keep);
+    listen<string>("overlay-error", (e) => setError(e.payload)).then(keep);
+    return () => {
+      active = false;
+      unlisteners.forEach((u) => u());
+    };
+  }, []);
+
   if (!joinedRoom) {
     return (
       <main className="login">
-        <form className="card" onSubmit={handleConnect}>
-          <h1>BrotherWatch</h1>
-          <p className="muted">Смотрим вместе</p>
-          <label>
-            Сервер
-            <input value={server} onChange={(e) => setServer(e.target.value)} required />
-          </label>
-          <label>
-            Комната
-            <input value={room} onChange={(e) => setRoom(e.target.value)} maxLength={32} required />
-          </label>
-          <label>
-            Пароль сервера
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Если сервер с паролем"
-              autoComplete="off"
-            />
-          </label>
-          <label>
-            Ник
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={32}
-              placeholder="Как тебя называть"
-              required
-              autoFocus
-            />
-          </label>
-          <button type="submit" disabled={connecting}>
-            {connecting ? "Подключаюсь…" : "Войти"}
-          </button>
-          {error && <p className="error">{error}</p>}
-        </form>
+        <div className="login-art" aria-hidden="true">
+          <div className="lamp" />
+          <div className="screen" />
+          <div className="seats">
+            {SEAT_COLORS.slice(0, 6).map((c, i) => (
+              <span key={i} style={{ background: i === 2 || i === 3 ? c : undefined }} />
+            ))}
+          </div>
+          <div className="login-brand">
+            <span className="wordmark">BrotherWatch</span>
+            <p>Кинозал для своих: один фильм, одна пауза, общий голосовой чат.</p>
+          </div>
+        </div>
+
+        <div className="login-side">
+          <form className="login-form" onSubmit={handleConnect}>
+            <h1>Войти в зал</h1>
+            <label>
+              Как тебя зовут
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={32}
+                required
+                autoFocus
+              />
+            </label>
+            <label>
+              Комната
+              <input value={room} onChange={(e) => setRoom(e.target.value)} maxLength={32} required />
+            </label>
+            <button type="submit" className="primary" disabled={connecting}>
+              {connecting ? "Подключаюсь…" : "Войти"}
+            </button>
+            {error && <p className="error">{error}</p>}
+
+            <details className="server-settings" open={showServer}>
+              <summary
+                onClick={(e) => {
+                  e.preventDefault();
+                  setShowServer((s) => !s);
+                }}
+              >
+                <Icon name="chevron" size={14} />
+                Сервер и пароль
+              </summary>
+              <label>
+                Адрес сервера
+                <input value={server} onChange={(e) => setServer(e.target.value)} required />
+              </label>
+              <label>
+                Пароль сервера
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Если сервер с паролем"
+                  autoComplete="off"
+                />
+              </label>
+            </details>
+          </form>
+        </div>
       </main>
     );
   }
@@ -586,359 +818,511 @@ export default function App() {
   const needsFile = !isHost && media !== null && !isUrl(media) && player.loaded !== media;
   const needsReopen = !isHost && media !== null && player.loaded === media && !player.running;
 
-  const roomClass = ["room", fullscreen && "fullscreen", !chatOpen && "chat-hidden"]
+  const others = members.length - 1;
+  const roomStatus = isHost
+    ? others > 0
+      ? `Просмотр ведёшь ты, в зале ещё ${people(others)}`
+      : "Просмотр ведёшь ты, в зале пока никого"
+    : `${hostName ?? "Кто-то"} ведёт просмотр, в зале ${people(members.length)}`;
+
+  const transmitting =
+    voiceStatus === "connected" && !deafened && (voiceMode === "open" ? micOn : pttPressed);
+  const voiceTitle =
+    voiceStatus === "connected"
+      ? "Голос подключён"
+      : voiceStatus === "connecting"
+        ? "Подключаюсь к голосу…"
+        : voiceAccess
+          ? "Голос отключён"
+          : "Голос на сервере не настроен";
+  const voiceHint = voiceError
+    ? voiceError
+    : voiceStatus !== "connected"
+      ? ""
+      : deafened
+        ? "Звук выключен"
+        : voiceMode === "ptt"
+          ? pttKey !== null
+            ? `Нажми и говори: ${keyName(pttKey)}`
+            : "Назначь кнопку в настройках"
+          : micOn
+            ? "Микрофон включён"
+            : "Микрофон выключен";
+
+  const roomClass = [
+    "room",
+    fullscreen && "fullscreen",
+    !chatOpen && "chat-hidden",
+    fullscreen && controlsHidden && "controls-hidden",
+  ]
     .filter(Boolean)
     .join(" ");
 
   return (
     <main className={roomClass}>
-      {!fullscreen && (
-        <header>
-          <div className="title">
-            <span className="brand">BrotherWatch</span>
-            <span className="muted">/</span>
-            <span>{joinedRoom}</span>
-          </div>
-          <div className="actions">
-            <button className="secondary" onClick={() => setChatOpen((o) => !o)} title="Tab">
-              <Icon name="panel" />
-              {chatOpen ? "Скрыть чат" : "Показать чат"}
-            </button>
-            <button className="secondary" onClick={() => applyFullscreen(true)} title="F">
-              <Icon name="fullscreen" />
-              Полный экран
-            </button>
-            <button className="secondary" onClick={handleLeave}>
-              Выйти
-            </button>
-          </div>
-        </header>
-      )}
-
-      <div className="body">
-        <section className="stage">
-          {!fullscreen && isHost && (
-            <div className="toolbar">
-              <button onClick={handleOpenFile}>
-                <Icon name="folder" />
-                Открыть файл
-              </button>
-              <form onSubmit={handleOpenUrl}>
-                <input
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  placeholder="Ссылка: YouTube, VK Видео, Rutube…"
-                  aria-label="Ссылка на видео"
-                />
-                <button type="submit" className="secondary">
-                  Открыть
-                </button>
-              </form>
+      <section className="stage">
+        {!fullscreen && (
+          <header className="stage-header">
+            <div className="room-title">
+              <h1>{joinedRoom}</h1>
+              <p>{roomStatus}</p>
             </div>
-          )}
-          {!fullscreen && needsFile && (
-            <div className="toolbar notice">
-              <span>
-                {hostName ?? "Глава лобби"} включил «{media}». Открой у себя этот же фильм или серию.
-              </span>
-              <button onClick={handleOpenFile}>
-                <Icon name="folder" />
-                Выбрать файл
+            <div className="header-actions">
+              <button className="ghost" onClick={() => setChatOpen((o) => !o)} title="Tab">
+                <Icon name="panel" size={17} />
+                {chatOpen ? "Скрыть чат" : "Показать чат"}
+              </button>
+              <button className="ghost" onClick={handleLeave}>
+                Выйти из зала
               </button>
             </div>
-          )}
-          {!fullscreen && needsReopen && (
-            <div className="toolbar notice">
-              <span>Плеер закрыт.</span>
-              <button
-                onClick={() =>
-                  media && isUrl(media) ? run(() => invoke("open_url", { url: media })) : handleOpenFile()
-                }
-              >
-                Открыть снова
-              </button>
-            </div>
-          )}
+          </header>
+        )}
 
-          <div className="video" ref={videoRef}>
-            <div className="video-placeholder">
-              <Icon name="screen" size={56} />
-              <span>
-                {media
-                  ? player.running
-                    ? "Загрузка видео…"
-                    : `Сейчас смотрят «${media}»`
-                  : isHost
-                    ? "Выбери, что смотрим: файл или ссылку"
-                    : `Ждём, пока ${hostName ?? "глава лобби"} выберет, что смотрим`}
-              </span>
-            </div>
+        {reconnecting && (
+          <div className="notice reconnecting" role="status">
+            <span>Связь с сервером пропала. Переподключаюсь — видео пока идёт дальше.</span>
           </div>
+        )}
+        {!fullscreen && isHost && (
+          <form className="source-bar" onSubmit={handleOpenUrl}>
+            <label className="source-input">
+              <Icon name="link" size={18} />
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="Вставь ссылку на YouTube, VK Видео или Rutube"
+                aria-label="Ссылка на видео"
+              />
+              <button type="submit" className="quiet" disabled={!url.trim()}>
+                Открыть
+              </button>
+            </label>
+          </form>
+        )}
+        {!fullscreen && needsFile && (
+          <div className="notice">
+            <span>
+              {hostName ?? "Ведущий"} включил «{media}». Открой у себя этот же файл.
+            </span>
+            <button className="primary" onClick={handleOpenFile}>
+              Выбрать файл
+            </button>
+          </div>
+        )}
+        {!fullscreen && needsReopen && (
+          <div className="notice">
+            <span>Плеер закрыт.</span>
+            <button
+              className="primary"
+              onClick={() =>
+                media && isUrl(media) ? run(() => invoke("open_url", { url: media })) : handleOpenFile()
+              }
+            >
+              Открыть снова
+            </button>
+          </div>
+        )}
 
-          <PlayerControls
-            info={info}
-            canControl={isHost && player.running && player.loaded === media}
-            controlHint={isHost ? "Сначала открой файл или ссылку" : `Управляет ${hostName ?? "глава лобби"}`}
-            scrub={scrub}
-            onScrub={setScrub}
-            tracks={tracks}
-            onError={(err) => setError(err)}
-            fullscreen={fullscreen}
-            onFullscreen={() => applyFullscreen(!fullscreen)}
-          />
+        <div className="video" ref={videoRef}>
+          <div className="video-placeholder">
+            {media
+              ? player.running
+                ? "Загружаю видео…"
+                : `Сейчас смотрят «${mediaTitle(media)}»`
+              : isHost
+                ? "Вставь ссылку сверху — видео начнётся у всех одновременно"
+                : `Ждём, пока ${hostName ?? "ведущий"} выберет, что смотрим`}
+          </div>
+        </div>
 
-          {!fullscreen && (
-            <div className="statusbar">
-              <span className={media ? "dot on" : "dot"} />
-              <span className="media-name">{media ?? "Ничего не выбрано"}</span>
-              {media && (
-                <span className="muted nowrap">· {playback?.paused ? "на паузе" : "идёт"}</span>
-              )}
-              <span className="spacer" />
-              {error && !chatOpen ? (
-                <span className="error small" onClick={() => setError(null)} title="Скрыть">
-                  {error}
-                </span>
-              ) : (
-                <span className="muted small hints">
-                  Пробел — пауза · ← → — перемотка · F — полный экран · Tab — чат
-                </span>
-              )}
-            </div>
-          )}
-        </section>
+        <PlayerControls
+          onHover={(over) => (overControlsRef.current = over)}
+          info={info}
+          canControl={isHost && player.running && player.loaded === media}
+          controlHint={isHost ? "Сначала открой видео" : `Управляет ${hostName ?? "ведущий"}`}
+          title={media ? mediaTitle(media) : "Ничего не выбрано"}
+          status={playbackStatus(playback, isHost, hostName)}
+          scrub={scrub}
+          onScrub={setScrub}
+          tracks={tracks}
+          quality={quality}
+          qualityEnabled={media !== null && isUrl(media)}
+          onQuality={changeQuality}
+          onError={(err) => setError(err)}
+          fullscreen={fullscreen}
+          onFullscreen={() => applyFullscreen(!fullscreen)}
+        />
+        {error && !chatOpen && (
+          <p className="error stage-error" onClick={() => setError(null)} title="Скрыть">
+            {error}
+          </p>
+        )}
+      </section>
 
-        {chatOpen && (
-          <aside className="side">
-            <div className="members">
-              <h3>В комнате · {members.length}</h3>
-              <ul>
-                {members.map((m) => (
+      {chatOpen && (
+        <aside className="side">
+          <div className="hall">
+            <h2>В зале</h2>
+            <ul>
+              {members.map((m) => {
+                const speaking = speakers.has(String(m.id));
+                return (
                   <li key={m.id}>
-                    <span className="crown-slot">
-                      {m.id === host && <Icon name="crown" label="Глава лобби" accent />}
-                    </span>
                     <span
-                      className={speakers.has(String(m.id)) ? "member-name speaking" : "member-name"}
-                      title={speakers.has(String(m.id)) ? "Говорит" : undefined}
+                      className={["seat", speaking && "speaking", !m.online && "offline"]
+                        .filter(Boolean)
+                        .join(" ")}
+                      style={{ background: SEAT_COLORS[colorIndex(m.name)] }}
+                      title={speaking ? "Говорит" : undefined}
                     >
-                      {m.name}
+                      {initial(m.name)}
                     </span>
-                    {m.id === me && <span className="muted"> (ты)</span>}
+                    <span className="seat-name">
+                      <span>
+                        {m.name}
+                        {m.id === me && <span className="muted"> (ты)</span>}
+                      </span>
+                      {!m.online ? (
+                        <span className="seat-role">переподключается…</span>
+                      ) : (
+                        m.id === host && <span className="seat-role">ведёт просмотр</span>
+                      )}
+                    </span>
                     {isHost && m.id !== me && (
-                      <span className="member-actions">
+                      <span className="seat-menu">
                         <button
                           className="icon"
-                          aria-label={`Сделать ${m.name} главой лобби`}
-                          title="Сделать главой лобби"
-                          onClick={() => handleTransfer(m)}
+                          aria-label={`Действия с участником ${m.name}`}
+                          aria-expanded={memberMenu === m.id}
+                          onClick={() => setMemberMenu((id) => (id === m.id ? null : m.id))}
                         >
-                          <Icon name="crown" />
+                          <Icon name="more" />
                         </button>
-                        <button
-                          className="icon"
-                          aria-label={`Исключить ${m.name}`}
-                          title="Исключить"
-                          onClick={() => handleKick(m)}
-                        >
-                          <Icon name="close" />
-                        </button>
+                        {memberMenu === m.id && (
+                          <span className="menu" role="menu">
+                            <button
+                              role="menuitem"
+                              onClick={() => {
+                                setMemberMenu(null);
+                                handleTransfer(m);
+                              }}
+                            >
+                              Передать управление
+                            </button>
+                            <button
+                              role="menuitem"
+                              className="danger"
+                              onClick={() => {
+                                setMemberMenu(null);
+                                handleKick(m);
+                              }}
+                            >
+                              Исключить из зала
+                            </button>
+                          </span>
+                        )}
                       </span>
                     )}
                   </li>
-                ))}
-              </ul>
-            </div>
+                );
+              })}
+            </ul>
+          </div>
 
-            <div className="voice-bar">
-              {voiceMode === "open" ? (
-                <button
-                  className={micOn && !deafened ? "secondary" : "secondary off"}
-                  onClick={() => setMicOn((on) => !on)}
-                  disabled={voiceStatus !== "connected" || deafened}
-                  aria-label={micOn ? "Выключить микрофон" : "Включить микрофон"}
-                  title={micOn ? "Выключить микрофон" : "Включить микрофон"}
-                >
-                  <Icon name={micOn && !deafened ? "mic" : "mic-off"} />
-                  {micOn && !deafened ? "Микрофон" : "Микрофон выкл"}
-                </button>
-              ) : (
-                <button
-                  className={pttPressed && !deafened ? "secondary talking" : "secondary"}
-                  onClick={() => setVoiceSettings(true)}
-                  disabled={voiceStatus !== "connected"}
-                  title="Нажми и говори — настроить кнопку"
-                >
-                  <Icon name={pttPressed && !deafened ? "mic" : "mic-off"} />
-                  {pttKey !== null ? `Держи: ${keyName(pttKey)}` : "Назначь кнопку"}
-                </button>
-              )}
-              <button
-                className={deafened ? "secondary icon-only off" : "secondary icon-only"}
-                onClick={() => setDeafened((d) => !d)}
-                disabled={voiceStatus !== "connected"}
-                aria-label={deafened ? "Включить звук" : "Выключить звук от всех"}
-                title={deafened ? "Включить звук" : "Выключить звук от всех"}
-              >
-                <Icon name={deafened ? "headphones-off" : "headphones"} />
-              </button>
-              <button
-                className={voiceSettings ? "secondary icon-only active" : "secondary icon-only"}
-                onClick={() => setVoiceSettings((v) => !v)}
-                aria-label="Настройки голоса"
-                title="Настройки голоса"
-              >
-                <Icon name="settings" />
-              </button>
-            </div>
-            {(voiceStatus !== "connected" || voiceError) && (
-              <p className={voiceStatus === "error" || voiceError ? "voice-status error" : "voice-status muted"}>
-                {voiceError ??
-                  (voiceStatus === "connecting"
-                    ? "Подключаюсь к голосу…"
-                    : voiceAccess
-                      ? "Голос отключён"
-                      : "На сервере не настроена голосовая связь")}
-              </p>
-            )}
-
-            {voiceSettings ? (
-              <div className="voice-settings">
-                <h3>Голос</h3>
-                <fieldset>
-                  <legend>Режим микрофона</legend>
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="voice-mode"
-                      checked={voiceMode === "open"}
-                      onChange={() => changeVoiceMode("open")}
-                    />
-                    Всегда включён (кнопка для выключения)
-                  </label>
-                  <label className="radio">
-                    <input
-                      type="radio"
-                      name="voice-mode"
-                      checked={voiceMode === "ptt"}
-                      onChange={() => changeVoiceMode("ptt")}
-                    />
-                    Нажми и говори
-                  </label>
-                </fieldset>
-
-                {voiceMode === "ptt" && (
-                  <div className="setting">
-                    <span className="muted small">Кнопка (работает и в других окнах)</span>
-                    <button className="secondary" onClick={() => setCapturing((c) => !c)}>
-                      {capturing
-                        ? "Нажми клавишу или кнопку мыши… (отмена)"
-                        : pttKey !== null
-                          ? `${keyName(pttKey)} — изменить`
-                          : "Назначить кнопку"}
-                    </button>
-                  </div>
-                )}
-
-                <label className="setting">
-                  <span className="muted small">Микрофон</span>
-                  <select value={micDevice} onChange={(e) => changeMic(e.target.value)}>
-                    <option value="">По умолчанию (как в Windows)</option>
-                    {mics
-                      .filter((d) => d.deviceId && d.deviceId !== "default")
-                      .map((d) => (
-                        <option key={d.deviceId} value={d.deviceId}>
-                          {d.label || "Микрофон"}
-                        </option>
-                      ))}
-                  </select>
+          {voiceSettings ? (
+            <div className="voice-settings">
+              <h2>Голос</h2>
+              <fieldset>
+                <legend>Микрофон</legend>
+                <label className="radio">
+                  <input
+                    type="radio"
+                    name="voice-mode"
+                    checked={voiceMode === "open"}
+                    onChange={() => changeVoiceMode("open")}
+                  />
+                  Всегда включён, выключаю кнопкой
                 </label>
+                <label className="radio">
+                  <input
+                    type="radio"
+                    name="voice-mode"
+                    checked={voiceMode === "ptt"}
+                    onChange={() => changeVoiceMode("ptt")}
+                  />
+                  Нажми и говори
+                </label>
+              </fieldset>
 
-                {members.some((m) => m.id !== me) && (
-                  <div className="setting">
-                    <span className="muted small">Громкость участников</span>
-                    {members
-                      .filter((m) => m.id !== me)
-                      .map((m) => (
-                        <label key={m.id} className="volume-row">
-                          <span className="member-name">{m.name}</span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            value={volumes[m.name] ?? 1}
-                            onChange={(e) => changeVolume(m.name, Number(e.target.value))}
-                            aria-label={`Громкость ${m.name}`}
-                          />
-                          <span className="small muted pct">
-                            {Math.round((volumes[m.name] ?? 1) * 100)}%
-                          </span>
-                        </label>
-                      ))}
-                  </div>
-                )}
+              {voiceMode === "ptt" && (
+                <div className="setting">
+                  <span className="setting-label">Кнопка — работает и в других окнах</span>
+                  <button className="quiet" onClick={() => setCapturing((c) => !c)}>
+                    {capturing
+                      ? "Нажми клавишу или кнопку мыши…"
+                      : pttKey !== null
+                        ? `${keyName(pttKey)}, изменить`
+                        : "Назначить кнопку"}
+                  </button>
+                </div>
+              )}
 
-                <button onClick={() => setVoiceSettings(false)}>Готово</button>
-              </div>
-            ) : (
+              <label className="setting">
+                <span className="setting-label">Устройство</span>
+                <select value={micDevice} onChange={(e) => changeMic(e.target.value)}>
+                  <option value="">Как в Windows</option>
+                  {mics
+                    .filter((d) => d.deviceId && d.deviceId !== "default")
+                    .map((d) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label || "Микрофон"}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              {members.some((m) => m.id !== me) && (
+                <div className="setting">
+                  <span className="setting-label">Громкость друзей</span>
+                  {members
+                    .filter((m) => m.id !== me)
+                    .map((m) => (
+                      <label key={m.id} className="volume-row">
+                        <span className="seat-name">{m.name}</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={1}
+                          step={0.05}
+                          value={volumes[m.name] ?? 1}
+                          onChange={(e) => changeVolume(m.name, Number(e.target.value))}
+                          aria-label={`Громкость ${m.name}`}
+                        />
+                        <span className="pct">{Math.round((volumes[m.name] ?? 1) * 100)}%</span>
+                      </label>
+                    ))}
+                </div>
+              )}
+
+              <button className="primary" onClick={() => setVoiceSettings(false)}>
+                Готово
+              </button>
+            </div>
+          ) : (
             <div className="lines">
               {lines.map((l) =>
                 l.kind === "system" ? (
-                  <div key={l.key} className="line system">
-                    {l.text}
+                  <div key={l.key} className="event">
+                    <Icon name={EVENT_ICONS[l.icon]} size={12} />
+                    <span>{l.text}</span>
                   </div>
                 ) : (
-                  <div key={l.key} className={l.mine ? "line mine" : "line"}>
-                    <span className="author">{l.name}</span>
+                  <div key={l.key} className="message">
+                    <span className="author" style={{ color: NAME_COLORS[colorIndex(l.name)] }}>
+                      {l.name}
+                    </span>
                     <span>{l.text}</span>
                   </div>
                 ),
               )}
               <div ref={chatEndRef} />
             </div>
-            )}
-            {error && (
-              <p className="error" onClick={() => setError(null)} title="Скрыть">
-                {error}
-              </p>
-            )}
+          )}
+
+          {error && (
+            <p className="error side-error" onClick={() => setError(null)} title="Скрыть">
+              {error}
+            </p>
+          )}
+          {!voiceSettings && (
             <form className="composer" onSubmit={handleSend}>
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="Сообщение…"
+                disabled={reconnecting}
+                placeholder={reconnecting ? "Ждём связь с сервером…" : "Написать в зал"}
                 aria-label="Сообщение"
                 maxLength={2000}
               />
-              <button type="submit" aria-label="Отправить">
-                <Icon name="send" />
-              </button>
             </form>
-          </aside>
-        )}
-      </div>
+          )}
+
+          <div className="voice-dock">
+            <div className="voice-state">
+              <span className={voiceStatus === "connected" ? "voice-title on" : "voice-title"}>
+                {voiceTitle}
+              </span>
+              {voiceHint && (
+                <span className={voiceError ? "voice-hint error" : "voice-hint"}>{voiceHint}</span>
+              )}
+            </div>
+            {voiceMode === "open" && (
+              <button
+                className={micOn && !deafened ? "dock" : "dock off"}
+                onClick={() => setMicOn((on) => !on)}
+                disabled={voiceStatus !== "connected" || deafened}
+                aria-label={micOn ? "Выключить микрофон" : "Включить микрофон"}
+                title={micOn ? "Выключить микрофон" : "Включить микрофон"}
+              >
+                <Icon name={micOn && !deafened ? "mic" : "mic-off"} size={18} />
+              </button>
+            )}
+            {voiceMode === "ptt" && (
+              <span className={transmitting ? "dock talking" : "dock idle"} aria-hidden="true">
+                <Icon name={transmitting ? "mic" : "mic-off"} size={18} />
+              </span>
+            )}
+            <button
+              className={deafened ? "dock off" : "dock"}
+              onClick={() => setDeafened((d) => !d)}
+              disabled={voiceStatus !== "connected"}
+              aria-label={deafened ? "Включить звук" : "Выключить звук"}
+              title={deafened ? "Включить звук" : "Выключить звук от всех"}
+            >
+              <Icon name={deafened ? "headphones-off" : "headphones"} size={18} />
+            </button>
+            <button
+              className={voiceSettings ? "dock active" : "dock"}
+              onClick={() => setVoiceSettings((v) => !v)}
+              aria-label="Настройки голоса"
+              title="Настройки голоса"
+            >
+              <Icon name="sliders" size={18} />
+            </button>
+          </div>
+        </aside>
+      )}
     </main>
   );
 }
 
+/**
+ * Панель плеера в отдельном прозрачном окне поверх видео (полный экран).
+ * Состояние присылает главное окно, а управляет плеером панель напрямую.
+ */
+export function ControlsOverlay() {
+  const [state, setState] = useState<OverlayState | null>(null);
+  const [visible, setVisible] = useState(true);
+  const [info, setInfo] = useState<PlaybackInfo | null>(null);
+  const [scrub, setScrub] = useState<number | null>(null);
+
+  useEffect(() => {
+    document.documentElement.classList.add("overlay");
+    let active = true;
+    const unlisteners: Array<() => void> = [];
+    const keep = (u: () => void) => (active ? unlisteners.push(u) : u());
+    listen<OverlayState>("overlay-state", (e) => setState(e.payload)).then(keep);
+    listen<boolean>("overlay-visible", (e) => setVisible(e.payload)).then(keep);
+    emit("overlay-ready").catch(() => {});
+
+    const poll = () =>
+      invoke<PlaybackInfo>("player_info")
+        .then((i) => active && setInfo(i))
+        .catch(() => {});
+    poll();
+    const timer = setInterval(poll, 400);
+
+    // Клавиши, пока фокус в панели: пауза и перемотка — сами,
+    // полный экран и чат — главному окну.
+    const onKey = (e: KeyboardEvent) => {
+      const key: PlayerKey | null =
+        e.key === "Escape"
+          ? "exit-fullscreen"
+          : e.code === "KeyF"
+            ? "fullscreen"
+            : e.key === "Tab"
+              ? "toggle-chat"
+              : null;
+      if (key) {
+        e.preventDefault();
+        emit("overlay-key", key).catch(() => {});
+      } else if (e.code === "Space" && (e.target as HTMLElement).tagName !== "BUTTON") {
+        e.preventDefault();
+        control({ type: "toggle_pause" }).catch(() => {});
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        if ((e.target as HTMLElement).tagName === "INPUT") return;
+        e.preventDefault();
+        control({ type: "seek_by", delta: e.key === "ArrowLeft" ? -5 : 5 }).catch(() => {});
+      }
+    };
+    window.addEventListener("keydown", onKey);
+
+    return () => {
+      active = false;
+      clearInterval(timer);
+      window.removeEventListener("keydown", onKey);
+      unlisteners.forEach((u) => u());
+    };
+  }, []);
+
+  if (!state) return null;
+
+  return (
+    <div className={visible ? "overlay-panel" : "overlay-panel hidden"}>
+      <PlayerControls
+        onHover={(over) => emit("overlay-hover", over).catch(() => {})}
+        info={info}
+        canControl={state.canControl}
+        controlHint={state.controlHint}
+        title={state.title}
+        status={state.status}
+        scrub={scrub}
+        onScrub={setScrub}
+        tracks={state.tracks}
+        quality={state.quality}
+        qualityEnabled={state.qualityEnabled}
+        onQuality={(value) => {
+          invoke("set_quality", { height: value ? Number(value) : null }).catch(() => {});
+          emit("overlay-quality", value).catch(() => {});
+        }}
+        onError={(message) => emit("overlay-error", message).catch(() => {})}
+        fullscreen
+        onFullscreen={() => emit("overlay-key", "exit-fullscreen").catch(() => {})}
+      />
+    </div>
+  );
+}
+
+const EVENT_ICONS: Record<EventIcon, IconName> = {
+  enter: "enter",
+  leave: "leave",
+  play: "play",
+  pause: "pause",
+  seek: "seek",
+  media: "film",
+  host: "star",
+};
+
 function PlayerControls({
+  onHover,
   info,
   canControl,
   controlHint,
+  title,
+  status,
   scrub,
   onScrub,
   tracks,
+  quality,
+  qualityEnabled,
+  onQuality,
   onError,
   fullscreen,
   onFullscreen,
 }: {
+  onHover: (over: boolean) => void;
   info: PlaybackInfo | null;
   canControl: boolean;
   controlHint: string;
+  title: string;
+  status: string;
   scrub: number | null;
   onScrub: (value: number | null) => void;
   tracks: Track[];
+  quality: string;
+  qualityEnabled: boolean;
+  onQuality: (value: string) => void;
   onError: (message: string) => void;
   fullscreen: boolean;
   onFullscreen: () => void;
@@ -946,8 +1330,20 @@ function PlayerControls({
   const duration = info?.duration ?? 0;
   const position = scrub ?? info?.position ?? 0;
   const paused = info?.paused ?? true;
-  const volume = info?.volume ?? 100;
+  // Пока тянешь ползунок громкости, он слушается только тебя, а не
+  // значения, которое приходит из плеера раз в 0,4 секунды.
+  const [volumeDrag, setVolumeDrag] = useState<number | null>(null);
+  const volumeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const volume = volumeDrag ?? info?.volume ?? 100;
   const send = (c: Control) => control(c).catch((err) => onError(String(err)));
+
+  const onVolume = (value: number) => {
+    setVolumeDrag(value);
+    send({ type: "volume", value });
+    clearTimeout(volumeTimer.current);
+    // Отдаём управление обратно плееру, когда mpv точно применил громкость.
+    volumeTimer.current = setTimeout(() => setVolumeDrag(null), 800);
+  };
 
   const audioTracks = tracks.filter((t) => t.kind === "audio");
   const subTracks = tracks.filter((t) => t.kind === "sub");
@@ -974,17 +1370,14 @@ function PlayerControls({
     }
   };
 
+  const progress = duration ? Math.min(position / duration, 1) * 100 : 0;
+
   return (
-    <div className="controls">
-      <button
-        className="play"
-        onClick={() => send({ type: "toggle_pause" })}
-        disabled={!canControl}
-        title={canControl ? "Пробел" : controlHint}
-        aria-label={paused ? "Воспроизвести" : "Пауза"}
-      >
-        <Icon name={paused ? "play" : "pause"} size={18} />
-      </button>
+    <div
+      className="controls"
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+    >
       <div className="seek-row">
         <span className="time">{formatTime(position)}</span>
         <input
@@ -994,70 +1387,106 @@ function PlayerControls({
           max={duration || 1}
           step={0.5}
           value={Math.min(position, duration || 1)}
+          style={{ "--progress": `${progress}%` } as CSSProperties}
           disabled={!canControl || !duration}
-          title={canControl ? "Перемотка (← →)" : controlHint}
+          title={canControl ? "Перемотка: стрелки ← →" : controlHint}
           aria-label="Перемотка"
           onChange={(e) => onScrub(Number(e.target.value))}
           onPointerUp={commitScrub}
           onKeyUp={commitScrub}
         />
-        <span className="time">{duration ? formatTime(duration) : "--:--"}</span>
+        <span className="time end">{duration ? formatTime(duration) : "–:––"}</span>
       </div>
-      <label className="track-select" title="Озвучка (у каждого своя)">
-        <Icon name="audio-track" />
-        <select
-          value={audioValue}
-          disabled={audioTracks.length === 0}
-          onChange={(e) => onAudio(e.target.value)}
-          aria-label="Озвучка"
+
+      <div className="control-row">
+        <button
+          className="play"
+          onClick={() => send({ type: "toggle_pause" })}
+          disabled={!canControl}
+          title={canControl ? "Пробел" : controlHint}
+          aria-label={paused ? "Смотреть" : "Пауза"}
         >
-          {audioTracks.length === 0 && <option value="off">Нет звука</option>}
-          {audioTracks.map((t) => (
-            <option key={t.id} value={t.id}>
-              {trackLabel(t)}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="track-select" title="Субтитры (у каждого свои)">
-        <Icon name="subtitles" />
-        <select
-          value={subValue}
-          disabled={!info}
-          onChange={(e) => onSubtitle(e.target.value)}
-          aria-label="Субтитры"
+          <Icon name={paused ? "play-solid" : "pause-solid"} size={18} />
+        </button>
+        <div className="now">
+          <span className="now-title">{title}</span>
+          <span className="now-status">{status}</span>
+        </div>
+
+        <label className="track-select" title="Озвучка у каждого своя">
+          <span>Озвучка</span>
+          <select
+            value={audioValue}
+            disabled={audioTracks.length === 0}
+            onChange={(e) => onAudio(e.target.value)}
+          >
+            {audioTracks.length === 0 && <option value="off">нет</option>}
+            {audioTracks.map((t) => (
+              <option key={t.id} value={t.id}>
+                {trackLabel(t)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="track-select" title="Субтитры у каждого свои">
+          <span>Субтитры</span>
+          <select value={subValue} disabled={!info} onChange={(e) => onSubtitle(e.target.value)}>
+            <option value="off">нет</option>
+            {subTracks.map((t) => (
+              <option key={t.id} value={t.id}>
+                {trackLabel(t)}
+              </option>
+            ))}
+            <option value="file">Загрузить из файла…</option>
+          </select>
+        </label>
+
+        <label
+          className="track-select"
+          title={
+            qualityEnabled
+              ? "Качество у каждого своё. Если интернет слабый — выбери пониже"
+              : "Качество выбирается только для ссылок"
+          }
         >
-          <option value="off">Без субтитров</option>
-          {subTracks.map((t) => (
-            <option key={t.id} value={t.id}>
-              {trackLabel(t)}
-            </option>
-          ))}
-          <option value="file">Загрузить из файла…</option>
-        </select>
-      </label>
-      <span className="volume">
-        <Icon name={volume > 0 ? "volume" : "mute"} />
-        <input
-          type="range"
-          min={0}
-          max={100}
-          step={1}
-          value={Math.min(volume, 100)}
-          disabled={!info}
-          aria-label="Громкость"
-          title="Громкость (у каждого своя)"
-          onChange={(e) => send({ type: "volume", value: Number(e.target.value) })}
-        />
-      </span>
-      <button
-        className="icon"
-        onClick={onFullscreen}
-        title={fullscreen ? "Выйти из полного экрана (Esc)" : "Полный экран (F)"}
-        aria-label={fullscreen ? "Выйти из полного экрана" : "Полный экран"}
-      >
-        <Icon name={fullscreen ? "exit-fullscreen" : "fullscreen"} />
-      </button>
+          <span>Качество</span>
+          <select
+            value={quality}
+            disabled={!qualityEnabled}
+            onChange={(e) => onQuality(e.target.value)}
+          >
+            {QUALITIES.map((q) => (
+              <option key={q.value} value={q.value}>
+                {q.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="volume" title="Громкость фильма у каждого своя">
+          <Icon name={volume > 0 ? "volume" : "mute"} size={18} />
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={Math.min(volume, 100)}
+            style={{ "--progress": `${Math.min(volume, 100)}%` } as CSSProperties}
+            disabled={!info}
+            aria-label="Громкость фильма"
+            onChange={(e) => onVolume(Number(e.target.value))}
+          />
+        </label>
+        {/* В правом нижнем углу, на одной линии с краем видео. */}
+        <button
+          className="ghost icon fullscreen-toggle"
+          onClick={onFullscreen}
+          title={fullscreen ? "Выйти из полного экрана: Esc" : "На весь экран: F"}
+          aria-label={fullscreen ? "Выйти из полного экрана" : "На весь экран"}
+        >
+          <Icon name={fullscreen ? "exit-fullscreen" : "fullscreen"} size={20} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -1081,9 +1510,78 @@ type IconName =
   | "mic-off"
   | "headphones"
   | "headphones-off"
-  | "settings";
+  | "settings"
+  | "chevron"
+  | "link"
+  | "more"
+  | "enter"
+  | "leave"
+  | "seek"
+  | "film"
+  | "star"
+  | "sliders"
+  | "play-solid"
+  | "pause-solid";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
+  chevron: <polyline points="9 6 15 12 9 18" />,
+  link: (
+    <>
+      <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" />
+      <path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />
+    </>
+  ),
+  more: (
+    <>
+      <circle cx="5" cy="12" r="1.2" />
+      <circle cx="12" cy="12" r="1.2" />
+      <circle cx="19" cy="12" r="1.2" />
+    </>
+  ),
+  enter: (
+    <>
+      <path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4" />
+      <polyline points="10 8 14 12 10 16" />
+      <line x1="3" y1="12" x2="14" y2="12" />
+    </>
+  ),
+  leave: (
+    <>
+      <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" />
+      <polyline points="15 8 19 12 15 16" />
+      <line x1="8" y1="12" x2="19" y2="12" />
+    </>
+  ),
+  seek: (
+    <>
+      <polygon points="4 6 11 12 4 18 4 6" />
+      <polygon points="13 6 20 12 13 18 13 6" />
+    </>
+  ),
+  film: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <line x1="7" y1="4" x2="7" y2="20" />
+      <line x1="17" y1="4" x2="17" y2="20" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+    </>
+  ),
+  star: <polygon points="12 3 14.8 9 21 9.6 16.3 13.8 17.7 20 12 16.8 6.3 20 7.7 13.8 3 9.6 9.2 9" />,
+  sliders: (
+    <>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+      <circle cx="9" cy="7" r="2.5" fill="var(--surface)" />
+      <circle cx="15" cy="17" r="2.5" fill="var(--surface)" />
+    </>
+  ),
+  "play-solid": <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z" />,
+  "pause-solid": (
+    <>
+      <rect x="6" y="4.5" width="4.2" height="15" rx="1.4" />
+      <rect x="13.8" y="4.5" width="4.2" height="15" rx="1.4" />
+    </>
+  ),
   panel: (
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -1214,14 +1712,16 @@ function Icon({
   label?: string;
   accent?: boolean;
 }) {
+  // Значки play/pause и «⋯» залиты, остальные — контурные.
+  const solid = name.endsWith("-solid") || name === "more" || name === "seek" || name === "star";
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 24 24"
-      fill="none"
-      stroke={accent ? "var(--accent)" : "currentColor"}
-      strokeWidth={size > 24 ? 1.5 : 2}
+      fill={solid ? "currentColor" : "none"}
+      stroke={solid ? "none" : accent ? "var(--accent)" : "currentColor"}
+      strokeWidth={1.8}
       strokeLinecap="round"
       strokeLinejoin="round"
       role={label ? "img" : undefined}

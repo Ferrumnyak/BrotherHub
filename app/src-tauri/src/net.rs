@@ -3,26 +3,44 @@
 //! Интерфейс (React) вызывает команды `connect`, `send`, `disconnect`,
 //! а сообщения от сервера получает событиями:
 //! - `server-message` — любое [`ServerMsg`];
-//! - `disconnected` — соединение оборвалось.
+//! - `reconnecting` — связь пропала, приложение пытается вернуться;
+//! - `disconnected` — вернуться не получилось.
+//!
+//! Если связь пропала, приложение само переподключается и возвращается на
+//! своё место с пропуском из `Welcome` (сервер держит место 30 секунд).
+//! Плеер при этом не останавливается.
 
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::{Duration, Instant},
 };
 
 use brotherwatch_shared::{ClientMsg, ServerMsg};
 use futures_util::{SinkExt, StreamExt};
 use tauri::{AppHandle, Emitter, State};
+use tokio::{net::TcpStream, sync::mpsc, sync::Mutex};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use crate::session::SharedSession;
-use tokio::sync::{mpsc, Mutex};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+/// Как часто проверять, что соединение живо.
+const PING_EVERY: Duration = Duration::from_secs(10);
+/// Если от сервера столько времени ничего нет — связь считается потерянной
+/// (бывает, что соединение «висит», хотя интернета уже нет).
+const SILENCE_LIMIT: Duration = Duration::from_secs(30);
+/// Сколько пытаться переподключиться, прежде чем сдаться.
+const GIVE_UP_AFTER: Duration = Duration::from_secs(120);
 
 #[derive(Default)]
 pub struct Connection {
     tx: Mutex<Option<mpsc::UnboundedSender<ClientMsg>>>,
-    /// Номер текущего подключения. Нужен, чтобы старое соединение,
-    /// закрываясь, не сообщило интерфейсу об обрыве нового.
+    /// Номер текущего подключения. Нужен, чтобы старое подключение,
+    /// закрываясь, не вмешивалось в новое.
     generation: Arc<AtomicU64>,
 }
 
@@ -36,65 +54,37 @@ pub async fn connect(
     name: String,
     password: Option<String>,
 ) -> Result<(), String> {
+    let my_generation = conn.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    // Было старое подключение — выходим из той комнаты по-честному.
+    if let Some(old) = conn.tx.lock().await.take() {
+        let _ = old.send(ClientMsg::Leave);
+    }
+
     let url = format!("{}/ws", server.trim().trim_end_matches('/'));
     let (ws, _) = connect_async(url.as_str())
         .await
         .map_err(|e| format!("не удалось подключиться к {url}: {e}"))?;
-    let (mut sink, mut stream) = ws.split();
 
-    let my_generation = conn.generation.fetch_add(1, Ordering::SeqCst) + 1;
-    let generation = conn.generation.clone();
-
-    let (tx, mut rx) = mpsc::unbounded_channel::<ClientMsg>();
-    let password = password.filter(|p| !p.is_empty());
-    tx.send(ClientMsg::Join {
-        room,
-        name,
-        password,
-    })
-    .map_err(|e| e.to_string())?;
-
-    // Отправка: всё из канала уходит на сервер.
-    tauri::async_runtime::spawn(async move {
-        while let Some(msg) = rx.recv().await {
-            let Ok(text) = serde_json::to_string(&msg) else {
-                continue;
-            };
-            if sink.send(Message::Text(text.into())).await.is_err() {
-                break;
-            }
-        }
-        // Канал закрыт — значит, нас отключили. Закрываем соединение.
-        let _ = sink.close().await;
-    });
-
+    let (tx, rx) = mpsc::unbounded_channel::<ClientMsg>();
     session.lock().await.connected(tx.clone());
 
-    // Приём: всё от сервера отдаём синхронизации и пересылаем в интерфейс.
-    let session = session.inner().clone();
-    tauri::async_runtime::spawn(async move {
-        while let Some(Ok(msg)) = stream.next().await {
-            if generation.load(Ordering::SeqCst) != my_generation {
-                break; // это уже старое подключение
-            }
-            let Message::Text(text) = msg else {
-                continue;
-            };
-            match serde_json::from_str::<ServerMsg>(text.as_str()) {
-                Ok(msg) => {
-                    session.lock().await.on_server_msg(&msg).await;
-                    let _ = app.emit("server-message", msg);
-                }
-                Err(e) => eprintln!("непонятное сообщение от сервера: {e}"),
-            }
-        }
-        if generation.load(Ordering::SeqCst) == my_generation {
-            session.lock().await.disconnected();
-            let _ = app.emit("disconnected", ());
-        }
-    });
+    let join = ClientMsg::Join {
+        room,
+        name,
+        password: password.filter(|p| !p.is_empty()),
+        resume: None,
+    };
+    tauri::async_runtime::spawn(supervise(Supervisor {
+        app,
+        session: session.inner().clone(),
+        generation: conn.generation.clone(),
+        my_generation,
+        url,
+        join,
+        rx,
+        first: Some(ws),
+    }));
 
-    // Если было старое подключение — его отправитель удалится и оно закроется.
     *conn.tx.lock().await = Some(tx);
     Ok(())
 }
@@ -105,7 +95,10 @@ pub async fn disconnect(
     session: State<'_, SharedSession>,
 ) -> Result<(), String> {
     conn.generation.fetch_add(1, Ordering::SeqCst);
-    conn.tx.lock().await.take();
+    if let Some(tx) = conn.tx.lock().await.take() {
+        // Сначала «выхожу», потом закрываем: сервер сразу освободит место.
+        let _ = tx.send(ClientMsg::Leave);
+    }
     session.lock().await.disconnected();
     Ok(())
 }
@@ -115,4 +108,146 @@ pub async fn send(conn: State<'_, Connection>, msg: ClientMsg) -> Result<(), Str
     let guard = conn.tx.lock().await;
     let tx = guard.as_ref().ok_or("нет подключения к серверу")?;
     tx.send(msg).map_err(|_| "соединение закрыто".to_string())
+}
+
+// ---------- Поддержание связи ----------
+
+struct Supervisor {
+    app: AppHandle,
+    session: SharedSession,
+    generation: Arc<AtomicU64>,
+    my_generation: u64,
+    url: String,
+    join: ClientMsg,
+    rx: mpsc::UnboundedReceiver<ClientMsg>,
+    first: Option<Ws>,
+}
+
+impl Supervisor {
+    fn current(&self) -> bool {
+        self.generation.load(Ordering::SeqCst) == self.my_generation
+    }
+}
+
+/// Чем закончилось одно подключение.
+enum Ended {
+    /// Мы сами вышли (или нас отключили из интерфейса).
+    ByUs,
+    /// Связь пропала.
+    Lost,
+}
+
+async fn supervise(mut s: Supervisor) {
+    let mut token: Option<String> = None;
+    let mut ws = s.first.take();
+
+    loop {
+        let Some(stream) = ws.take() else {
+            return;
+        };
+        if let ClientMsg::Join { resume, .. } = &mut s.join {
+            *resume = token.clone();
+        }
+        if let Ended::ByUs = run_connection(&mut s, stream, &mut token).await {
+            return;
+        }
+        if !s.current() {
+            return;
+        }
+
+        // Связь пропала — плеер не трогаем, пробуем вернуться.
+        let _ = s.app.emit("reconnecting", ());
+        let lost_at = Instant::now();
+        let mut attempt = 0u32;
+        loop {
+            // 0.5, 1, 2, 4, 5, 5… секунд между попытками.
+            let delay = Duration::from_millis((500u64 << attempt.min(4)).min(5000));
+            tokio::time::sleep(delay).await;
+            if !s.current() {
+                return;
+            }
+            match connect_async(s.url.as_str()).await {
+                Ok((stream, _)) => {
+                    ws = Some(stream);
+                    break;
+                }
+                Err(_) if lost_at.elapsed() > GIVE_UP_AFTER => {
+                    s.session.lock().await.disconnected();
+                    let _ = s.app.emit("disconnected", ());
+                    return;
+                }
+                Err(_) => attempt += 1,
+            }
+        }
+        // Команды, набранные, пока связи не было, уже неактуальны.
+        while s.rx.try_recv().is_ok() {}
+    }
+}
+
+async fn run_connection(s: &mut Supervisor, ws: Ws, token: &mut Option<String>) -> Ended {
+    let (mut sink, mut stream) = ws.split();
+
+    let Ok(join) = serde_json::to_string(&s.join) else {
+        return Ended::ByUs;
+    };
+    if sink.send(Message::Text(join.into())).await.is_err() {
+        return Ended::Lost;
+    }
+
+    let mut ping = tokio::time::interval(PING_EVERY);
+    ping.tick().await; // первый тик срабатывает сразу
+    let mut last_heard = Instant::now();
+
+    loop {
+        tokio::select! {
+            outgoing = s.rx.recv() => match outgoing {
+                Some(msg) => {
+                    let leaving = matches!(msg, ClientMsg::Leave);
+                    let Ok(text) = serde_json::to_string(&msg) else { continue };
+                    if sink.send(Message::Text(text.into())).await.is_err() {
+                        return if leaving { Ended::ByUs } else { Ended::Lost };
+                    }
+                    if leaving {
+                        let _ = sink.close().await;
+                        return Ended::ByUs;
+                    }
+                }
+                // Отправитель удалён — нас отключили из интерфейса.
+                None => {
+                    let _ = sink.close().await;
+                    return Ended::ByUs;
+                }
+            },
+            incoming = stream.next() => {
+                last_heard = Instant::now();
+                match incoming {
+                    Some(Ok(Message::Text(text))) => {
+                        if !s.current() {
+                            continue; // старое подключение доживает
+                        }
+                        match serde_json::from_str::<ServerMsg>(text.as_str()) {
+                            Ok(msg) => {
+                                if let ServerMsg::Welcome { token: t, .. } = &msg {
+                                    *token = Some(t.clone());
+                                }
+                                s.session.lock().await.on_server_msg(&msg).await;
+                                let _ = s.app.emit("server-message", msg);
+                            }
+                            Err(e) => eprintln!("непонятное сообщение от сервера: {e}"),
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return Ended::Lost,
+                    Some(Ok(_)) => {} // ping/pong
+                }
+            },
+            _ = ping.tick() => {
+                if last_heard.elapsed() > SILENCE_LIMIT {
+                    return Ended::Lost;
+                }
+                if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
+                    return Ended::Lost;
+                }
+            },
+        }
+    }
 }

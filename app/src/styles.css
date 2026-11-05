@@ -1,19 +1,34 @@
+/* BrotherWatch — «Кинозал для своих».
+   Тёмный бархатный зал, тёплый свет лампы над экраном. */
+
 :root {
-  --bg: #0f1115;
-  --panel: #181b22;
-  --panel-2: #20242d;
-  --text: #e8e9ed;
-  --muted: #8b90a0;
-  --accent: #e0a63a;
-  --error: #ef6b6b;
-  /* Segoe UI Variable — современная версия Segoe в Windows 11. */
-  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  font-size: 15px;
-  line-height: 1.4;
+  --hall: #191416;        /* фон зала */
+  --hall-deep: #140f11;   /* самый тёмный — левая часть экрана входа */
+  --surface: #211a1d;     /* боковая панель */
+  --raised: #241b1f;      /* поля ввода, полосы */
+  --raised-2: #2a2024;    /* кнопки дока */
+  --line: #2e2428;        /* разделители */
+  --line-strong: #3a2e33; /* рамки полей, дорожки ползунков */
+  --lamp: #f2c879;        /* свет лампы: главные действия, кто говорит */
+  --lamp-soft: #f7dca6;
+  --lamp-ink: #2a1d12;    /* текст на лампе */
+  --velvet: #c25a63;      /* бархат: выключено, исключить, ошибки */
+  --live: #9fd0a8;        /* голос подключён */
+  --text: #efe6dc;
+  --text-2: #cdbfb4;
+  --muted: #a3958c;
+
+  --radius: 12px;
+  --radius-sm: 8px;
+
+  font-family: "Manrope", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--hall);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  color: var(--text);
-  background: var(--bg);
+  color-scheme: dark;
 }
 
 * {
@@ -32,147 +47,301 @@ body {
 
 h1,
 h2,
-h3 {
+p {
   margin: 0;
-  font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
-  letter-spacing: -0.01em;
-}
-
-input {
-  width: 100%;
-  padding: 9px 11px;
-  border: 1px solid #2c313c;
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text);
-  font: inherit;
-}
-
-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-button {
-  padding: 9px 16px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: #1a1306;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-button.secondary {
-  background: var(--panel-2);
-  color: var(--text);
 }
 
 .muted {
   color: var(--muted);
 }
 
-.error {
-  color: var(--error);
-  margin: 0;
-  cursor: pointer;
+/* ---------- Базовые элементы ---------- */
+
+input,
+select {
+  font: inherit;
+  color: var(--text);
 }
 
-/* Экран входа */
-.login {
-  height: 100%;
-  display: grid;
-  place-items: center;
+input[type="text"],
+input[type="password"],
+input:not([type]) {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--raised);
+  font-size: 15px;
+  transition: border-color 0.15s;
 }
 
-.card {
-  width: 340px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 28px;
-  border-radius: 14px;
-  background: var(--panel);
+input:not([type="range"]):not([type="radio"]):focus {
+  outline: none;
+  border-color: var(--lamp);
 }
 
-.card h1 {
-  color: var(--accent);
+input::placeholder {
+  color: #7d6f68;
 }
 
-.card p.muted {
-  margin: -10px 0 4px;
-}
-
-.card label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-/* Комната */
-.room {
-  height: 100%;
-  display: grid;
-  grid-template-rows: auto 1fr;
-}
-
-.room.fullscreen {
-  grid-template-rows: 1fr;
-}
-
-.room header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 8px 16px;
-  background: var(--panel);
-  border-bottom: 1px solid #252a34;
-}
-
-.room header .title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 600;
-  min-width: 0;
-}
-
-.brand {
-  color: var(--accent);
-  font-weight: 700;
-}
-
-.room header .actions {
-  display: flex;
-  gap: 8px;
-}
-
-.room button {
+button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   height: 36px;
-  padding: 0 14px;
-  font-size: 14px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
 
-.body {
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+button:focus-visible,
+select:focus-visible,
+input[type="range"]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--lamp);
+  outline-offset: 2px;
+}
+
+button.primary {
+  height: 46px;
+  padding: 0 18px;
+  border-radius: var(--radius);
+  background: var(--lamp);
+  color: var(--lamp-ink);
+  font-weight: 700;
+  font-size: 15px;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--lamp-soft);
+}
+
+button.ghost {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+button.ghost:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+button.quiet {
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: #33282d;
+  font-size: 13px;
+}
+
+button.quiet:hover:not(:disabled) {
+  background: #3d3036;
+}
+
+button.icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+button.icon:hover {
+  background: var(--raised-2);
+  color: var(--text);
+}
+
+.error {
+  color: var(--velvet);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ---------- Экран входа ---------- */
+
+.login {
+  height: 100%;
   display: grid;
-  grid-template-columns: 1fr 320px;
-  min-height: 0;
+  grid-template-columns: 1.1fr 1fr;
 }
 
-.chat-hidden .body {
+.login-art {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 56px;
+  background: var(--hall-deep);
+}
+
+/* Свет над экраном — единственная «декорация» в приложении. */
+.login-art .lamp {
+  position: absolute;
+  left: 50%;
+  top: -140px;
+  width: 560px;
+  height: 440px;
+  margin-left: -280px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(242, 200, 121, 0.26), rgba(242, 200, 121, 0));
+}
+
+.login-art .screen {
+  position: absolute;
+  left: 56px;
+  right: 56px;
+  top: 16%;
+  height: 26%;
+  border-radius: 10px;
+  background: var(--lamp);
+  opacity: 0.9;
+}
+
+.login-art .seats {
+  position: absolute;
+  left: 56px;
+  right: 56px;
+  top: 49%;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+
+.login-art .seats span {
+  height: 26px;
+  border-radius: 9px 9px 4px 4px;
+  background: #3a272c;
+}
+
+.login-brand {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wordmark {
+  font-family: "Unbounded", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 40px;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.login-brand p {
+  max-width: 30ch;
+  color: var(--text-2);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.login-side {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 56px 64px;
+}
+
+.login-form {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.login-form h1 {
+  font-family: "Unbounded", "Segoe UI", sans-serif;
+  font-weight: 500;
+  font-size: 20px;
+}
+
+.login-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.server-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.server-settings summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  color: var(--muted);
+  font-size: 13px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.server-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.server-settings summary svg {
+  transition: transform 0.15s;
+}
+
+.server-settings[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.server-settings[open] summary {
+  margin-bottom: 14px;
+}
+
+/* Узкое окно: картинка зала сверху, форма под ней. */
+@media (max-width: 860px) {
+  .login {
+    grid-template-columns: 1fr;
+    grid-template-rows: 220px 1fr;
+  }
+
+  .login-art {
+    padding: 28px 32px;
+  }
+
+  .login-art .screen,
+  .login-art .seats {
+    display: none;
+  }
+
+  .login-side {
+    padding: 28px 32px;
+    justify-content: flex-start;
+  }
+}
+
+/* ---------- Комната ---------- */
+
+.room {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr 300px;
+}
+
+.room.chat-hidden {
   grid-template-columns: 1fr;
 }
 
@@ -181,40 +350,115 @@ button.secondary {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  container-type: inline-size;
 }
 
-.toolbar {
+.stage-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 16px;
-  background: #13161c;
-  border-bottom: 1px solid #252a34;
+  gap: 16px;
+  padding: 18px 24px 14px;
 }
 
-.toolbar form {
+.room-title {
   flex: 1;
-  min-width: 240px;
+  min-width: 0;
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.toolbar input {
-  height: 36px;
-  padding: 0 12px;
-  font-size: 14px;
+.room-title h1 {
+  font-family: "Unbounded", "Segoe UI", sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.toolbar.notice {
-  background: #2b2617;
+.room-title p {
+  color: var(--muted);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+
+.source-bar {
+  padding: 0 24px 14px;
+}
+
+.source-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  padding: 0 7px 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--muted);
+  transition: border-color 0.15s;
+}
+
+.source-input:focus-within {
+  border-color: var(--lamp);
+}
+
+.source-input input {
+  flex: 1;
+  height: 40px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
+  margin: 0 24px 14px;
+  padding: 10px 10px 10px 16px;
+  border-radius: var(--radius);
+  background: #33281c;
+  color: var(--lamp-soft);
+}
+
+.notice.reconnecting {
+  background: #3a2427;
+  color: #f0c2c6;
+}
+
+.fullscreen .notice.reconnecting {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  margin: 0;
+}
+
+.notice button.primary {
+  height: 36px;
+  font-size: 14px;
 }
 
 /* Сюда приложение кладёт окно mpv. */
 .video {
   flex: 1;
   min-height: 0;
+  margin: 0 24px;
+  border-radius: 14px;
   background: #000;
   display: flex;
   align-items: center;
@@ -222,389 +466,520 @@ button.secondary {
 }
 
 .video-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  color: #5d6272;
-  font-size: 14px;
+  max-width: 44ch;
+  padding: 24px;
+  color: #7d6f68;
   text-align: center;
-  padding: 20px;
+  font-size: 15px;
 }
 
-.statusbar {
+.fullscreen .video {
+  margin: 0;
+  border-radius: 0;
+}
+
+/* ---------- Плеер ---------- */
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 24px 18px;
+}
+
+.seek-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
-  background: var(--panel);
-  border-top: 1px solid #252a34;
-  font-size: 14px;
+  gap: 12px;
+}
+
+.time {
+  width: 56px;
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.time.end {
+  text-align: right;
+}
+
+/* Ползунки: тонкая дорожка, заполненная часть светится лампой. */
+input[type="range"] {
+  --progress: 0%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--fill, var(--lamp)) var(--progress), var(--line-strong) var(--progress));
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--fill, var(--lamp));
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+input[type="range"]:hover::-webkit-slider-thumb,
+input[type="range"]:focus-visible::-webkit-slider-thumb,
+input[type="range"]:active::-webkit-slider-thumb {
+  opacity: 1;
+  box-shadow: 0 0 0 4px rgba(242, 200, 121, 0.18);
+}
+
+input[type="range"]:disabled {
+  cursor: default;
+}
+
+input[type="range"]:disabled::-webkit-slider-runnable-track {
+  opacity: 0.5;
+}
+
+.seek {
+  flex: 1;
+  min-width: 80px;
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
   min-width: 0;
 }
 
-.statusbar .media-name {
+button.play {
+  width: 46px;
+  height: 46px;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--lamp);
+  color: var(--lamp-ink);
+}
+
+button.play:hover:not(:disabled) {
+  background: var(--lamp-soft);
+}
+
+button.play:disabled {
+  opacity: 1;
+  background: var(--raised-2);
+  color: var(--muted);
+}
+
+.now {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.now-title {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.statusbar .spacer {
-  flex: 1;
-}
-
-.dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #4a4f5c;
-}
-
-.dot.on {
-  background: #5ec27a;
-}
-
-.small {
+.now-status {
+  color: var(--muted);
   font-size: 12px;
-  margin: 0;
 }
 
-/* Правая панель: участники и чат */
+/* «Озвучка: Дубляж» — текст вместо коробки. */
+.track-select {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.track-select select {
+  /* Ширина по выбранному пункту, а не по самому длинному в списке. */
+  field-sizing: content;
+  max-width: 150px;
+  min-width: 40px;
+  padding: 4px 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font-weight: 600;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.track-select select:hover:not(:disabled) {
+  background: var(--raised);
+}
+
+.track-select select:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+
+.track-select option {
+  background: var(--raised);
+}
+
+.volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  color: var(--text-2);
+}
+
+.volume input {
+  --fill: var(--text-2);
+  width: 84px;
+}
+
+.stage-error {
+  padding: 0 24px 12px;
+}
+
+.room button.fullscreen-toggle,
+.overlay-panel button.fullscreen-toggle {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  margin-right: -7px; /* значок — ровно по правому краю видео */
+  color: var(--text-2);
+}
+
+/* В полном экране панель плеера живёт в отдельном окне поверх видео,
+   а в главном окне остаётся только видео — без полос и прыжков. */
+.fullscreen .stage > .controls,
+.fullscreen .stage-error {
+  display: none;
+}
+
+/* ---------- Окно панели поверх видео ---------- */
+
+html.overlay,
+html.overlay body {
+  background: transparent;
+}
+
+.overlay-panel {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  /* Затемнение снизу, чтобы панель читалась на любом кадре. */
+  background: linear-gradient(to top, rgba(14, 10, 12, 0.92) 0%, rgba(14, 10, 12, 0.7) 55%, rgba(14, 10, 12, 0) 100%);
+  opacity: 1;
+  transition: opacity 0.35s ease;
+}
+
+.overlay-panel.hidden {
+  opacity: 0;
+  transition-duration: 0.6s;
+}
+
+.overlay-panel .controls {
+  padding: 0 32px 22px;
+}
+
+/* Узкая сцена: дорожки и громкость переносятся на свою строку. */
+@container (max-width: 760px) {
+  .control-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .now {
+    flex-basis: calc(100% - 62px);
+  }
+
+  .track-select select {
+    max-width: 110px;
+  }
+
+  .volume {
+    margin-left: auto;
+  }
+
+  .header-actions button:not(:last-child) {
+    width: 36px;
+    padding: 0;
+    font-size: 0;
+    gap: 0;
+  }
+}
+
+/* ---------- Боковая панель: зал, чат, голос ---------- */
+
 .side {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--panel);
-  border-left: 1px solid #252a34;
   min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
 }
 
-.members {
-  padding-bottom: 10px;
-  border-bottom: 1px solid #252a34;
-}
-
-.members h3 {
-  font-size: 11px;
-  color: var(--muted);
+.side h2 {
+  font-size: 14px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 8px;
 }
 
-.members ul {
+.hall {
+  padding: 20px 18px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.hall h2 {
+  margin-bottom: 12px;
+}
+
+.hall ul {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.members li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  font-size: 14px;
-}
-
-.crown-slot {
-  width: 16px;
-  display: inline-flex;
-}
-
-.member-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.member-actions {
-  margin-left: auto;
-  display: inline-flex;
-  gap: 2px;
-}
-
-.room button.icon {
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  background: none;
-  color: var(--muted);
-}
-
-.room button.icon:hover {
-  color: var(--text);
-  background: var(--panel-2);
-}
-
-.lines {
-  flex: 1;
+  gap: 10px;
+  max-height: 35vh;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
-.line {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 7px 11px;
-  font-size: 14px;
-  line-height: 1.45;
-  border-radius: 8px;
-  background: var(--panel-2);
-  word-break: break-word;
-}
-
-.line.mine {
-  background: #2b2617;
-}
-
-.line.system {
-  background: none;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-}
-
-.author {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-}
-
-.composer {
-  display: flex;
-  gap: 8px;
-}
-
-.composer button {
-  width: 44px;
-  padding: 0;
-}
-
-/* Панель управления воспроизведением */
-.controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: #0b0d11;
-  border-top: 1px solid #1d2129;
-}
-
-.room .controls button.play {
-  width: 40px;
-  height: 40px;
-  padding: 0;
-  border-radius: 50%;
-}
-
-.room .controls button.play:disabled {
-  background: var(--panel-2);
-  color: var(--muted);
-}
-
-.time {
-  font-size: 13px;
-  color: #c4c7d0;
-  font-variant-numeric: tabular-nums;
-  min-width: 44px;
-  text-align: center;
-}
-
-.controls input[type="range"] {
-  padding: 0;
-  border: none;
-  background: transparent;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.controls input[type="range"]:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.controls .seek {
-  flex: 1;
-  min-width: 120px;
-}
-
-.controls .volume {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-}
-
-.controls .volume input {
-  width: 90px;
-}
-
-.track-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  min-width: 0;
-}
-
-.track-select select {
-  max-width: 180px;
-  height: 30px;
-  padding: 0 8px;
-  border: 1px solid #2c313c;
-  border-radius: 6px;
-  background: var(--panel-2);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.track-select select:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-
-/* ----- Узкое окно ----- */
-
-.stage {
-  container-type: inline-size;
-}
-
-.controls {
-  flex-wrap: wrap;
-  row-gap: 6px;
-}
-
-.controls > button,
-.controls .volume {
-  flex: none;
-}
-
-.seek-row {
-  flex: 1;
-  min-width: 160px;
+.hall li {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 34px;
 }
 
-.track-select {
-  flex: 0 1 auto;
-}
-
-.track-select select {
-  min-width: 70px;
-}
-
-.nowrap,
-.hints {
-  white-space: nowrap;
-}
-
-.statusbar .media-name {
-  min-width: 0;
-  flex: 0 1 auto;
-}
-
-/* Средняя ширина: полоса перемотки уходит на отдельную строку сверху. */
-@container (max-width: 820px) {
-  .seek-row {
-    order: -1;
-    flex-basis: 100%;
-  }
-
-  .controls .volume {
-    margin-left: auto;
-  }
-
-  .hints {
-    display: none;
-  }
-}
-
-/* Совсем узко: громкость без ползунка. */
-@container (max-width: 520px) {
-  .controls .volume input {
-    width: 60px;
-  }
-
-  .track-select select {
-    max-width: 90px;
-  }
-}
-
-/* ----- Голос ----- */
-
-.voice-bar {
+/* Кружок участника — «кресло». Говорит — светится, как лампа. */
+.seat {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
   display: flex;
-  gap: 6px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid #252a34;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text);
+  transition: box-shadow 0.12s;
 }
 
-.voice-bar button:first-child {
+.seat.offline {
+  opacity: 0.4;
+}
+
+.seat.speaking {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--lamp), 0 0 16px rgba(242, 200, 121, 0.45);
+}
+
+.seat-name {
   flex: 1;
   min-width: 0;
-  justify-content: flex-start;
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
   overflow: hidden;
-  white-space: nowrap;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.room .voice-bar button.icon-only {
-  width: 36px;
-  padding: 0;
+.seat-role {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.seat-menu {
+  position: relative;
   flex: none;
 }
 
-.room .voice-bar button.off {
-  color: var(--error);
+.menu {
+  position: absolute;
+  right: 0;
+  top: 34px;
+  z-index: 10;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #2a2024;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
-.room .voice-bar button.talking {
-  background: #1d3a27;
-  color: #7ee0a0;
+.menu button {
+  justify-content: flex-start;
+  height: 34px;
+  font-weight: 500;
 }
 
-.room .voice-bar button.active {
-  background: #2c313c;
+.menu button:hover {
+  background: #352a2f;
 }
 
-.voice-status {
-  margin: 0;
-  font-size: 12px;
+.menu button.danger {
+  color: var(--velvet);
 }
 
-/* Подсветка того, кто говорит. */
-.member-name.speaking {
-  color: #7ee0a0;
-  text-shadow: 0 0 10px rgba(94, 194, 122, 0.45);
-}
-
-.voice-settings {
+/* Чат */
+.lines {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding-top: 4px;
+  gap: 12px;
+  padding: 14px 18px;
 }
 
-.voice-settings h3 {
-  font-size: 15px;
+.lines > :first-child {
+  margin-top: auto;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  word-break: break-word;
+}
+
+.author {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.event {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.event svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.side-error {
+  padding: 0 18px 8px;
+}
+
+.composer {
+  padding: 4px 14px 10px;
+}
+
+.composer input {
+  height: 42px;
+  background: var(--hall);
+  font-size: 14px;
+}
+
+/* Голосовой док */
+.voice-dock {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px 14px;
+  background: #1b1517;
+}
+
+.voice-state {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.voice-title.on {
+  color: var(--live);
+}
+
+.voice-hint {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-hint.error {
+  color: var(--velvet);
+  white-space: normal;
+  cursor: default;
+}
+
+.dock {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--raised-2);
+  color: var(--text);
+}
+
+button.dock:hover:not(:disabled) {
+  background: #352a2f;
+}
+
+.dock.off {
+  color: var(--velvet);
+}
+
+.dock.active {
+  background: #3d3036;
+}
+
+.dock.idle {
+  color: var(--muted);
+}
+
+.dock.talking {
+  background: var(--lamp);
+  color: var(--lamp-ink);
+}
+
+/* Настройки голоса */
+.voice-settings {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 16px 18px;
 }
 
 .voice-settings fieldset {
@@ -613,61 +988,70 @@ button.secondary {
   border: none;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
-.voice-settings legend {
-  font-size: 12px;
-  color: var(--muted);
+.voice-settings legend,
+.setting-label {
   margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.voice-settings .radio {
+.radio {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 10px;
   cursor: pointer;
 }
 
-.voice-settings .radio input {
-  width: auto;
-  accent-color: var(--accent);
+.radio input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--lamp);
 }
 
-.voice-settings .setting {
+.setting {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.voice-settings select {
-  height: 34px;
-  padding: 0 8px;
-  border: 1px solid #2c313c;
-  border-radius: 8px;
-  background: var(--panel-2);
-  color: var(--text);
-  font: inherit;
+.setting button.quiet {
+  height: 38px;
+  justify-content: flex-start;
+}
+
+.setting select {
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--raised);
   font-size: 13px;
 }
 
 .volume-row {
   display: grid;
-  grid-template-columns: 1fr 110px 40px;
+  grid-template-columns: 1fr 100px 38px;
   align-items: center;
-  gap: 8px;
-  font-size: 14px;
+  gap: 10px;
 }
 
-.volume-row input[type="range"] {
-  padding: 0;
-  border: none;
-  background: transparent;
-  accent-color: var(--accent);
+.volume-row .seat-name {
+  font-weight: 500;
 }
 
-.volume-row .pct {
+.pct {
+  color: var(--muted);
+  font-size: 12px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }

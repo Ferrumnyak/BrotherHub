@@ -22,7 +22,13 @@ pub enum ClientMsg {
         /// Пароль сервера, если он задан.
         #[serde(default)]
         password: Option<String>,
+        /// Пропуск из прошлого `Welcome` — вернуться на своё место после
+        /// обрыва связи (тот же id, та же роль ведущего).
+        #[serde(default)]
+        resume: Option<String>,
     },
+    /// Выйти из комнаты насовсем (без ожидания переподключения).
+    Leave,
     /// Сообщение в текстовый чат.
     Chat { text: String },
 
@@ -50,6 +56,10 @@ pub enum ServerMsg {
     /// Ответ на успешный вход в комнату.
     Welcome {
         you: MemberId,
+        /// Пропуск для возвращения после обрыва связи.
+        token: String,
+        /// `true` — вернулись на своё место после обрыва связи.
+        resumed: bool,
         room: String,
         host: MemberId,
         members: Vec<Member>,
@@ -59,6 +69,11 @@ pub enum ServerMsg {
     },
     MemberJoined {
         member: Member,
+    },
+    /// У участника пропала (`online: false`) или вернулась связь.
+    MemberStatus {
+        id: MemberId,
+        online: bool,
     },
     /// Участник ушёл сам (`kicked: false`) или его исключили.
     MemberLeft {
@@ -111,6 +126,13 @@ pub struct VoiceAccess {
 pub struct Member {
     pub id: MemberId,
     pub name: String,
+    /// `false` — связь пропала, ждём переподключения.
+    #[serde(default = "yes")]
+    pub online: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// Общее для комнаты состояние воспроизведения.
@@ -137,4 +159,73 @@ impl Default for PlaybackState {
 pub fn is_url(media: &str) -> bool {
     let m = media.trim_start().to_ascii_lowercase();
     m.starts_with("http://") || m.starts_with("https://")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Формат сообщений должен совпадать с app/src/protocol.ts.
+
+    #[test]
+    fn client_messages_from_json() {
+        let join: ClientMsg =
+            serde_json::from_str(r#"{"type":"join","room":"r","name":"n"}"#).unwrap();
+        assert!(matches!(
+            join,
+            ClientMsg::Join {
+                password: None,
+                resume: None,
+                ..
+            }
+        ));
+
+        let chat: ClientMsg = serde_json::from_str(r#"{"type":"chat","text":"привет"}"#).unwrap();
+        assert!(matches!(chat, ClientMsg::Chat { text } if text == "привет"));
+
+        let leave: ClientMsg = serde_json::from_str(r#"{"type":"leave"}"#).unwrap();
+        assert!(matches!(leave, ClientMsg::Leave));
+
+        let transfer: ClientMsg =
+            serde_json::from_str(r#"{"type":"transfer_host","to":7}"#).unwrap();
+        assert!(matches!(transfer, ClientMsg::TransferHost { to: 7 }));
+    }
+
+    #[test]
+    fn server_messages_to_json() {
+        let msg = ServerMsg::Playback {
+            playback: PlaybackState {
+                media: Some("https://example.com/v".into()),
+                paused: false,
+                position: 12.5,
+            },
+            action: Some(PlaybackAction::SetMedia),
+            by: Some("Ferrum".into()),
+        };
+        let v: serde_json::Value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(v["type"], "playback");
+        assert_eq!(v["action"], "set_media");
+        assert_eq!(v["playback"]["position"], 12.5);
+
+        let status = serde_json::to_value(ServerMsg::MemberStatus {
+            id: 3,
+            online: false,
+        })
+        .unwrap();
+        assert_eq!(status["type"], "member_status");
+    }
+
+    #[test]
+    fn member_online_by_default() {
+        let m: Member = serde_json::from_str(r#"{"id":1,"name":"n"}"#).unwrap();
+        assert!(m.online);
+    }
+
+    #[test]
+    fn url_detection() {
+        assert!(is_url("https://vkvideo.ru/video-1_2"));
+        assert!(is_url("  HTTP://example.com"));
+        assert!(!is_url("Interstellar.2014.mkv"));
+        assert!(!is_url("httpfile.mkv"));
+    }
 }

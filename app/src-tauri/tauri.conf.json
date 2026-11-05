@@ -13,10 +13,11 @@
     "windows": [
       {
         "title": "BrotherWatch",
-        "width": 1000,
-        "height": 700,
-        "minWidth": 720,
-        "minHeight": 480
+        "width": 1180,
+        "height": 760,
+        "minWidth": 760,
+        "minHeight": 520,
+        "backgroundColor": "#191416"
       }
     ],
     "security": {
