@@ -34,7 +34,7 @@ use axum::{
     Router,
 };
 use brotherwatch_shared::{
-    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg, VoiceAccess,
+    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg, Suggestion, VoiceAccess,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
@@ -45,6 +45,8 @@ use tokio::{
 const MAX_NAME_LEN: usize = 32;
 const MAX_CHAT_LEN: usize = 2000;
 const MAX_MEDIA_LEN: usize = 2000;
+/// Сколько предложений «что посмотреть» держит комната.
+const MAX_SUGGESTIONS: usize = 30;
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// Больше людей в одной комнате — уже не «посмотреть с друзьями».
 const MAX_ROOM_MEMBERS: usize = 16;
@@ -115,6 +117,9 @@ struct Peer {
     /// Номер подключения, к которому сейчас привязан участник.
     conn: u64,
     gone_since: Option<Instant>,
+    in_voice: bool,
+    mic: bool,
+    deaf: bool,
 }
 
 struct Room {
@@ -125,6 +130,8 @@ struct Room {
     /// Позиция на момент `updated_at`.
     position: f64,
     updated_at: Instant,
+    suggestions: Vec<Suggestion>,
+    next_suggestion: u64,
 }
 
 impl Room {
@@ -136,7 +143,15 @@ impl Room {
             paused: true,
             position: 0.0,
             updated_at: Instant::now(),
+            suggestions: Vec::new(),
+            next_suggestion: 1,
         }
+    }
+
+    fn broadcast_suggestions(&self) {
+        self.broadcast(&ServerMsg::Suggestions {
+            list: self.suggestions.clone(),
+        });
     }
 
     /// Текущее состояние: если видео играет, позиция «уехала» вперёд
@@ -193,6 +208,9 @@ impl Room {
                 id: *id,
                 name: p.name.clone(),
                 online: p.tx.is_some(),
+                in_voice: p.in_voice,
+                mic: p.mic,
+                deaf: p.deaf,
             })
             .collect();
         members.sort_by_key(|m| m.id);
@@ -310,6 +328,10 @@ impl RateLimit {
     }
 }
 
+fn random_u64() -> u64 {
+    RandomState::new().build_hasher().finish()
+}
+
 fn new_token() -> String {
     // RandomState каждый раз берёт новый случайный ключ от ОС.
     let a = RandomState::new().build_hasher().finish();
@@ -385,7 +407,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, ip: IpAddr) {
             }
         };
 
-        let is_chat = matches!(cmd, ClientMsg::Chat { .. });
+        let is_chat = matches!(cmd, ClientMsg::Chat { .. } | ClientMsg::Suggest { .. });
         if !messages.allow() || (is_chat && !chat.allow()) {
             flood_warnings += 1;
             if flood_warnings > 20 {
@@ -505,6 +527,9 @@ async fn handle_command(
                 id,
                 name: name.clone(),
                 online: true,
+                in_voice: false,
+                mic: false,
+                deaf: false,
             },
         });
         let token = new_token();
@@ -516,6 +541,9 @@ async fn handle_command(
                 tx: Some(tx.clone()),
                 conn,
                 gone_since: None,
+                in_voice: false,
+                mic: false,
+                deaf: false,
             },
         );
         let welcome = welcome(state, r, &room, id, token, false);
@@ -556,13 +584,101 @@ async fn handle_command(
         return false;
     }
 
+    // Это может делать любой участник.
+    match cmd {
+        ClientMsg::Suggest { media } => {
+            let media = media.trim();
+            if media.is_empty() || media.chars().count() > MAX_MEDIA_LEN {
+                return error("некорректная ссылка");
+            }
+            if room.suggestions.iter().any(|s| s.media == media) {
+                return error("это уже есть в списке");
+            }
+            if room.suggestions.len() >= MAX_SUGGESTIONS {
+                return error("список предложений полон — уберите что-нибудь");
+            }
+            let suggestion_id = room.next_suggestion;
+            room.next_suggestion += 1;
+            room.suggestions.push(Suggestion {
+                id: suggestion_id,
+                media: media.to_string(),
+                by: id,
+                name,
+            });
+            room.broadcast_suggestions();
+            return false;
+        }
+        ClientMsg::RemoveSuggestion { id: suggestion_id } => {
+            let Some(pos) = room.suggestions.iter().position(|s| s.id == suggestion_id) else {
+                return false; // уже убрали
+            };
+            if room.suggestions[pos].by != id && room.host != id {
+                return error("убрать чужое предложение может только ведущий");
+            }
+            room.suggestions.remove(pos);
+            room.broadcast_suggestions();
+            return false;
+        }
+        ClientMsg::Loaded { media } => {
+            if room.media.as_deref() == Some(media.as_str()) {
+                room.broadcast(&ServerMsg::MemberLoaded { id, media });
+            }
+            return false;
+        }
+        ClientMsg::VoiceState { in_voice, mic, deaf } => {
+            if let Some(peer) = room.peers.get_mut(&id) {
+                if (peer.in_voice, peer.mic, peer.deaf) == (in_voice, mic, deaf) {
+                    return false;
+                }
+                peer.in_voice = in_voice;
+                peer.mic = mic;
+                peer.deaf = deaf;
+            }
+            room.broadcast(&ServerMsg::MemberVoice {
+                id,
+                in_voice,
+                mic,
+                deaf,
+            });
+            return false;
+        }
+        cmd => handle_host_command(state, &room_name, room, id, name, tx, cmd),
+    }
+}
+
+/// Команды, которые может давать только ведущий.
+fn handle_host_command(
+    state: &Arc<AppState>,
+    room_name: &str,
+    room: &mut Room,
+    id: MemberId,
+    name: String,
+    tx: &Tx,
+    cmd: ClientMsg,
+) -> bool {
+    let error = |message: &str| {
+        send(
+            tx,
+            ServerMsg::Error {
+                message: message.to_string(),
+            },
+        );
+        false
+    };
+
     // Всё остальное — только для ведущего.
     if room.host != id {
         return error("это может делать только ведущий");
     }
 
     match cmd {
-        ClientMsg::Join { .. } | ClientMsg::Leave | ClientMsg::Chat { .. } => {
+        ClientMsg::Join { .. }
+        | ClientMsg::Leave
+        | ClientMsg::Chat { .. }
+        | ClientMsg::Suggest { .. }
+        | ClientMsg::RemoveSuggestion { .. }
+        | ClientMsg::Loaded { .. }
+        | ClientMsg::VoiceState { .. } => {
             unreachable!("обработано выше")
         }
         ClientMsg::SetMedia { media } => {
@@ -574,6 +690,26 @@ async fn handle_command(
             room.paused = true;
             room.set_position(0.0);
             room.broadcast_playback(Some(PlaybackAction::SetMedia), Some(name));
+            // Включили то, что было в предложениях, — из списка убираем.
+            let before = room.suggestions.len();
+            room.suggestions.retain(|s| s.media != media);
+            if room.suggestions.len() != before {
+                room.broadcast_suggestions();
+            }
+        }
+        ClientMsg::ClearMedia => {
+            room.media = None;
+            room.paused = true;
+            room.set_position(0.0);
+            room.broadcast_playback(Some(PlaybackAction::SetMedia), Some(name));
+        }
+        ClientMsg::Spin => {
+            if room.suggestions.is_empty() {
+                return error("в списке предложений пусто");
+            }
+            let pick = (random_u64() % room.suggestions.len() as u64) as usize;
+            let winner = room.suggestions[pick].id;
+            room.broadcast(&ServerMsg::Roulette { winner, by: name });
         }
         ClientMsg::Play { position } => {
             room.paused = false;
@@ -610,7 +746,7 @@ async fn handle_command(
                     if let Some(peer_tx) = &peer.tx {
                         send(peer_tx, ServerMsg::Kicked { by: name.clone() });
                     }
-                    state.remove_from_voice(&room_name, target);
+                    state.remove_from_voice(room_name, target);
                     tracing::info!("{name} исключил {} из «{room_name}»", peer.name);
                 }
                 None => return error("такого участника нет в комнате"),
@@ -642,6 +778,7 @@ fn welcome(
         members: room.members(),
         playback: room.playback(),
         voice,
+        suggestions: room.suggestions.clone(),
     }
 }
 

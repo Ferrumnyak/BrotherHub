@@ -286,6 +286,11 @@ impl Player {
         self.load(url);
     }
 
+    /// Закрыть видео: окно плеера остаётся, но пустое.
+    pub fn stop(&self) {
+        self.command(json!(["stop"]));
+    }
+
     pub fn set_pause(&self, paused: bool) {
         self.command(json!(["set_property", "pause", paused]));
     }

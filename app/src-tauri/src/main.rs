@@ -42,6 +42,7 @@ fn main() {
             session::set_chat_overlay,
             session::player_info,
             session::player_control,
+            session::close_media,
             session::set_quality,
             video::set_video_rect,
             video::watch_cursor,

@@ -8,6 +8,20 @@ export interface Member {
   name: string;
   /** false — связь пропала, ждём переподключения. */
   online: boolean;
+  /** Подключён к голосу. */
+  in_voice?: boolean;
+  /** Микрофон включён. */
+  mic?: boolean;
+  /** Выключил себе звук от всех. */
+  deaf?: boolean;
+}
+
+/** Предложение, что посмотреть. */
+export interface Suggestion {
+  id: number;
+  media: string;
+  by: MemberId;
+  name: string;
 }
 
 /** Пропуск в голосовой канал LiveKit. */
@@ -34,13 +48,19 @@ export type ClientMsg =
     }
   | { type: "leave" }
   | { type: "chat"; text: string }
+  | { type: "suggest"; media: string }
+  | { type: "remove_suggestion"; id: number }
+  | { type: "loaded"; media: string }
+  | { type: "voice_state"; in_voice: boolean; mic: boolean; deaf: boolean }
   | { type: "set_media"; media: string }
   | { type: "play"; position: number }
   | { type: "pause"; position: number }
   | { type: "seek"; position: number }
   | { type: "sync"; position: number; paused: boolean }
   | { type: "transfer_host"; to: MemberId }
-  | { type: "kick"; id: MemberId };
+  | { type: "kick"; id: MemberId }
+  | { type: "spin" }
+  | { type: "clear_media" };
 
 export type ServerMsg =
   | {
@@ -53,6 +73,7 @@ export type ServerMsg =
       members: Member[];
       playback: PlaybackState;
       voice: VoiceAccess | null;
+      suggestions?: Suggestion[];
     }
   | { type: "member_joined"; member: Member }
   | { type: "member_status"; id: MemberId; online: boolean }
@@ -66,7 +87,11 @@ export type ServerMsg =
       action: PlaybackAction | null;
       by: string | null;
     }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "suggestions"; list: Suggestion[] }
+  | { type: "roulette"; winner: number; by: string }
+  | { type: "member_loaded"; id: MemberId; media: string }
+  | { type: "member_voice"; id: MemberId; in_voice: boolean; mic: boolean; deaf: boolean };
 
 /** Состояние плеера mpv (событие `player-status` от Rust-части). */
 export interface PlayerStatus {
@@ -93,6 +118,7 @@ export interface PlaybackInfo {
 /** Кнопки панели управления (команда `player_control`). */
 export type Control =
   | { type: "toggle_pause" }
+  | { type: "play" }
   | { type: "seek"; position: number }
   | { type: "seek_by"; delta: number }
   | { type: "volume"; value: number }

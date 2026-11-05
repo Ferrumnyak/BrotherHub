@@ -54,6 +54,8 @@ pub struct PlaybackInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
     TogglePause,
+    /// Запустить (автозапуск, когда видео открылось у всех).
+    Play,
     Seek {
         position: f64,
     },
@@ -341,6 +343,14 @@ impl Session {
     /// а локальный файл каждый выбирает у себя (интерфейс покажет подсказку).
     async fn follow_media(&mut self) {
         let Some(media) = self.room_media() else {
+            // Ведущий закрыл видео — закрываем и у себя.
+            if self.loaded.take().is_some() {
+                if let Some(player) = &self.player {
+                    player.stop();
+                }
+                crate::logs::info("видео закрыто");
+                self.emit_status();
+            }
             return;
         };
         if self.loaded.as_deref() == Some(media.as_str()) {
@@ -469,6 +479,10 @@ impl Session {
             }
             PlayerEvent::FileLoaded => {
                 crate::logs::info("видео загрузилось");
+                // Ведущий запустит видео, когда оно откроется у всех.
+                if let Some(media) = self.loaded.clone() {
+                    self.send(ClientMsg::Loaded { media });
+                }
                 self.load_failed_at = None;
                 self.reset_speed();
                 if !self.is_host() {
@@ -691,13 +705,14 @@ impl Session {
         // управляет глава. Его действия попадут в mpv, а оттуда — на сервер.
         let shared = matches!(
             control,
-            Control::TogglePause | Control::Seek { .. } | Control::SeekBy { .. }
+            Control::TogglePause | Control::Play | Control::Seek { .. } | Control::SeekBy { .. }
         );
         if shared && !self.is_host() {
             return Err("Паузой и перемоткой управляет ведущий".into());
         }
         match control {
             Control::TogglePause => player.set_pause(!self.player_paused),
+            Control::Play => player.set_pause(false),
             Control::Seek { position } => player.seek(position.max(0.0)),
             Control::SeekBy { delta } => player.seek_by(delta),
             Control::Volume { value } => player.set_volume(value),
@@ -747,6 +762,27 @@ impl Session {
     }
 
     // ---------- Действия из интерфейса ----------
+
+    /// Ведущий закрывает видео у всех.
+    pub fn close_media(&mut self) -> Result<(), String> {
+        if !self.is_host() {
+            return Err("Закрыть видео может только ведущий".into());
+        }
+        self.send(ClientMsg::ClearMedia);
+        self.room = Some(RoomPlayback::new(PlaybackState {
+            media: None,
+            paused: true,
+            position: 0.0,
+        }));
+        if self.loaded.take().is_some() {
+            if let Some(player) = &self.player {
+                player.stop();
+            }
+        }
+        crate::logs::info("ведущий закрыл видео");
+        self.emit_status();
+        Ok(())
+    }
 
     pub async fn open_file(&mut self, path: String) -> Result<(), String> {
         let host = self.is_host();
@@ -906,6 +942,11 @@ pub async fn set_chat_overlay(
 #[tauri::command]
 pub async fn player_info(session: State<'_, SharedSession>) -> Result<PlaybackInfo, String> {
     Ok(session.lock().await.info().await)
+}
+
+#[tauri::command]
+pub async fn close_media(session: State<'_, SharedSession>) -> Result<(), String> {
+    session.lock().await.close_media()
 }
 
 #[tauri::command]

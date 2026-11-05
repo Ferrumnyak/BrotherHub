@@ -836,6 +836,17 @@ html.overlay body {
   outline-offset: -2px;
 }
 
+.seat-icons {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  color: var(--velvet);
+}
+
+.seat-icons > span {
+  display: flex;
+}
+
 .seat-more {
   flex: none;
   display: flex;
@@ -1018,7 +1029,14 @@ button.danger-solid:hover {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  word-break: break-word;
+  min-width: 0;
+  /* Длинные ссылки переносятся, а не уходят за край. */
+  overflow-wrap: anywhere;
+}
+
+.event span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .author {
@@ -1044,13 +1062,194 @@ button.danger-solid:hover {
 }
 
 .composer {
+  position: relative;
   padding: 4px 14px 10px;
 }
 
+.composer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .composer input {
+  flex: 1;
+  min-width: 0;
   height: 42px;
   background: var(--hall);
   font-size: 14px;
+}
+
+.composer button.icon {
+  width: 38px;
+  height: 38px;
+}
+
+.composer button.icon.active {
+  color: var(--lamp);
+}
+
+.emoji-picker {
+  position: absolute;
+  right: 14px;
+  left: 14px;
+  bottom: calc(100% - 2px);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: #2a2024;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  animation: menu-in 0.12s ease-out;
+}
+
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 2px;
+  height: 220px;
+  overflow-y: auto;
+  align-content: start;
+}
+
+.emoji-tabs {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.emoji-tabs button {
+  opacity: 0.55;
+}
+
+.emoji-tabs button.active,
+.emoji-tabs button:hover {
+  opacity: 1;
+}
+
+.emoji-picker button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.emoji-picker button:hover {
+  background: #352a2f;
+}
+
+/* Вкладки справа: чат и «Что посмотреть» */
+.side-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.side-tabs button {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+}
+
+.side-tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--lamp);
+}
+
+.side-tabs .count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--raised-2);
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.suggestions {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+
+.suggestions ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.suggestions li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  transition: background 0.08s, border-color 0.08s;
+}
+
+/* Рулетка: подсветка бежит по строкам… */
+.suggestions li.lit {
+  border-color: var(--lamp);
+  background: #33281c;
+}
+
+/* …и останавливается на выпавшем. */
+.suggestions li.winner {
+  animation: winner 0.6s ease-in-out 3;
+}
+
+@keyframes winner {
+  50% { box-shadow: 0 0 0 3px rgba(242, 200, 121, 0.35); }
+}
+
+.suggestion-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.suggestion-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-by,
+.suggestions-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.suggestions-empty {
+  line-height: 1.5;
+}
+
+button.roulette {
+  flex: none;
+  height: 42px;
 }
 
 /* Голосовой док */

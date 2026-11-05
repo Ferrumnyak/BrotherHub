@@ -233,3 +233,62 @@ async fn chat_flood_is_limited() {
     let err = a.expect("error").await;
     assert!(err["message"].as_str().unwrap().contains("часто"));
 }
+
+#[tokio::test]
+async fn suggestions_roulette_and_clear() {
+    let url = start(Config::default()).await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    let (mut b, _) = Client::join(&url, "r", "Боря").await;
+
+    // Предлагать может любой; повтор не добавляется.
+    b.send(json!({"type": "suggest", "media": "https://example.com/1"}))
+        .await;
+    let list = a.expect("suggestions").await;
+    assert_eq!(list["list"][0]["name"], "Боря");
+    b.send(json!({"type": "suggest", "media": "https://example.com/1"}))
+        .await;
+    assert!(b.expect("error").await["message"]
+        .as_str()
+        .unwrap()
+        .contains("уже"));
+
+    // Рулетку крутит только ведущий, выпадает то, что есть в списке.
+    b.send(json!({"type": "spin"})).await;
+    assert!(b.expect("error").await["message"]
+        .as_str()
+        .unwrap()
+        .contains("ведущий"));
+    a.send(json!({"type": "spin"})).await;
+    let roulette = b.expect("roulette").await;
+    assert_eq!(roulette["winner"], list["list"][0]["id"]);
+
+    // Включили предложенное — оно пропало из списка.
+    a.send(json!({"type": "set_media", "media": "https://example.com/1"}))
+        .await;
+    assert_eq!(b.expect("playback").await["action"], "set_media");
+    assert_eq!(b.expect("suggestions").await["list"], json!([]));
+
+    // «Открылось» доходит до всех, закрыть видео может ведущий.
+    b.send(json!({"type": "loaded", "media": "https://example.com/1"}))
+        .await;
+    assert_eq!(a.expect("member_loaded").await["media"], "https://example.com/1");
+    a.send(json!({"type": "clear_media"})).await;
+    let pb = b.expect("playback").await;
+    assert_eq!(pb["playback"]["media"], Value::Null);
+}
+
+#[tokio::test]
+async fn voice_state_is_shared_and_kept() {
+    let url = start(Config::default()).await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    a.send(json!({"type": "voice_state", "in_voice": true, "mic": false, "deaf": true}))
+        .await;
+    assert_eq!(a.expect("member_voice").await["deaf"], true);
+
+    // Кто зашёл позже, видит значки сразу.
+    let (_b, wb) = Client::join(&url, "r", "Боря").await;
+    let anya = &wb["members"][0];
+    assert_eq!(anya["in_voice"], true);
+    assert_eq!(anya["mic"], false);
+    assert_eq!(anya["deaf"], true);
+}

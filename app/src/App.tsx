@@ -14,15 +14,17 @@ import {
   type PlayerKey,
   type PlayerStatus,
   type ServerMsg,
+  type Suggestion,
   type Track,
   type VoiceAccess,
 } from "./protocol";
+import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { keyName, listMicrophones, VoiceClient, type ScreenShare, type VoiceStatus } from "./voice";
 
 type VoiceMode = "open" | "ptt";
 
 /** Значок у события в чате. */
-type EventIcon = "enter" | "leave" | "play" | "pause" | "seek" | "media" | "host";
+type EventIcon = "enter" | "leave" | "play" | "pause" | "seek" | "media" | "host" | "suggest" | "roulette";
 
 type ChatLine =
   | { key: number; kind: "chat"; name: string; text: string; mine: boolean }
@@ -57,6 +59,10 @@ const MINI_WIDTH = 480;
 const MINI_HEIGHT = 340;
 /** Уже этого окно считается узким: чат прячется сам. */
 const NARROW_WIDTH = 760;
+/** Автозапуск: сколько ждать, пока видео откроется у всех. */
+const AUTOPLAY_WAIT_MS = 15_000;
+/** Через сколько прячется сообщение об ошибке. */
+const ERROR_HIDE_MS = 7_000;
 
 /** Что нужно панели плеера поверх видео (событие `overlay-state`). */
 interface OverlayState {
@@ -269,7 +275,27 @@ export default function App() {
   // Трансляция экрана: чужая, которую показываем, и показываю ли я свою.
   const [screenShare, setScreenShare] = useState<ScreenShare | null>(null);
   const [sharing, setSharing] = useState(false);
+  /** Открыто окно выбора, что показывать. */
+  const [picking, setPicking] = useState(false);
   const screenRef = useRef<HTMLVideoElement>(null);
+  // Что посмотреть: общий список, рулетка и вкладка справа.
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const suggestionsRef = useRef<Suggestion[]>([]);
+  suggestionsRef.current = suggestions;
+  const [sideTab, setSideTab] = useState<"chat" | "suggest">("chat");
+  const [spin, setSpin] = useState<{ list: Suggestion[]; winner: number; by: string } | null>(
+    null,
+  );
+  const [spinIndex, setSpinIndex] = useState<number | null>(null);
+  const [spinDone, setSpinDone] = useState(false);
+  // Автозапуск: у кого уже открылось видео, и чего ждём.
+  const [loadedBy, setLoadedBy] = useState<Map<MemberId, string>>(new Map());
+  const autoplayRef = useRef<{ media: string; since: number } | null>(null);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [recent, setRecent] = useState<string[]>(recentEmoji);
+  /** Раздел смайликов: -1 — недавние. */
+  const [emojiGroup, setEmojiGroup] = useState(() => (recentEmoji().length > 0 ? -1 : 0));
+  const draftRef = useRef<HTMLInputElement>(null);
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -333,6 +359,11 @@ export default function App() {
   miniRef.current = mini;
 
   const isHost = me !== null && me === host;
+  const isHostRef = useRef(false);
+  isHostRef.current = isHost;
+
+  const addSystem = (text: string, icon: EventIcon) =>
+    setLines((l) => [...l, { key: ++keyRef.current, kind: "system", text, icon }]);
 
   // Подписка на события от Rust-части приложения.
   useEffect(() => {
@@ -351,6 +382,7 @@ export default function App() {
           setJoinedRoom(msg.room);
           setMembers(msg.members);
           setPlayback(msg.playback);
+          setSuggestions(msg.suggestions ?? []);
           setReconnecting(false);
           if (msg.resumed) {
             // Вернулись на своё место: чат и голос оставляем как были.
@@ -409,9 +441,24 @@ export default function App() {
           setPlayback(msg.playback);
           const at = formatTime(msg.playback.position);
           const by = msg.by ?? "";
+          // Новое видео по ссылке запустится само, когда откроется у всех
+          // (это делает ведущий, см. эффект автозапуска). Любое ручное
+          // действие ведущего автозапуск отменяет.
+          if (msg.action === "set_media") {
+            const media = msg.playback.media;
+            autoplayRef.current =
+              media && isUrl(media) ? { media, since: Date.now() } : null;
+          } else if (msg.action) {
+            autoplayRef.current = null;
+          }
           switch (msg.action) {
             case "set_media":
-              system(`${by} включил «${mediaTitle(msg.playback.media ?? "")}»`, "media");
+              system(
+                msg.playback.media
+                  ? `${by} включил «${mediaTitle(msg.playback.media)}»`
+                  : `${by} закрыл видео`,
+                "media",
+              );
               break;
             case "play":
               system(`${by} запустил на ${at}`, "play");
@@ -427,6 +474,35 @@ export default function App() {
         }
         case "error":
           setError(msg.message);
+          break;
+        case "suggestions": {
+          const known = new Set(suggestionsRef.current.map((x) => x.id));
+          for (const x of msg.list) {
+            if (!known.has(x.id)) system(`${x.name} предлагает «${mediaTitle(x.media)}»`, "suggest");
+          }
+          suggestionsRef.current = msg.list;
+          setSuggestions(msg.list);
+          break;
+        }
+        case "roulette": {
+          const list = suggestionsRef.current;
+          const winner = list.findIndex((x) => x.id === msg.winner);
+          if (winner < 0) break;
+          system(`${msg.by} крутит рулетку…`, "roulette");
+          setSideTab("suggest");
+          setSpinDone(false);
+          setSpin({ list, winner, by: msg.by });
+          break;
+        }
+        case "member_loaded":
+          setLoadedBy((m) => new Map(m).set(msg.id, msg.media));
+          break;
+        case "member_voice":
+          setMembers((m) =>
+            m.map((x) =>
+              x.id === msg.id ? { ...x, in_voice: msg.in_voice, mic: msg.mic, deaf: msg.deaf } : x,
+            ),
+          );
           break;
       }
     };
@@ -506,6 +582,7 @@ export default function App() {
     const text = draft.trim();
     if (!text) return;
     setDraft("");
+    setEmojiOpen(false);
     await run(() => send({ type: "chat", text }));
   }
 
@@ -518,8 +595,38 @@ export default function App() {
     e.preventDefault();
     const link = url.trim();
     if (!link) return;
+    if (!isHost) {
+      await handleSuggest();
+      return;
+    }
     await run(() => invoke("open_url", { url: link }));
     setUrl("");
+  }
+
+  async function handleSuggest() {
+    const link = url.trim();
+    if (!link) return;
+    if (!isUrl(link)) {
+      setError("Ссылка должна начинаться с http:// или https://");
+      return;
+    }
+    await run(() => send({ type: "suggest", media: link }));
+    setUrl("");
+    setSideTab("suggest");
+    if (!mini) setChatOpen(true);
+  }
+
+  function insertEmoji(emoji: string) {
+    setRecent(rememberEmoji(emoji));
+    const input = draftRef.current;
+    const at = input?.selectionStart ?? draft.length;
+    const end = input?.selectionEnd ?? at;
+    setDraft((d) => d.slice(0, at) + emoji + d.slice(end));
+    requestAnimationFrame(() => {
+      input?.focus();
+      const pos = at + emoji.length;
+      input?.setSelectionRange(pos, pos);
+    });
   }
 
   // Подтверждение — в самом меню участника (см. MemberMenu).
@@ -666,6 +773,93 @@ export default function App() {
     };
   }, [fullscreen]);
 
+  // Панель смайликов закрывается кликом мимо неё.
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".composer")) setEmojiOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [emojiOpen]);
+
+  // Ошибки прячутся сами через несколько секунд.
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), ERROR_HIDE_MS);
+    return () => clearTimeout(t);
+  }, [error]);
+
+  // Остальные видят, выключен ли у меня микрофон или звук.
+  useEffect(() => {
+    if (!joinedRoom) return;
+    const inVoice = voiceStatus === "connected";
+    send({
+      type: "voice_state",
+      in_voice: inVoice,
+      mic: inVoice && !deafened && (voiceMode === "ptt" || micOn),
+      deaf: inVoice && deafened,
+    }).catch(() => {});
+  }, [joinedRoom, voiceStatus, micOn, deafened, voiceMode]);
+
+  // Автозапуск: ведущий запускает новое видео, когда оно открылось у всех
+  // в зале (но ждёт не дольше AUTOPLAY_WAIT_MS).
+  useEffect(() => {
+    const pending = autoplayRef.current;
+    if (!isHost || me === null || !pending || !playback) return;
+    if (playback.media !== pending.media || !playback.paused) return;
+    if (loadedBy.get(me) !== pending.media) return; // у самого ещё не открылось
+    const start = () => {
+      if (autoplayRef.current !== pending) return;
+      autoplayRef.current = null;
+      control({ type: "play" }).catch((err) => setError(String(err)));
+    };
+    const everyone = members
+      .filter((m) => m.online)
+      .every((m) => loadedBy.get(m.id) === pending.media);
+    const left = AUTOPLAY_WAIT_MS - (Date.now() - pending.since);
+    if (everyone || left <= 0) {
+      start();
+      return;
+    }
+    const t = setTimeout(start, left);
+    return () => clearTimeout(t);
+  }, [isHost, me, playback, loadedBy, members]);
+
+  // Рулетка: подсветка бежит по списку, замедляется и останавливается
+  // на выпавшем. Потом ведущий сам включает выпавшее.
+  useEffect(() => {
+    if (!spin) return;
+    const n = spin.list.length;
+    const steps = n * 3 + spin.winner;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let at = 0;
+    for (let i = 0; i <= steps; i++) {
+      const delay = 50 + 330 * (i / steps) ** 2;
+      at += delay;
+      timers.push(setTimeout(() => setSpinIndex(i % n), at));
+    }
+    timers.push(
+      setTimeout(() => {
+        const winner = spin.list[spin.winner];
+        setSpinDone(true);
+        addSystem(`Рулетка выбрала «${mediaTitle(winner.media)}»`, "roulette");
+        if (isHostRef.current) {
+          run(() => invoke("open_url", { url: winner.media }));
+        }
+      }, at + 300),
+    );
+    timers.push(
+      setTimeout(() => {
+        setSpin(null);
+        setSpinIndex(null);
+        setSpinDone(false);
+      }, at + 3000),
+    );
+    return () => timers.forEach(clearTimeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spin]);
+
   // Окно сузили — чат прячется сам, чтобы видео не стало крошечным.
   // Обратно его можно открыть кнопкой или Tab.
   useEffect(() => {
@@ -702,8 +896,19 @@ export default function App() {
   }, [voiceStatus]);
 
   async function toggleScreenShare() {
-    if (sharing) await voice.stopScreenShare();
-    else await voice.startScreenShare();
+    if (sharing) {
+      await voice.stopScreenShare();
+      return;
+    }
+    // Окно выбора экрана открывается под окном видео mpv — на время выбора
+    // видео прячем, иначе выбора не видно.
+    setPicking(true);
+    await invoke("set_video_rect", { rect: null }).catch(() => {});
+    try {
+      await voice.startScreenShare();
+    } finally {
+      setPicking(false);
+    }
   }
 
   // Качество ссылок: запоминается и применяется сразу, даже к открытому видео.
@@ -842,7 +1047,13 @@ export default function App() {
     const el = videoRef.current;
     // Пока идёт трансляция экрана, окно mpv прячем — на его месте трансляция.
     const show =
-      joinedRoom !== null && player.running && el !== null && !screenShare && !sharing;
+      joinedRoom !== null &&
+      player.running &&
+      el !== null &&
+      !screenShare &&
+      !sharing &&
+      !picking &&
+      (playback?.media ?? null) !== null;
     const update = () => {
       if (!show || !el) {
         invoke("set_video_rect", { rect: null }).catch(() => {});
@@ -881,7 +1092,7 @@ export default function App() {
       window.removeEventListener("resize", update);
       invoke("set_video_rect", { rect: null }).catch(() => {});
     };
-  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing]);
+  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, playback?.media]);
 
   // ----- Связь с панелью поверх видео -----
 
@@ -1068,18 +1279,33 @@ export default function App() {
             <span>Связь с сервером пропала. Переподключаюсь — видео пока идёт дальше.</span>
           </div>
         )}
-        {!fullscreen && !mini && isHost && (
+        {!fullscreen && !mini && (
           <form className="source-bar" onSubmit={handleOpenUrl}>
             <label className="source-input">
               <Icon name="link" size={18} />
               <input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="Вставь ссылку на YouTube, VK Видео или Rutube"
+                placeholder={
+                  isHost
+                    ? "Вставь ссылку на YouTube, VK Видео или Rutube"
+                    : "Предложи, что посмотреть: ссылка на видео"
+                }
                 aria-label="Ссылка на видео"
               />
+              {isHost && (
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={!url.trim()}
+                  onClick={handleSuggest}
+                  title="Добавить в список «Что посмотреть»"
+                >
+                  В список
+                </button>
+              )}
               <button type="submit" className="quiet" disabled={!url.trim()}>
-                Открыть
+                {isHost ? "Открыть" : "Предложить"}
               </button>
             </label>
           </form>
@@ -1156,6 +1382,9 @@ export default function App() {
           onFullscreen={() => applyFullscreen(!fullscreen)}
           mini={mini}
           onMini={() => applyMini(!mini)}
+          onClose={
+            isHost && media !== null ? () => run(() => invoke("close_media")) : undefined
+          }
         />
         {error && !chatOpen && (
           <p className="error stage-error" onClick={() => setError(null)} title="Скрыть">
@@ -1215,6 +1444,20 @@ export default function App() {
                         m.id === host && <span className="seat-role">ведёт просмотр</span>
                       )}
                     </span>
+                    {(m.deaf || (m.in_voice && !m.mic)) && (
+                      <span className="seat-icons">
+                        {m.in_voice && !m.mic && !m.deaf && (
+                          <span title="Микрофон выключен">
+                            <Icon name="mic-off" size={15} />
+                          </span>
+                        )}
+                        {m.deaf && (
+                          <span title="Выключил звук">
+                            <Icon name="headphones-off" size={15} />
+                          </span>
+                        )}
+                      </span>
+                    )}
                     {manageable && (
                       <span className="seat-more" aria-hidden="true">
                         <Icon name="more" />
@@ -1328,6 +1571,39 @@ export default function App() {
               </button>
             </div>
           ) : (
+            <>
+            <div className="side-tabs" role="tablist">
+              <button
+                role="tab"
+                aria-selected={sideTab === "chat"}
+                className={sideTab === "chat" ? "active" : ""}
+                onClick={() => setSideTab("chat")}
+              >
+                Чат
+              </button>
+              <button
+                role="tab"
+                aria-selected={sideTab === "suggest"}
+                className={sideTab === "suggest" ? "active" : ""}
+                onClick={() => setSideTab("suggest")}
+              >
+                Что посмотреть
+                {suggestions.length > 0 && <span className="count">{suggestions.length}</span>}
+              </button>
+            </div>
+            {sideTab === "suggest" ? (
+              <SuggestionsPanel
+                list={spin ? spin.list : suggestions}
+                me={me}
+                isHost={isHost}
+                highlight={spinIndex}
+                spinning={spin !== null}
+                done={spinDone}
+                onPlay={(x) => run(() => invoke("open_url", { url: x.media }))}
+                onRemove={(x) => run(() => send({ type: "remove_suggestion", id: x.id }))}
+                onSpin={() => run(() => send({ type: "spin" }))}
+              />
+            ) : (
             <div className="lines">
               {lines.map((l) =>
                 l.kind === "system" ? (
@@ -1346,6 +1622,8 @@ export default function App() {
               )}
               <div ref={chatEndRef} />
             </div>
+            )}
+            </>
           )}
 
           {error && (
@@ -1355,14 +1633,63 @@ export default function App() {
           )}
           {!voiceSettings && (
             <form className="composer" onSubmit={handleSend}>
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                disabled={reconnecting}
-                placeholder={reconnecting ? "Ждём связь с сервером…" : "Написать в зал"}
-                aria-label="Сообщение"
-                maxLength={2000}
-              />
+              {emojiOpen && (
+                <div className="emoji-picker" role="dialog" aria-label="Смайлики">
+                  <div className="emoji-grid">
+                    {(emojiGroup === -1 ? recent : EMOJI_GROUPS[emojiGroup].list).map((e) => (
+                      <button key={e} type="button" onClick={() => insertEmoji(e)}>
+                        {e}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="emoji-tabs" role="tablist">
+                    {recent.length > 0 && (
+                      <button
+                        type="button"
+                        role="tab"
+                        className={emojiGroup === -1 ? "active" : ""}
+                        onClick={() => setEmojiGroup(-1)}
+                        title="Недавние"
+                      >
+                        🕘
+                      </button>
+                    )}
+                    {EMOJI_GROUPS.map((g, i) => (
+                      <button
+                        key={g.title}
+                        type="button"
+                        role="tab"
+                        className={emojiGroup === i ? "active" : ""}
+                        onClick={() => setEmojiGroup(i)}
+                        title={g.title}
+                      >
+                        {g.icon}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="composer-row">
+                <input
+                  ref={draftRef}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onFocus={() => setSideTab("chat")}
+                  disabled={reconnecting}
+                  placeholder={reconnecting ? "Ждём связь с сервером…" : "Написать в зал"}
+                  aria-label="Сообщение"
+                  maxLength={2000}
+                />
+                <button
+                  type="button"
+                  className={emojiOpen ? "icon active" : "icon"}
+                  onClick={() => setEmojiOpen((o) => !o)}
+                  aria-label="Смайлики"
+                  title="Смайлики"
+                >
+                  <Icon name="smile" size={18} />
+                </button>
+              </div>
             </form>
           )}
 
@@ -1412,6 +1739,90 @@ export default function App() {
         </aside>
       )}
     </main>
+  );
+}
+
+/** Список «Что посмотреть» и рулетка по нему. */
+function SuggestionsPanel({
+  list,
+  me,
+  isHost,
+  highlight,
+  spinning,
+  done,
+  onPlay,
+  onRemove,
+  onSpin,
+}: {
+  list: Suggestion[];
+  me: MemberId | null;
+  isHost: boolean;
+  highlight: number | null;
+  spinning: boolean;
+  done: boolean;
+  onPlay: (s: Suggestion) => void;
+  onRemove: (s: Suggestion) => void;
+  onSpin: () => void;
+}) {
+  return (
+    <div className="suggestions">
+      {list.length === 0 ? (
+        <p className="suggestions-empty">
+          Пока пусто. Вставь ссылку в поле сверху и нажми «{isHost ? "В список" : "Предложить"}» —
+          а ведущий включит или крутанёт рулетку.
+        </p>
+      ) : (
+        <ul>
+          {list.map((x, i) => (
+            <li
+              key={x.id}
+              className={[
+                highlight === i && "lit",
+                highlight === i && done && "winner",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <span className="suggestion-text">
+                <span className="suggestion-title" title={x.media}>
+                  {mediaTitle(x.media)}
+                </span>
+                <span className="suggestion-by">предложил(а) {x.name}</span>
+              </span>
+              {isHost && (
+                <button
+                  className="icon"
+                  onClick={() => onPlay(x)}
+                  disabled={spinning}
+                  title="Включить сейчас"
+                  aria-label="Включить"
+                >
+                  <Icon name="play" />
+                </button>
+              )}
+              {(isHost || x.by === me) && (
+                <button
+                  className="icon"
+                  onClick={() => onRemove(x)}
+                  disabled={spinning}
+                  title="Убрать из списка"
+                  aria-label="Убрать"
+                >
+                  <Icon name="close" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {isHost && list.length > 0 && (
+        <button className="primary roulette" onClick={onSpin} disabled={spinning}>
+          <Icon name="dice" size={18} />
+          {spinning ? "Крутится…" : "Крутить рулетку"}
+        </button>
+      )}
+      {!isHost && spinning && <p className="suggestions-empty">Рулетка крутится…</p>}
+    </div>
   );
 }
 
@@ -1588,6 +1999,8 @@ const EVENT_ICONS: Record<EventIcon, IconName> = {
   seek: "seek",
   media: "film",
   host: "star",
+  suggest: "film",
+  roulette: "dice",
 };
 
 function PlayerControls({
@@ -1608,6 +2021,7 @@ function PlayerControls({
   onFullscreen,
   mini = false,
   onMini,
+  onClose,
 }: {
   onHover: (over: boolean) => void;
   info: PlaybackInfo | null;
@@ -1628,6 +2042,8 @@ function PlayerControls({
   mini?: boolean;
   /** Нет в панели поверх полноэкранного видео. */
   onMini?: () => void;
+  /** Закрыть видео у всех (только у ведущего). */
+  onClose?: () => void;
 }) {
   const duration = info?.duration ?? 0;
   const position = scrub ?? info?.position ?? 0;
@@ -1779,6 +2195,16 @@ function PlayerControls({
             onChange={(e) => onVolume(Number(e.target.value))}
           />
         </label>
+        {onClose && (
+          <button
+            className="ghost icon"
+            onClick={onClose}
+            title="Закрыть видео у всех"
+            aria-label="Закрыть видео"
+          >
+            <Icon name="close" size={18} />
+          </button>
+        )}
         {onMini && !fullscreen && (
           <button
             className="ghost icon"
@@ -1836,7 +2262,9 @@ type IconName =
   | "pause-solid"
   | "pip"
   | "pip-exit"
-  | "cast";
+  | "cast"
+  | "smile"
+  | "dice";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
   chevron: <polyline points="9 6 15 12 9 18" />,
@@ -2002,6 +2430,24 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
     </>
   ),
   crown: <path d="M3 18h18l-2-11-5 5-2-7-2 7-5-5z" />,
+  smile: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8.5 14a4 4 0 0 0 7 0" />
+      <line x1="9" y1="9.5" x2="9.01" y2="9.5" />
+      <line x1="15" y1="9.5" x2="15.01" y2="9.5" />
+    </>
+  ),
+  dice: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="4" />
+      <line x1="8" y1="8" x2="8.01" y2="8" />
+      <line x1="16" y1="8" x2="16.01" y2="8" />
+      <line x1="12" y1="12" x2="12.01" y2="12" />
+      <line x1="8" y1="16" x2="8.01" y2="16" />
+      <line x1="16" y1="16" x2="16.01" y2="16" />
+    </>
+  ),
   pip: (
     <>
       <rect x="2" y="4" width="20" height="16" rx="2" />

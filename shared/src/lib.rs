@@ -31,6 +31,14 @@ pub enum ClientMsg {
     Leave,
     /// Сообщение в текстовый чат.
     Chat { text: String },
+    /// Предложить, что посмотреть (ссылку или название файла).
+    Suggest { media: String },
+    /// Убрать предложение (своё — любой, чужое — только ведущий).
+    RemoveSuggestion { id: u64 },
+    /// У меня открылось это видео — для автозапуска, когда готовы все.
+    Loaded { media: String },
+    /// Мой микрофон и звук — чтобы остальные видели значки в списке.
+    VoiceState { in_voice: bool, mic: bool, deaf: bool },
 
     // --- Только для главы лобби ---
     /// Выбрать, что смотрим (название файла или ссылка).
@@ -47,6 +55,10 @@ pub enum ClientMsg {
     TransferHost { to: MemberId },
     /// Исключить участника из комнаты.
     Kick { id: MemberId },
+    /// Крутить рулетку по списку предложений.
+    Spin,
+    /// Закрыть видео у всех.
+    ClearMedia,
 }
 
 /// Сообщения от сервера к клиенту.
@@ -66,6 +78,9 @@ pub enum ServerMsg {
         playback: PlaybackState,
         /// Пропуск в голосовой канал комнаты (`None` — голос на сервере не настроен).
         voice: Option<VoiceAccess>,
+        /// Что предложили посмотреть.
+        #[serde(default)]
+        suggestions: Vec<Suggestion>,
     },
     MemberJoined {
         member: Member,
@@ -103,6 +118,37 @@ pub enum ServerMsg {
     Error {
         message: String,
     },
+    /// Список предложений изменился (присылается целиком).
+    Suggestions {
+        list: Vec<Suggestion>,
+    },
+    /// Ведущий крутанул рулетку — выпало предложение `winner`.
+    Roulette {
+        winner: u64,
+        by: String,
+    },
+    /// У участника открылось видео `media`.
+    MemberLoaded {
+        id: MemberId,
+        media: String,
+    },
+    /// Участник включил или выключил микрофон или звук.
+    MemberVoice {
+        id: MemberId,
+        in_voice: bool,
+        mic: bool,
+        deaf: bool,
+    },
+}
+
+/// Предложение, что посмотреть.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Suggestion {
+    pub id: u64,
+    pub media: String,
+    /// Кто предложил.
+    pub by: MemberId,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,6 +175,15 @@ pub struct Member {
     /// `false` — связь пропала, ждём переподключения.
     #[serde(default = "yes")]
     pub online: bool,
+    /// Подключён к голосу.
+    #[serde(default)]
+    pub in_voice: bool,
+    /// Микрофон включён.
+    #[serde(default)]
+    pub mic: bool,
+    /// Выключил себе звук от всех.
+    #[serde(default)]
+    pub deaf: bool,
 }
 
 fn yes() -> bool {
@@ -219,6 +274,32 @@ mod tests {
     fn member_online_by_default() {
         let m: Member = serde_json::from_str(r#"{"id":1,"name":"n"}"#).unwrap();
         assert!(m.online);
+    }
+
+    #[test]
+    fn new_messages_round_trip() {
+        let spin: ClientMsg = serde_json::from_str(r#"{"type":"spin"}"#).unwrap();
+        assert!(matches!(spin, ClientMsg::Spin));
+        let clear: ClientMsg = serde_json::from_str(r#"{"type":"clear_media"}"#).unwrap();
+        assert!(matches!(clear, ClientMsg::ClearMedia));
+        let voice: ClientMsg =
+            serde_json::from_str(r#"{"type":"voice_state","in_voice":true,"mic":false,"deaf":true}"#)
+                .unwrap();
+        assert!(matches!(
+            voice,
+            ClientMsg::VoiceState {
+                in_voice: true,
+                mic: false,
+                deaf: true
+            }
+        ));
+        let v = serde_json::to_value(ServerMsg::Roulette {
+            winner: 4,
+            by: "Ferrum".into(),
+        })
+        .unwrap();
+        assert_eq!(v["type"], "roulette");
+        assert_eq!(v["winner"], 4);
     }
 
     #[test]
