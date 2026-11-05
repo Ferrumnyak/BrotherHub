@@ -62,3 +62,18 @@ export function isUrl(media: string): boolean {
 
 /** Клавиши, нажатые в окне видео (событие `player-key`). */
 export type PlayerKey = "fullscreen" | "exit-fullscreen" | "toggle-chat";
+
+/** Позиция, длительность и громкость (команда `player_info`). */
+export interface PlaybackInfo {
+  position: number | null;
+  duration: number | null;
+  paused: boolean;
+  volume: number | null;
+}
+
+/** Кнопки панели управления (команда `player_control`). */
+export type Control =
+  | { type: "toggle_pause" }
+  | { type: "seek"; position: number }
+  | { type: "seek_by"; delta: number }
+  | { type: "volume"; value: number };

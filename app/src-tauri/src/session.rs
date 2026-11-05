@@ -28,12 +28,36 @@ const SYNC_INTERVAL: Duration = Duration::from_secs(2);
 /// После перемотки даём плееру время загрузиться, прежде чем снова
 /// поправлять позицию (важно для онлайн-видео, где перемотка небыстрая).
 const SEEK_COOLDOWN: Duration = Duration::from_secs(4);
-/// Сколько висят сообщения чата поверх видео.
-const OVERLAY_TTL: Duration = Duration::from_secs(6);
+/// Сколько висят сообщения чата поверх видео (вместе с затуханием).
+const OVERLAY_TTL: Duration = Duration::from_secs(7);
+/// Плавное появление и затухание сообщений, секунды.
+const OVERLAY_FADE_IN: f64 = 0.3;
+const OVERLAY_FADE_OUT: f64 = 1.5;
+/// Как часто перерисовывать сообщения во время затухания.
+const OVERLAY_FRAME: Duration = Duration::from_millis(80);
 /// Сколько последних сообщений показывать поверх видео.
 const OVERLAY_LINES: usize = 4;
 
 pub type SharedSession = Arc<Mutex<Session>>;
+
+/// Позиция, длительность и громкость для панели управления.
+#[derive(Clone, Serialize)]
+pub struct PlaybackInfo {
+    position: Option<f64>,
+    duration: Option<f64>,
+    paused: bool,
+    volume: Option<f64>,
+}
+
+/// Кнопки панели управления.
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Control {
+    TogglePause,
+    Seek { position: f64 },
+    SeekBy { delta: f64 },
+    Volume { value: f64 },
+}
 
 /// Состояние плеера для интерфейса (событие `player-status`).
 #[derive(Clone, Serialize)]
@@ -108,6 +132,16 @@ impl Session {
         tauri::async_runtime::spawn(async move {
             while let Some((id, ev)) = events_rx.recv().await {
                 s.lock().await.on_player_event(id, ev).await;
+            }
+        });
+
+        // Плавное появление и затухание сообщений поверх видео.
+        let s = session.clone();
+        tauri::async_runtime::spawn(async move {
+            let mut interval = tokio::time::interval(OVERLAY_FRAME);
+            loop {
+                interval.tick().await;
+                s.lock().await.animate_overlay();
             }
         });
 
@@ -377,11 +411,14 @@ impl Session {
         self.render_overlay();
     }
 
-    /// Убрать устаревшие сообщения; `true`, если что-то убрали.
-    fn expire_overlay(&mut self) -> bool {
-        let before = self.overlay.len();
+    /// Кадр анимации: убрать истёкшие сообщения и перерисовать остальные
+    /// с нужной прозрачностью.
+    fn animate_overlay(&mut self) {
+        if self.overlay.is_empty() {
+            return;
+        }
         self.overlay.retain(|(at, _, _)| at.elapsed() < OVERLAY_TTL);
-        self.overlay.len() != before
+        self.render_overlay();
     }
 
     fn render_overlay(&self) {
@@ -397,26 +434,62 @@ impl Session {
         let lines: Vec<String> = self
             .overlay
             .iter()
-            .map(|(_, name, text)| {
+            .map(|(at, name, text)| {
                 format!(
-                    "{{\\c&H3AA6E0&\\b1}}{}:{{\\b0\\c&HFFFFFF&}} {}",
+                    "{{\\alpha&H{:02X}&\\c&H3AA6E0&\\fnSegoe UI Semibold}}{}{{\\c&HFFFFFF&\\fnSegoe UI}}  {}",
+                    overlay_alpha(at.elapsed().as_secs_f64()),
                     ass_escape(name),
                     ass_escape(text)
                 )
             })
             .collect();
+        // Левый нижний угол, мягкая тёмная обводка вместо подложки.
         let ass = format!(
-            "{{\\an1\\pos(24,640)\\fs22\\bord1.5\\shad0}}{}",
+            "{{\\an1\\pos(32,672)\\fnSegoe UI Semibold\\fs26\\bord2\\3c&H101010&\\blur1.2\\shad0}}{}",
             lines.join("\\N")
         );
         player.set_overlay(&ass);
     }
 
+    // ---------- Панель управления ----------
+
+    pub async fn info(&self) -> PlaybackInfo {
+        let Some(player) = &self.player else {
+            return PlaybackInfo {
+                position: None,
+                duration: None,
+                paused: true,
+                volume: None,
+            };
+        };
+        PlaybackInfo {
+            position: player.get_f64("time-pos").await,
+            duration: player.get_f64("duration").await,
+            paused: self.player_paused,
+            volume: player.get_f64("volume").await,
+        }
+    }
+
+    pub fn control(&mut self, control: Control) -> Result<(), String> {
+        let Some(player) = &self.player else {
+            return Ok(());
+        };
+        // Громкость у каждого своя, а паузой и перемоткой управляет глава.
+        // Его действия попадут в mpv, а оттуда событиями — на сервер.
+        if !matches!(control, Control::Volume { .. }) && !self.is_host() {
+            return Err("Паузой и перемоткой управляет глава лобби".into());
+        }
+        match control {
+            Control::TogglePause => player.set_pause(!self.player_paused),
+            Control::Seek { position } => player.seek(position.max(0.0)),
+            Control::SeekBy { delta } => player.seek_by(delta),
+            Control::Volume { value } => player.set_volume(value),
+        }
+        Ok(())
+    }
+
     /// Раз в [`SYNC_INTERVAL`]: глава сообщает позицию, остальные сверяются.
     async fn tick(&mut self) {
-        if self.expire_overlay() {
-            self.render_overlay();
-        }
         if !self.is_host() {
             self.apply().await;
             return;
@@ -510,6 +583,21 @@ impl Session {
     }
 }
 
+/// Прозрачность сообщения по его возрасту: 0x00 — видно, 0xFF — нет.
+fn overlay_alpha(age: f64) -> u8 {
+    let ttl = OVERLAY_TTL.as_secs_f64();
+    let visibility = if age < OVERLAY_FADE_IN {
+        age / OVERLAY_FADE_IN
+    } else if age > ttl - OVERLAY_FADE_OUT {
+        (ttl - age) / OVERLAY_FADE_OUT
+    } else {
+        1.0
+    };
+    // Плавнее на глаз, чем линейно.
+    let eased = visibility.clamp(0.0, 1.0).powf(1.6);
+    (255.0 * (1.0 - eased)).round() as u8
+}
+
 /// Убрать из текста символы, которые ASS понимает как разметку.
 fn ass_escape(text: &str) -> String {
     text.replace('\\', "/")
@@ -542,4 +630,17 @@ pub async fn set_chat_overlay(
 ) -> Result<(), String> {
     session.lock().await.set_overlay_enabled(enabled);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn player_info(session: State<'_, SharedSession>) -> Result<PlaybackInfo, String> {
+    Ok(session.lock().await.info().await)
+}
+
+#[tauri::command]
+pub async fn player_control(
+    session: State<'_, SharedSession>,
+    control: Control,
+) -> Result<(), String> {
+    session.lock().await.control(control)
 }

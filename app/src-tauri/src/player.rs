@@ -95,6 +95,16 @@ impl Player {
             "--title=BrotherWatch",
             "--no-terminal",
             "--ytdl-format=bestvideo[height<=?1080]+bestaudio/best",
+            // Встроенный mpv по умолчанию не принимает клавиатуру — включаем.
+            "--input-vo-keyboard=yes",
+            // Управление — панелью приложения, свою панель mpv прячем.
+            "--osc=no",
+            // Шрифты экранных подсказок и обычных (не ASS) субтитров.
+            "--osd-font=Segoe UI Semibold",
+            "--osd-font-size=36",
+            "--sub-font=Segoe UI Semibold",
+            "--sub-border-size=2.5",
+            "--sub-shadow-offset=1",
         ])
         .arg(format!("--input-ipc-server={ipc}"))
         .kill_on_drop(true);
@@ -231,6 +241,20 @@ impl Player {
             "format": format,
             "data": ass,
         }));
+    }
+
+    /// Перемотать относительно текущей позиции.
+    pub fn seek_by(&self, delta: f64) {
+        self.command(json!(["seek", delta, "relative"]));
+    }
+
+    pub fn set_volume(&self, volume: f64) {
+        self.command(json!(["set_property", "volume", volume.clamp(0.0, 130.0)]));
+    }
+
+    /// Прочитать числовое свойство.
+    pub async fn get_f64(&self, property: &str) -> Option<f64> {
+        self.get(property).await.and_then(|v| v.as_f64())
     }
 
     /// Текущая позиция в секундах (если файл загружен).

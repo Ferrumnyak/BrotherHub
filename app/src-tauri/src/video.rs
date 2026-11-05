@@ -43,6 +43,8 @@ pub fn create(window: &WebviewWindow, host: &VideoHost) -> Result<(), String> {
 
     /// Статическое окно, залитое чёрным.
     const SS_BLACKRECT: u32 = 0x0004;
+    /// Без этого флага static-окно «прозрачно» для мыши.
+    const SS_NOTIFY: u32 = 0x0100;
 
     let handle = window.window_handle().map_err(|e| e.to_string())?;
     let RawWindowHandle::Win32(win32) = handle.as_raw() else {
@@ -57,7 +59,7 @@ pub fn create(window: &WebviewWindow, host: &VideoHost) -> Result<(), String> {
             0,
             class.as_ptr(),
             std::ptr::null(),
-            WS_CHILD | WS_CLIPSIBLINGS | SS_BLACKRECT,
+            WS_CHILD | WS_CLIPSIBLINGS | SS_BLACKRECT | SS_NOTIFY,
             0,
             0,
             0,

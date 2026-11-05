@@ -6,6 +6,8 @@ import { ask, open } from "@tauri-apps/plugin-dialog";
 import {
   isUrl,
   type ClientMsg,
+  type Control,
+  type PlaybackInfo,
   type Member,
   type MemberId,
   type PlaybackState,
@@ -42,6 +44,10 @@ function save(key: string, value: string) {
 
 function send(msg: ClientMsg) {
   return invoke("send", { msg });
+}
+
+function control(c: Control) {
+  return invoke("player_control", { control: c });
 }
 
 function formatTime(seconds: number): string {
@@ -85,6 +91,8 @@ export default function App() {
   const [url, setUrl] = useState("");
   const [chatOpen, setChatOpen] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
+  const [info, setInfo] = useState<PlaybackInfo | null>(null);
+  const [scrub, setScrub] = useState<number | null>(null);
 
   const meRef = useRef<MemberId | null>(null);
   const membersRef = useRef<Member[]>([]);
@@ -297,7 +305,15 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
-      if (e.key === "Escape") {
+      const onButton = target?.tagName === "BUTTON";
+      if (e.code === "Space" && !typing && !onButton) {
+        e.preventDefault();
+        control({ type: "toggle_pause" }).catch((err) => setError(String(err)));
+      } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
+        e.preventDefault();
+        const delta = e.key === "ArrowLeft" ? -5 : 5;
+        control({ type: "seek_by", delta }).catch((err) => setError(String(err)));
+      } else if (e.key === "Escape") {
         onKeyRef.current("exit-fullscreen");
       } else if (e.key === "Tab" && !typing) {
         e.preventDefault();
@@ -309,6 +325,25 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [joinedRoom]);
+
+  // Позиция и длительность для панели управления.
+  useEffect(() => {
+    if (!joinedRoom || !player.running) {
+      setInfo(null);
+      return;
+    }
+    let active = true;
+    const poll = () =>
+      invoke<PlaybackInfo>("player_info")
+        .then((i) => active && setInfo(i))
+        .catch(() => {});
+    poll();
+    const timer = setInterval(poll, 400);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [joinedRoom, player.running]);
 
   // Сообщения поверх видео, пока панель чата скрыта.
   useEffect(() => {
@@ -475,6 +510,17 @@ export default function App() {
             </div>
           </div>
 
+          <PlayerControls
+            info={info}
+            canControl={isHost && player.running && player.loaded === media}
+            controlHint={isHost ? "Сначала открой файл или ссылку" : `Управляет ${hostName ?? "глава лобби"}`}
+            scrub={scrub}
+            onScrub={setScrub}
+            onError={(err) => setError(err)}
+            fullscreen={fullscreen}
+            onFullscreen={() => applyFullscreen(!fullscreen)}
+          />
+
           {!fullscreen && (
             <div className="statusbar">
               <span className={media ? "dot on" : "dot"} />
@@ -488,7 +534,7 @@ export default function App() {
                   {error}
                 </span>
               ) : (
-                <span className="muted small">F — полный экран · Tab — чат</span>
+                <span className="muted small">Пробел — пауза · ← → — перемотка · F — полный экран · Tab — чат</span>
               )}
             </div>
           )}
@@ -570,7 +616,105 @@ export default function App() {
   );
 }
 
-type IconName = "panel" | "fullscreen" | "folder" | "screen" | "crown" | "close" | "send";
+function PlayerControls({
+  info,
+  canControl,
+  controlHint,
+  scrub,
+  onScrub,
+  onError,
+  fullscreen,
+  onFullscreen,
+}: {
+  info: PlaybackInfo | null;
+  canControl: boolean;
+  controlHint: string;
+  scrub: number | null;
+  onScrub: (value: number | null) => void;
+  onError: (message: string) => void;
+  fullscreen: boolean;
+  onFullscreen: () => void;
+}) {
+  const duration = info?.duration ?? 0;
+  const position = scrub ?? info?.position ?? 0;
+  const paused = info?.paused ?? true;
+  const volume = info?.volume ?? 100;
+  const send = (c: Control) => control(c).catch((err) => onError(String(err)));
+
+  const commitScrub = () => {
+    if (scrub !== null) {
+      send({ type: "seek", position: scrub });
+      // Даём mpv перемотаться, чтобы ползунок не прыгнул назад.
+      setTimeout(() => onScrub(null), 300);
+    }
+  };
+
+  return (
+    <div className="controls">
+      <button
+        className="play"
+        onClick={() => send({ type: "toggle_pause" })}
+        disabled={!canControl}
+        title={canControl ? "Пробел" : controlHint}
+        aria-label={paused ? "Воспроизвести" : "Пауза"}
+      >
+        <Icon name={paused ? "play" : "pause"} size={18} />
+      </button>
+      <span className="time">{formatTime(position)}</span>
+      <input
+        className="seek"
+        type="range"
+        min={0}
+        max={duration || 1}
+        step={0.5}
+        value={Math.min(position, duration || 1)}
+        disabled={!canControl || !duration}
+        title={canControl ? "Перемотка (← →)" : controlHint}
+        aria-label="Перемотка"
+        onChange={(e) => onScrub(Number(e.target.value))}
+        onPointerUp={commitScrub}
+        onKeyUp={commitScrub}
+      />
+      <span className="time">{duration ? formatTime(duration) : "--:--"}</span>
+      <span className="volume">
+        <Icon name={volume > 0 ? "volume" : "mute"} />
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.min(volume, 100)}
+          disabled={!info}
+          aria-label="Громкость"
+          title="Громкость (у каждого своя)"
+          onChange={(e) => send({ type: "volume", value: Number(e.target.value) })}
+        />
+      </span>
+      <button
+        className="icon"
+        onClick={onFullscreen}
+        title={fullscreen ? "Выйти из полного экрана (Esc)" : "Полный экран (F)"}
+        aria-label={fullscreen ? "Выйти из полного экрана" : "Полный экран"}
+      >
+        <Icon name={fullscreen ? "exit-fullscreen" : "fullscreen"} />
+      </button>
+    </div>
+  );
+}
+
+type IconName =
+  | "panel"
+  | "fullscreen"
+  | "exit-fullscreen"
+  | "folder"
+  | "screen"
+  | "crown"
+  | "close"
+  | "send"
+  | "play"
+  | "pause"
+  | "volume"
+  | "mute";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
   panel: (
@@ -585,6 +729,35 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
       <polyline points="20 9 20 4 15 4" />
       <polyline points="4 15 4 20 9 20" />
       <polyline points="20 15 20 20 15 20" />
+    </>
+  ),
+  "exit-fullscreen": (
+    <>
+      <polyline points="9 4 9 9 4 9" />
+      <polyline points="15 4 15 9 20 9" />
+      <polyline points="9 20 9 15 4 15" />
+      <polyline points="15 20 15 15 20 15" />
+    </>
+  ),
+  play: <polygon points="7 4 20 12 7 20 7 4" />,
+  pause: (
+    <>
+      <rect x="6" y="4" width="4" height="16" rx="1" />
+      <rect x="14" y="4" width="4" height="16" rx="1" />
+    </>
+  ),
+  volume: (
+    <>
+      <polygon points="4 9 8 9 13 5 13 19 8 15 4 15 4 9" />
+      <path d="M16.5 8.5a5 5 0 0 1 0 7" />
+      <path d="M19 6a8.5 8.5 0 0 1 0 12" />
+    </>
+  ),
+  mute: (
+    <>
+      <polygon points="4 9 8 9 13 5 13 19 8 15 4 15 4 9" />
+      <line x1="17" y1="9" x2="22" y2="14" />
+      <line x1="22" y1="9" x2="17" y2="14" />
     </>
   ),
   folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,

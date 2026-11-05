@@ -32,6 +32,8 @@ fn main() {
             session::open_url,
             session::player_status,
             session::set_chat_overlay,
+            session::player_info,
+            session::player_control,
             video::set_video_rect
         ])
         .run(tauri::generate_context!())
