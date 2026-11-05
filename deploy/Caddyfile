@@ -1,0 +1,12 @@
+# Caddy сам получает бесплатные HTTPS-сертификаты (Let's Encrypt)
+# и пропускает WebSocket без дополнительных настроек.
+
+# Приложение: вход, чат, синхронизация.
+{$DOMAIN} {
+	reverse_proxy server:8080
+}
+
+# Голос: подключение к LiveKit.
+{$VOICE_DOMAIN} {
+	reverse_proxy livekit:7880
+}

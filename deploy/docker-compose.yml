@@ -1,8 +1,62 @@
+# Запуск BrotherWatch на сервере: наш сервер + голос (LiveKit) + Caddy,
+# который получает HTTPS-сертификат и шифрует соединения.
+#
+# Настройки — в файле .env рядом (шаблон: .env.example).
+# Запуск и обновление:
+#   docker compose pull
+#   docker compose up -d
+# Подробно — docs/DEPLOY.md.
+
 services:
   server:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    ports:
-      - "8080:8080"
+    image: ghcr.io/ferrumnyak/brotherwatch-server:latest
     restart: unless-stopped
+    environment:
+      BROTHERWATCH_ADDR: 0.0.0.0:8080
+      BROTHERWATCH_PASSWORD: ${BROTHERWATCH_PASSWORD:?впиши пароль в .env}
+      # Адрес голоса для приложений — через Caddy, с шифрованием.
+      LIVEKIT_URL: wss://${VOICE_DOMAIN:?впиши VOICE_DOMAIN в .env}
+      # Сервер обращается к LiveKit напрямую, внутри Docker.
+      LIVEKIT_API_URL: http://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?впиши ключ в .env}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?впиши секрет в .env}
+    # Наружу не открыт: к нему ходят только через Caddy.
+    expose:
+      - "8080"
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      # Звук голоса: основной путь (UDP) и запасной (TCP).
+      - "7882:7882/udp"
+      - "7881:7881/tcp"
+    expose:
+      - "7880"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?впиши DOMAIN в .env}
+      VOICE_DOMAIN: ${VOICE_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - server
+      - livekit
+
+volumes:
+  # Сертификаты HTTPS — сохраняются между перезапусками.
+  caddy_data:
+  caddy_config:

@@ -30,3 +30,6 @@ node_modules/
 # Установщики для друзей и адрес сервера (scripts/release.ps1)
 /release/
 /release.env
+
+# Настройки сервера с паролем и ключами — только на сервере
+/deploy/.env

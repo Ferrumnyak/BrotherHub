@@ -1,5 +1,9 @@
 .git
+.github
 target
+release
 app/node_modules
 app/dist
 app/src-tauri/gen
+app/src-tauri/bin
+deploy/.env

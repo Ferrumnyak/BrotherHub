@@ -21,7 +21,7 @@
 | `server/`        | Сервер (axum + WebSocket): комнаты, чат, синхронизация, пропуска в голос |
 | `app/`           | Приложение на Tauri 2, интерфейс на React + TypeScript            |
 | `app/src-tauri/` | Rust-часть приложения: связь с сервером, mpv, встраивание видео, синхронизация, «нажми и говори» |
-| `deploy/`        | Docker-файлы сервера                                              |
+| `deploy/`        | Запуск на сервере: Docker Compose, LiveKit, Caddy                 |
 | `scripts/`       | Сборка: скачивание mpv и yt-dlp, сборка релиза                    |
 | `docs/`          | Инструкции                                                        |
 
@@ -40,11 +40,9 @@
   [BUILD-INSTALLER.md](BUILD-INSTALLER.md)
 - Сторонние программы в установщике и их лицензии:
   [THIRD-PARTY.md](THIRD-PARTY.md)
-- Сервер в Docker (из корня репозитория):
-
-  ```bash
-  docker compose -f deploy/docker-compose.yml up -d --build
-  ```
+- Запуск сервера (наш сервер + LiveKit + Caddy с HTTPS): [DEPLOY.md](DEPLOY.md).
+  Образ сервера собирает GitHub Actions (`.github/workflows/server-image.yml`)
+  и публикует в `ghcr.io/ferrumnyak/brotherwatch-server`.
 
 ## Тесты
 
