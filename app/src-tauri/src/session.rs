@@ -152,6 +152,9 @@ pub struct Session {
     player_paused: bool,
     loaded: Option<String>,
     last_seek: Option<Instant>,
+    /// Текущая скорость плеера: не-ведущий слегка ускоряется или
+    /// замедляется, чтобы незаметно догнать ведущего.
+    speed: f64,
     /// Когда mpv сообщил об ошибке загрузки. Ошибку показываем, только если
     /// за пару секунд так ничего и не загрузилось: при смене качества и у
     /// некоторых сайтов mpv сообщает о промежуточных ошибках, а видео
@@ -181,6 +184,7 @@ impl Session {
             player_paused: true,
             loaded: None,
             last_seek: None,
+            speed: 1.0,
             load_failed_at: None,
             quality: None,
             reloading: false,
@@ -284,6 +288,7 @@ impl Session {
             let wid = self.app.state::<VideoHost>().wid();
             let player = Player::spawn(self.player_events.clone(), wid, self.quality).await?;
             self.player = Some(player);
+            self.speed = 1.0;
             self.player_paused = true;
             self.loaded = None;
             self.emit_status();
@@ -307,6 +312,10 @@ impl Session {
             }
             ServerMsg::HostChanged { host } => {
                 self.host = Some(*host);
+                // Ведущий — эталон времени, он всегда идёт с обычной скоростью.
+                if self.is_host() {
+                    self.reset_speed();
+                }
             }
             ServerMsg::Playback { playback, .. } => {
                 // Глава сам источник истины: свои же сообщения, вернувшиеся
@@ -371,12 +380,31 @@ impl Session {
         if recently_seeked {
             return;
         }
-        if let Some(position) = player.time_pos().await {
-            let expected = room.expected_position();
-            if (position - expected).abs() > TOLERANCE {
-                player.seek(expected);
-                self.last_seek = Some(Instant::now());
+        let Some(position) = player.time_pos().await else {
+            return;
+        };
+        let expected = room.expected_position();
+        // > 0 — мы впереди ведущего, < 0 — отстаём.
+        let drift = position - expected;
+
+        let (seek, speed) = catch_up(drift, room.state.paused, self.speed);
+        if seek {
+            player.seek(expected);
+            self.last_seek = Some(Instant::now());
+        }
+        if (speed - self.speed).abs() > f64::EPSILON {
+            player.set_speed(speed);
+            self.speed = speed;
+        }
+    }
+
+    /// Вернуть обычную скорость (новый файл, стали ведущим и т.п.).
+    fn reset_speed(&mut self) {
+        if (self.speed - 1.0).abs() > f64::EPSILON {
+            if let Some(player) = &self.player {
+                player.set_speed(1.0);
             }
+            self.speed = 1.0;
         }
     }
 
@@ -436,6 +464,7 @@ impl Session {
             }
             PlayerEvent::FileLoaded => {
                 self.load_failed_at = None;
+                self.reset_speed();
                 if !self.is_host() {
                     self.last_seek = None;
                     self.apply().await;
@@ -754,6 +783,39 @@ impl Session {
     }
 }
 
+/// Расхождение, после которого догоняем перемоткой, а не скоростью.
+const SEEK_DRIFT: f64 = 3.0;
+/// Расхождение, с которого начинаем подгонять скорость.
+const NUDGE_START: f64 = 0.25;
+/// Расхождение, при котором возвращаем обычную скорость.
+const NUDGE_DONE: f64 = 0.06;
+/// На сколько ускоряемся/замедляемся: 5 % на слух почти незаметно
+/// (mpv сохраняет высоту звука).
+const NUDGE: f64 = 0.05;
+
+/// Как догнать ведущего: `(перемотать?, скорость)`.
+///
+/// Большое расхождение — перемотка. Небольшое — плавно: чуть быстрее, если
+/// отстаём, чуть медленнее, если убежали вперёд, пока не сравняемся.
+fn catch_up(drift: f64, paused: bool, current_speed: f64) -> (bool, f64) {
+    if paused {
+        return (drift.abs() > TOLERANCE, 1.0);
+    }
+    if drift.abs() > SEEK_DRIFT {
+        return (true, 1.0);
+    }
+    let speed = if drift < -NUDGE_START {
+        1.0 + NUDGE
+    } else if drift > NUDGE_START {
+        1.0 - NUDGE
+    } else if drift.abs() < NUDGE_DONE {
+        1.0
+    } else {
+        current_speed // почти догнали — продолжаем как шли
+    };
+    (false, speed)
+}
+
 /// Прозрачность сообщения по его возрасту: 0x00 — видно, 0xFF — нет.
 fn overlay_alpha(age: f64) -> u8 {
     let ttl = OVERLAY_TTL.as_secs_f64();
@@ -823,4 +885,48 @@ pub async fn set_quality(
 ) -> Result<(), String> {
     session.lock().await.set_quality(height).await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_lag_is_caught_up_by_speed_not_seek() {
+        assert_eq!(catch_up(-1.0, false, 1.0), (false, 1.0 + NUDGE));
+        assert_eq!(catch_up(1.0, false, 1.0), (false, 1.0 - NUDGE));
+    }
+
+    #[test]
+    fn big_lag_is_fixed_by_seek() {
+        assert_eq!(catch_up(-10.0, false, 1.0 + NUDGE), (true, 1.0));
+    }
+
+    #[test]
+    fn speed_returns_to_normal_when_in_sync() {
+        assert_eq!(catch_up(0.01, false, 1.0 + NUDGE), (false, 1.0));
+        // Между «начать» и «закончить» — продолжаем догонять.
+        assert_eq!(catch_up(-0.1, false, 1.0 + NUDGE), (false, 1.0 + NUDGE));
+        assert_eq!(catch_up(-0.1, false, 1.0), (false, 1.0));
+    }
+
+    #[test]
+    fn on_pause_only_seek_when_far() {
+        assert_eq!(catch_up(-0.3, true, 1.0 + NUDGE), (false, 1.0));
+        assert_eq!(catch_up(-2.0, true, 1.0), (true, 1.0));
+    }
+
+    #[test]
+    fn chat_overlay_fades_in_and_out() {
+        assert_eq!(overlay_alpha(0.0), 0xFF);
+        assert_eq!(overlay_alpha(2.0), 0x00);
+        let ttl = OVERLAY_TTL.as_secs_f64();
+        assert_eq!(overlay_alpha(ttl), 0xFF);
+        assert!(overlay_alpha(ttl - 0.5) > 0x00);
+    }
+
+    #[test]
+    fn ass_markup_is_escaped() {
+        assert_eq!(ass_escape("{\\b1}жирный\nтекст"), "(/b1)жирный текст");
+    }
 }

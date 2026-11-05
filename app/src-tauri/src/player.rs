@@ -99,6 +99,13 @@ impl Player {
             "--pause=yes",
             "--title=BrotherWatch",
             "--no-terminal",
+            // Декодировать видео на видеокарте, если она умеет (4K и HEVC
+            // без нагрузки на процессор); иначе — процессором, как раньше.
+            "--hwdec=auto-safe",
+            // Запас для онлайн-видео, чтобы не подтормаживало.
+            "--cache=yes",
+            "--demuxer-max-bytes=150MiB",
+            "--demuxer-readahead-secs=30",
             // Встроенный mpv по умолчанию не принимает клавиатуру — включаем.
             "--input-vo-keyboard=yes",
             // Управление — панелью приложения, свою панель mpv прячем.
@@ -285,6 +292,11 @@ impl Player {
     /// Подключить субтитры из файла и сразу их включить.
     pub fn add_subtitle(&self, path: &str) {
         self.command(json!(["sub-add", path, "select"]));
+    }
+
+    /// Скорость воспроизведения (1.0 — обычная).
+    pub fn set_speed(&self, speed: f64) {
+        self.command(json!(["set_property", "speed", speed]));
     }
 
     pub fn set_volume(&self, volume: f64) {
@@ -534,4 +546,29 @@ async fn open_ipc(path: &str) -> std::io::Result<tokio::net::windows::named_pipe
 #[cfg(unix)]
 async fn open_ipc(path: &str) -> std::io::Result<tokio::net::UnixStream> {
     tokio::net::UnixStream::connect(path).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quality_format() {
+        assert_eq!(
+            ytdl_format(None),
+            "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
+        );
+        assert!(ytdl_format(Some(480)).contains("height<=?480"));
+    }
+
+    #[test]
+    fn keys_from_mpv() {
+        let v: Value =
+            serde_json::from_str(r#"{"event":"client-message","args":["bw","toggle-chat"]}"#)
+                .unwrap();
+        assert!(matches!(parse_key(&v), Some(PlayerKey::ToggleChat)));
+        let other: Value =
+            serde_json::from_str(r#"{"event":"client-message","args":["x","y"]}"#).unwrap();
+        assert!(parse_key(&other).is_none());
+    }
 }

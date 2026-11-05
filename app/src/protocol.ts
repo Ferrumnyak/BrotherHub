@@ -6,6 +6,8 @@ export type MemberId = number;
 export interface Member {
   id: MemberId;
   name: string;
+  /** false — связь пропала, ждём переподключения. */
+  online: boolean;
 }
 
 /** Пропуск в голосовой канал LiveKit. */
@@ -23,7 +25,14 @@ export interface PlaybackState {
 export type PlaybackAction = "set_media" | "play" | "pause" | "seek";
 
 export type ClientMsg =
-  | { type: "join"; room: string; name: string; password?: string | null }
+  | {
+      type: "join";
+      room: string;
+      name: string;
+      password?: string | null;
+      resume?: string | null;
+    }
+  | { type: "leave" }
   | { type: "chat"; text: string }
   | { type: "set_media"; media: string }
   | { type: "play"; position: number }
@@ -37,6 +46,8 @@ export type ServerMsg =
   | {
       type: "welcome";
       you: MemberId;
+      token: string;
+      resumed: boolean;
       room: string;
       host: MemberId;
       members: Member[];
@@ -44,6 +55,7 @@ export type ServerMsg =
       voice: VoiceAccess | null;
     }
   | { type: "member_joined"; member: Member }
+  | { type: "member_status"; id: MemberId; online: boolean }
   | { type: "member_left"; id: MemberId; kicked: boolean }
   | { type: "kicked"; by: string }
   | { type: "host_changed"; host: MemberId }

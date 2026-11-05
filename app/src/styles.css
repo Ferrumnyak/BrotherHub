@@ -434,6 +434,20 @@ button.icon:hover {
   color: var(--lamp-soft);
 }
 
+.notice.reconnecting {
+  background: #3a2427;
+  color: #f0c2c6;
+}
+
+.fullscreen .notice.reconnecting {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  margin: 0;
+}
+
 .notice button.primary {
   height: 36px;
   font-size: 14px;
@@ -768,6 +782,10 @@ html.overlay body {
   font-size: 13px;
   color: var(--text);
   transition: box-shadow 0.12s;
+}
+
+.seat.offline {
+  opacity: 0.4;
 }
 
 .seat.speaking {

@@ -190,6 +190,7 @@ export default function App() {
   const [room, setRoom] = useState(() => load("room", "brotherhood"));
   const [password, setPassword] = useState(() => load("password", ""));
   const [connecting, setConnecting] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
   const [showServer, setShowServer] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -250,6 +251,8 @@ export default function App() {
     });
   }
   const voice = voiceRef.current;
+  const voiceStatusRef = useRef(voiceStatus);
+  voiceStatusRef.current = voiceStatus;
 
   const meRef = useRef<MemberId | null>(null);
   const membersRef = useRef<Member[]>([]);
@@ -279,12 +282,22 @@ export default function App() {
           setJoinedRoom(msg.room);
           setMembers(msg.members);
           setPlayback(msg.playback);
+          setReconnecting(false);
+          if (msg.resumed) {
+            // Вернулись на своё место: чат и голос оставляем как были.
+            system("Связь восстановлена", "enter");
+            if (voiceStatusRef.current !== "connected") setVoiceAccess(msg.voice);
+            break;
+          }
           setVoiceAccess(msg.voice);
           setLines([]);
           system(`Ты в зале «${msg.room}»`, "enter");
           if (msg.host === msg.you) system("Ты ведёшь просмотр: выбирай, что смотрим", "host");
           break;
         }
+        case "member_status":
+          setMembers((m) => m.map((x) => (x.id === msg.id ? { ...x, online: msg.online } : x)));
+          break;
         case "member_joined":
           setMembers((m) => [...m, msg.member]);
           system(`${msg.member.name} зашёл в зал`, "enter");
@@ -361,10 +374,12 @@ export default function App() {
     }).then(keep);
     listen<Track[]>("player-tracks", (e) => setTracks(e.payload)).then(keep);
     listen<PlayerKey>("player-key", (e) => onKeyRef.current(e.payload)).then(keep);
+    listen("reconnecting", () => setReconnecting(true)).then(keep);
     listen("disconnected", () => {
+      setReconnecting(false);
       setVoiceAccess(null);
       setJoinedRoom(null);
-      setError("Соединение с сервером потеряно");
+      setError("Не получилось восстановить связь с сервером. Проверь интернет и зайди снова");
     }).then(keep);
 
     invoke<PlayerStatus>("player_status").then((s) => active && setPlayer(s));
@@ -864,6 +879,11 @@ export default function App() {
           </header>
         )}
 
+        {reconnecting && (
+          <div className="notice reconnecting" role="status">
+            <span>Связь с сервером пропала. Переподключаюсь — видео пока идёт дальше.</span>
+          </div>
+        )}
         {!fullscreen && isHost && (
           <form className="source-bar" onSubmit={handleOpenUrl}>
             <label className="source-input">
@@ -950,7 +970,9 @@ export default function App() {
                 return (
                   <li key={m.id}>
                     <span
-                      className={speaking ? "seat speaking" : "seat"}
+                      className={["seat", speaking && "speaking", !m.online && "offline"]
+                        .filter(Boolean)
+                        .join(" ")}
                       style={{ background: SEAT_COLORS[colorIndex(m.name)] }}
                       title={speaking ? "Говорит" : undefined}
                     >
@@ -961,7 +983,11 @@ export default function App() {
                         {m.name}
                         {m.id === me && <span className="muted"> (ты)</span>}
                       </span>
-                      {m.id === host && <span className="seat-role">ведёт просмотр</span>}
+                      {!m.online ? (
+                        <span className="seat-role">переподключается…</span>
+                      ) : (
+                        m.id === host && <span className="seat-role">ведёт просмотр</span>
+                      )}
                     </span>
                     {isHost && m.id !== me && (
                       <span className="seat-menu">
@@ -1114,7 +1140,8 @@ export default function App() {
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="Написать в зал"
+                disabled={reconnecting}
+                placeholder={reconnecting ? "Ждём связь с сервером…" : "Написать в зал"}
                 aria-label="Сообщение"
                 maxLength={2000}
               />
