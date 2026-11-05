@@ -3,5 +3,14 @@
   "identifier": "default",
   "description": "Права главного окна",
   "windows": ["main", "controls"],
-  "permissions": ["core:default", "dialog:default", "core:window:allow-set-fullscreen"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "core:window:allow-set-fullscreen",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize"
+  ]
 }

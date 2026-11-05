@@ -5,13 +5,32 @@
 // id участника комнаты (строкой).
 
 import {
+  createAudioAnalyser,
   Room,
   RoomEvent,
   Track,
+  type LocalAudioTrack,
+  type LocalTrackPublication,
   type Participant,
+  type RemoteAudioTrack,
   type RemoteParticipant,
   type RemoteTrack,
+  type RemoteVideoTrack,
 } from "livekit-client";
+
+/** Чужая трансляция экрана. */
+export type ScreenShare = { identity: string; track: RemoteVideoTrack };
+
+// Кто говорит, определяем сами по громкости звука, а не по сообщениям
+// сервера LiveKit: сервер сглаживает их и присылает с заметной задержкой.
+/** Как часто проверять громкость, мс. */
+const SPEAK_POLL_MS = 40;
+/** Громкость (0..1), с которой считаем, что человек говорит. */
+const SPEAK_ON = 0.04;
+/** Сколько ждать после тишины, прежде чем погасить кольцо, мс (паузы между словами). */
+const SPEAK_HOLD_MS = 350;
+
+type Meter = { volume: () => number; cleanup: () => Promise<void>; loudAt: number };
 
 export type VoiceStatus = "off" | "connecting" | "connected" | "error";
 
@@ -21,6 +40,10 @@ export interface VoiceCallbacks {
   onSpeakers(identities: Set<string>): void;
   /** Ошибка, не обрывающая соединение (например, нет доступа к микрофону). */
   onError(message: string): void;
+  /** Чья трансляция экрана сейчас показывается (последняя начатая), или `null`. */
+  onScreenShare(share: ScreenShare | null): void;
+  /** Показываю ли я свой экран. */
+  onLocalScreenShare(active: boolean): void;
 }
 
 export class VoiceClient {
@@ -28,6 +51,16 @@ export class VoiceClient {
   private volumes = new Map<string, number>();
   private deafened = false;
   private micOn = false;
+  /** Измерители громкости по участникам (id строкой). */
+  private meters = new Map<string, Meter>();
+  /** Кто говорит по данным сервера — для тех, кого не удалось измерить самим. */
+  private serverSpeakers = new Set<string>();
+  private speaking = new Set<string>();
+  private poll: number | null = null;
+  /** Чужие трансляции по порядку начала (последняя — та, что на экране). */
+  private shares: ScreenShare[] = [];
+  /** Мои дорожки трансляции, пока показываю экран. */
+  private myShare: MediaStreamTrack[] = [];
 
   constructor(private cb: VoiceCallbacks) {}
 
@@ -52,26 +85,66 @@ export class VoiceClient {
     room.on(
       RoomEvent.TrackSubscribed,
       (track: RemoteTrack, _publication: unknown, participant: RemoteParticipant) => {
+        if (track.source === Track.Source.ScreenShare && track.kind === Track.Kind.Video) {
+          this.shares = [
+            ...this.shares.filter((s) => s.identity !== participant.identity),
+            { identity: participant.identity, track: track as RemoteVideoTrack },
+          ];
+          this.emitShare();
+          return;
+        }
         if (track.kind !== Track.Kind.Audio) return;
         const el = track.attach();
         el.style.display = "none";
         document.body.appendChild(el);
         this.applyVolume(participant);
+        if (track.source === Track.Source.Microphone) {
+          this.addMeter(participant.identity, track as RemoteAudioTrack);
+        }
       },
     );
-    room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
-      track.detach().forEach((el) => el.remove());
+    room.on(
+      RoomEvent.TrackUnsubscribed,
+      (track: RemoteTrack, _publication: unknown, participant: RemoteParticipant) => {
+        if (track.source === Track.Source.ScreenShare && track.kind === Track.Kind.Video) {
+          this.shares = this.shares.filter((s) => s.track !== track);
+          this.emitShare();
+          return;
+        }
+        track.detach().forEach((el) => el.remove());
+        // Звук трансляции — не голос: кольцо «говорит» от него не зависит.
+        if (track.kind === Track.Kind.Audio && track.source === Track.Source.Microphone) {
+          this.removeMeter(participant.identity);
+        }
+      },
+    );
+    // Свой микрофон: кольцо загорается сразу, как начинаешь говорить.
+    room.on(RoomEvent.LocalTrackPublished, (pub: LocalTrackPublication) => {
+      if (pub.source === Track.Source.Microphone && pub.track) {
+        this.addMeter(room.localParticipant.identity, pub.track as LocalAudioTrack);
+      }
+    });
+    room.on(RoomEvent.LocalTrackUnpublished, (pub: LocalTrackPublication) => {
+      if (pub.source === Track.Source.Microphone) {
+        this.removeMeter(room.localParticipant.identity);
+      }
     });
     room.on(RoomEvent.ParticipantConnected, (p: RemoteParticipant) => this.applyVolume(p));
     room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-      this.cb.onSpeakers(new Set(speakers.map((p) => p.identity)));
+      this.serverSpeakers = new Set(speakers.map((p) => p.identity));
+      this.updateSpeakers();
     });
     room.on(RoomEvent.Disconnected, () => {
       if (this.room !== room) return;
       this.room = null;
-      this.cb.onSpeakers(new Set());
+      this.stopMeters();
+      this.dropShares();
       this.cb.onStatus("off");
     });
+
+    if (this.poll === null) {
+      this.poll = window.setInterval(() => this.updateSpeakers(), SPEAK_POLL_MS);
+    }
 
     this.cb.onStatus("connecting");
     try {
@@ -88,7 +161,165 @@ export class VoiceClient {
     const room = this.room;
     this.room = null;
     this.micOn = false;
+    this.stopMeters();
+    this.dropShares();
     if (room) await room.disconnect();
+  }
+
+  // ----- Трансляция экрана -----
+
+  /**
+   * Показать свой экран или окно вместе со звуком. Windows покажет окно
+   * выбора, что именно показывать.
+   */
+  async startScreenShare() {
+    const room = this.room;
+    if (!room || this.myShare.length > 0) return;
+    let stream: MediaStream;
+    try {
+      // Нестандартные поля Chromium (WebView2 — это он): звук всей системы,
+      // без звука самого BrotherWatch — иначе друзья услышат себя.
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1920 }, height: { max: 1080 } },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          restrictOwnAudio: true,
+          suppressLocalAudioPlayback: false,
+        },
+        systemAudio: "include",
+        windowAudio: "system",
+        selfBrowserSurface: "exclude",
+        surfaceSwitching: "include",
+      } as DisplayMediaStreamOptions);
+    } catch (err) {
+      // Отмена в окне выбора — не ошибка.
+      if (!String(err).includes("NotAllowed") && !String(err).includes("AbortError")) {
+        this.cb.onError(`Не удалось показать экран: ${err}`);
+      }
+      return;
+    }
+    if (this.room !== room) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+
+    const [video] = stream.getVideoTracks();
+    const [audio] = stream.getAudioTracks();
+    this.myShare = stream.getTracks();
+    // «Прекратить показ» на панели Windows или закрытое окно — заканчиваем.
+    video?.addEventListener("ended", () => this.stopScreenShare());
+    if (video) video.contentHint = "motion";
+
+    try {
+      if (video) {
+        await room.localParticipant.publishTrack(video, {
+          source: Track.Source.ScreenShare,
+          screenShareEncoding: { maxBitrate: 5_000_000, maxFramerate: 30 },
+          degradationPreference: "maintain-framerate",
+          simulcast: false,
+        });
+      }
+      if (audio) {
+        await room.localParticipant.publishTrack(audio, {
+          source: Track.Source.ScreenShareAudio,
+          // Для фильмов и музыки: без «тишины» и в хорошем качестве.
+          dtx: false,
+          red: false,
+          audioPreset: { maxBitrate: 128_000 },
+        });
+      } else {
+        this.cb.onError("Экран показывается без звука: Windows не дал захватить звук.");
+      }
+      this.cb.onLocalScreenShare(true);
+    } catch (err) {
+      this.cb.onError(`Не удалось показать экран: ${err}`);
+      await this.stopScreenShare();
+    }
+  }
+
+  async stopScreenShare() {
+    const tracks = this.myShare;
+    if (tracks.length === 0) return;
+    this.myShare = [];
+    const room = this.room;
+    for (const t of tracks) {
+      try {
+        if (room) await room.localParticipant.unpublishTrack(t, true);
+      } catch {
+        // Уже снята — ничего страшного.
+      }
+      t.stop();
+    }
+    this.cb.onLocalScreenShare(false);
+  }
+
+  private emitShare() {
+    this.cb.onScreenShare(this.shares[this.shares.length - 1] ?? null);
+  }
+
+  private dropShares() {
+    this.myShare.forEach((t) => t.stop());
+    if (this.myShare.length > 0) this.cb.onLocalScreenShare(false);
+    this.myShare = [];
+    this.shares = [];
+    this.cb.onScreenShare(null);
+  }
+
+  // ----- Кто говорит -----
+
+  private addMeter(identity: string, track: LocalAudioTrack | RemoteAudioTrack) {
+    this.removeMeter(identity);
+    try {
+      const { calculateVolume, cleanup } = createAudioAnalyser(track, {
+        fftSize: 512,
+        smoothingTimeConstant: 0.2,
+        // Тише −75 дБ — тишина и шум, громче −25 дБ — уже точно голос.
+        minDecibels: -75,
+        maxDecibels: -25,
+      });
+      this.meters.set(identity, { volume: calculateVolume, cleanup, loudAt: 0 });
+    } catch {
+      // Не получилось измерить — останутся данные сервера.
+    }
+  }
+
+  private removeMeter(identity: string) {
+    const meter = this.meters.get(identity);
+    if (!meter) return;
+    this.meters.delete(identity);
+    meter.cleanup().catch(() => {});
+  }
+
+  private stopMeters() {
+    [...this.meters.keys()].forEach((id) => this.removeMeter(id));
+    if (this.poll !== null) {
+      window.clearInterval(this.poll);
+      this.poll = null;
+    }
+    this.serverSpeakers = new Set();
+    this.speaking = new Set();
+    this.cb.onSpeakers(new Set());
+  }
+
+  private updateSpeakers() {
+    const now = performance.now();
+    const next = new Set<string>();
+    this.meters.forEach((meter, id) => {
+      if (meter.volume() >= SPEAK_ON) meter.loudAt = now;
+      if (now - meter.loudAt < SPEAK_HOLD_MS) next.add(id);
+    });
+    this.serverSpeakers.forEach((id) => {
+      if (!this.meters.has(id)) next.add(id);
+    });
+    // Свой микрофон выключен — не светимся, даже если трек ещё не остановился.
+    const me = this.room?.localParticipant.identity;
+    if (me && !this.micOn) next.delete(me);
+
+    if (next.size === this.speaking.size && [...next].every((id) => this.speaking.has(id))) return;
+    this.speaking = next;
+    this.cb.onSpeakers(new Set(next));
   }
 
   /** Включить/выключить передачу своего голоса. */

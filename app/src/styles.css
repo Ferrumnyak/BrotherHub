@@ -1206,6 +1206,136 @@ button.dock:hover:not(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---------- Узкое и низкое окно (до 480×320) ---------- */
+
+@media (max-width: 760px) {
+  .room {
+    grid-template-columns: 1fr 240px;
+  }
+
+  .stage-header {
+    padding: 12px 16px 10px;
+  }
+
+  .source-bar {
+    padding: 0 16px 10px;
+  }
+
+  .video {
+    margin: 0 16px;
+  }
+
+  .controls {
+    padding: 10px 16px 12px;
+  }
+
+  .notice {
+    margin: 0 16px 10px;
+  }
+}
+
+@media (max-height: 560px) {
+  .room-title p {
+    display: none;
+  }
+
+  .stage-header {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .source-input {
+    height: 38px;
+  }
+
+  .controls {
+    gap: 6px;
+    padding-top: 8px;
+    padding-bottom: 10px;
+  }
+
+  /* Дорожки и качество — в обычном окне побольше; тут оставляем главное. */
+  .stage .track-select {
+    display: none;
+  }
+}
+
+/* ---------- Мини-окно ---------- */
+
+.room.mini .video {
+  margin: 0;
+  border-radius: 0;
+}
+
+.room.mini .controls {
+  gap: 4px;
+  padding: 6px 10px 8px;
+}
+
+.room.mini .track-select,
+.room.mini .now-status,
+.room.mini .fullscreen-toggle {
+  display: none;
+}
+
+.room.mini .control-row {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+
+.room.mini .now {
+  flex-basis: auto;
+}
+
+.room.mini .volume {
+  margin-left: 0;
+}
+
+.room.mini .volume input {
+  width: 70px;
+}
+
+.room.mini .time {
+  width: 44px;
+}
+
+/* ---------- Трансляция экрана ---------- */
+
+.video {
+  position: relative;
+  overflow: hidden;
+}
+
+.screen-share {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.screen-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(20, 15, 17, 0.75);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.video-placeholder p {
+  margin-bottom: 12px;
+}
+
+.header-actions button.sharing {
+  color: var(--lamp);
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;

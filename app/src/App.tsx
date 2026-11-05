@@ -1,7 +1,7 @@
 import { CSSProperties, FormEvent, ReactElement, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   isUrl,
@@ -17,7 +17,7 @@ import {
   type Track,
   type VoiceAccess,
 } from "./protocol";
-import { keyName, listMicrophones, VoiceClient, type VoiceStatus } from "./voice";
+import { keyName, listMicrophones, VoiceClient, type ScreenShare, type VoiceStatus } from "./voice";
 
 type VoiceMode = "open" | "ptt";
 
@@ -52,6 +52,11 @@ function people(n: number): string {
 
 /** Высота панели плеера поверх видео в полном экране, CSS-пиксели. */
 const OVERLAY_HEIGHT = 150;
+/** Размер мини-окна (внутренняя часть, без заголовка). */
+const MINI_WIDTH = 480;
+const MINI_HEIGHT = 340;
+/** Уже этого окно считается узким: чат прячется сам. */
+const NARROW_WIDTH = 760;
 
 /** Что нужно панели плеера поверх видео (событие `overlay-state`). */
 interface OverlayState {
@@ -253,6 +258,18 @@ export default function App() {
   const [url, setUrl] = useState("");
   const [chatOpen, setChatOpen] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
+  // Мини-окно поверх всех окон: только видео и короткая панель.
+  const [mini, setMini] = useState(false);
+  const miniRestore = useRef<{
+    size: PhysicalSize;
+    position: PhysicalPosition;
+    maximized: boolean;
+    chat: boolean;
+  } | null>(null);
+  // Трансляция экрана: чужая, которую показываем, и показываю ли я свою.
+  const [screenShare, setScreenShare] = useState<ScreenShare | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const screenRef = useRef<HTMLVideoElement>(null);
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -296,6 +313,8 @@ export default function App() {
       },
       onSpeakers: setSpeakers,
       onError: (message) => setVoiceError(message),
+      onScreenShare: setScreenShare,
+      onLocalScreenShare: setSharing,
     });
   }
   const voice = voiceRef.current;
@@ -310,6 +329,8 @@ export default function App() {
   const videoRef = useRef<HTMLDivElement>(null);
   const fullscreenRef = useRef(false);
   fullscreenRef.current = fullscreen;
+  const miniRef = useRef(false);
+  miniRef.current = mini;
 
   const isHost = me !== null && me === host;
 
@@ -513,6 +534,7 @@ export default function App() {
   // ----- Полный экран и панель чата -----
 
   async function applyFullscreen(next: boolean) {
+    if (next && miniRef.current) await applyMini(false);
     try {
       await getCurrentWindow().setFullscreen(next);
     } catch (err) {
@@ -523,11 +545,59 @@ export default function App() {
     setChatOpen(!next);
   }
 
+  /** Мини-окно: маленькое, поверх всех окон, в правом нижнем углу экрана. */
+  async function applyMini(next: boolean) {
+    const win = getCurrentWindow();
+    try {
+      if (next) {
+        if (fullscreenRef.current) await applyFullscreen(false);
+        const maximized = await win.isMaximized();
+        miniRestore.current = {
+          size: await win.innerSize(),
+          position: await win.outerPosition(),
+          maximized,
+          chat: chatOpen,
+        };
+        if (maximized) await win.unmaximize();
+        setChatOpen(false);
+        setMini(true);
+        await win.setSize(new LogicalSize(MINI_WIDTH, MINI_HEIGHT));
+        await win.setAlwaysOnTop(true);
+        const monitor = await currentMonitor();
+        if (monitor) {
+          const outer = await win.outerSize();
+          const gap = Math.round(16 * monitor.scaleFactor);
+          const area = monitor.workArea;
+          await win.setPosition(
+            new PhysicalPosition(
+              area.position.x + area.size.width - outer.width - gap,
+              area.position.y + area.size.height - outer.height - gap,
+            ),
+          );
+        }
+      } else {
+        const restore = miniRestore.current;
+        miniRestore.current = null;
+        await win.setAlwaysOnTop(false);
+        setMini(false);
+        setChatOpen(restore?.chat ?? true);
+        if (restore) {
+          await win.setSize(restore.size);
+          await win.setPosition(restore.position);
+          if (restore.maximized) await win.maximize();
+        }
+      }
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
   const onKey = (key: PlayerKey) => {
     if (key === "fullscreen") applyFullscreen(!fullscreenRef.current);
     else if (key === "exit-fullscreen") {
       if (fullscreenRef.current) applyFullscreen(false);
-    } else if (key === "toggle-chat") setChatOpen((open) => !open);
+      else if (miniRef.current) applyMini(false);
+    } else if (key === "toggle-chat" && !miniRef.current) setChatOpen((open) => !open);
   };
   const onKeyRef = useRef(onKey);
   onKeyRef.current = onKey;
@@ -595,6 +665,46 @@ export default function App() {
       window.removeEventListener("keydown", poke);
     };
   }, [fullscreen]);
+
+  // Окно сузили — чат прячется сам, чтобы видео не стало крошечным.
+  // Обратно его можно открыть кнопкой или Tab.
+  useEffect(() => {
+    if (!joinedRoom) return;
+    let wasNarrow = window.innerWidth < NARROW_WIDTH;
+    const onResize = () => {
+      const narrow = window.innerWidth < NARROW_WIDTH;
+      if (narrow && !wasNarrow && !miniRef.current) setChatOpen(false);
+      wasNarrow = narrow;
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [joinedRoom]);
+
+  // Чужая трансляция экрана — в элемент <video> на месте плеера.
+  useEffect(() => {
+    const el = screenRef.current;
+    if (!screenShare || !el) return;
+    screenShare.track.attach(el);
+    return () => {
+      screenShare.track.detach(el);
+    };
+  }, [screenShare]);
+
+  // Вышли из зала (или выгнали) в мини-окне — возвращаем обычное окно.
+  useEffect(() => {
+    if (!joinedRoom && miniRef.current) applyMini(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [joinedRoom]);
+
+  // Вышли из зала или голос отключился — показ экрана заканчивается.
+  useEffect(() => {
+    if (voiceStatus !== "connected") setScreenShare(null);
+  }, [voiceStatus]);
+
+  async function toggleScreenShare() {
+    if (sharing) await voice.stopScreenShare();
+    else await voice.startScreenShare();
+  }
 
   // Качество ссылок: запоминается и применяется сразу, даже к открытому видео.
   useEffect(() => {
@@ -730,7 +840,9 @@ export default function App() {
   // Окно видео mpv лежит поверх области .video — сообщаем, где она.
   useEffect(() => {
     const el = videoRef.current;
-    const show = joinedRoom !== null && player.running && el !== null;
+    // Пока идёт трансляция экрана, окно mpv прячем — на его месте трансляция.
+    const show =
+      joinedRoom !== null && player.running && el !== null && !screenShare && !sharing;
     const update = () => {
       if (!show || !el) {
         invoke("set_video_rect", { rect: null }).catch(() => {});
@@ -769,7 +881,7 @@ export default function App() {
       window.removeEventListener("resize", update);
       invoke("set_video_rect", { rect: null }).catch(() => {});
     };
-  }, [joinedRoom, player.running, chatOpen, fullscreen]);
+  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing]);
 
   // ----- Связь с панелью поверх видео -----
 
@@ -908,6 +1020,7 @@ export default function App() {
   const roomClass = [
     "room",
     fullscreen && "fullscreen",
+    mini && "mini",
     !chatOpen && "chat-hidden",
     fullscreen && controlsHidden && "controls-hidden",
   ]
@@ -917,13 +1030,28 @@ export default function App() {
   return (
     <main className={roomClass}>
       <section className="stage">
-        {!fullscreen && (
+        {!fullscreen && !mini && (
           <header className="stage-header">
             <div className="room-title">
               <h1>{joinedRoom}</h1>
               <p>{roomStatus}</p>
             </div>
             <div className="header-actions">
+              <button
+                className={sharing ? "ghost sharing" : "ghost"}
+                onClick={toggleScreenShare}
+                disabled={voiceStatus !== "connected"}
+                title={
+                  voiceStatus === "connected"
+                    ? sharing
+                      ? "Остановить показ экрана"
+                      : "Показать друзьям экран или окно со звуком"
+                    : "Показ экрана работает, когда подключён голос"
+                }
+              >
+                <Icon name="cast" size={17} />
+                {sharing ? "Остановить показ" : "Показать экран"}
+              </button>
               <button className="ghost" onClick={() => setChatOpen((o) => !o)} title="Tab">
                 <Icon name="panel" size={17} />
                 {chatOpen ? "Скрыть чат" : "Показать чат"}
@@ -940,7 +1068,7 @@ export default function App() {
             <span>Связь с сервером пропала. Переподключаюсь — видео пока идёт дальше.</span>
           </div>
         )}
-        {!fullscreen && isHost && (
+        {!fullscreen && !mini && isHost && (
           <form className="source-bar" onSubmit={handleOpenUrl}>
             <label className="source-input">
               <Icon name="link" size={18} />
@@ -956,7 +1084,7 @@ export default function App() {
             </label>
           </form>
         )}
-        {!fullscreen && needsFile && (
+        {!fullscreen && !mini && needsFile && (
           <div className="notice">
             <span>
               {hostName ?? "Ведущий"} включил «{media}». Открой у себя этот же файл.
@@ -966,7 +1094,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {!fullscreen && needsReopen && (
+        {!fullscreen && !mini && needsReopen && (
           <div className="notice">
             <span>Плеер закрыт.</span>
             <button
@@ -981,6 +1109,23 @@ export default function App() {
         )}
 
         <div className="video" ref={videoRef}>
+          {screenShare && !sharing ? (
+            <>
+              <video ref={screenRef} className="screen-share" autoPlay playsInline muted />
+              <span className="screen-badge">
+                <Icon name="cast" size={14} />
+                Экран показывает{" "}
+                {members.find((m) => String(m.id) === screenShare.identity)?.name ?? "кто-то"}
+              </span>
+            </>
+          ) : sharing ? (
+            <div className="video-placeholder">
+              <p>Ты показываешь экран — друзья видят его вместо плеера.</p>
+              <button className="quiet" onClick={toggleScreenShare}>
+                Остановить показ
+              </button>
+            </div>
+          ) : (
           <div className="video-placeholder">
             {media
               ? player.running
@@ -990,6 +1135,7 @@ export default function App() {
                 ? "Вставь ссылку сверху — видео начнётся у всех одновременно"
                 : `Ждём, пока ${hostName ?? "ведущий"} выберет, что смотрим`}
           </div>
+          )}
         </div>
 
         <PlayerControls
@@ -1008,6 +1154,8 @@ export default function App() {
           onError={(err) => setError(err)}
           fullscreen={fullscreen}
           onFullscreen={() => applyFullscreen(!fullscreen)}
+          mini={mini}
+          onMini={() => applyMini(!mini)}
         />
         {error && !chatOpen && (
           <p className="error stage-error" onClick={() => setError(null)} title="Скрыть">
@@ -1458,6 +1606,8 @@ function PlayerControls({
   onError,
   fullscreen,
   onFullscreen,
+  mini = false,
+  onMini,
 }: {
   onHover: (over: boolean) => void;
   info: PlaybackInfo | null;
@@ -1474,6 +1624,10 @@ function PlayerControls({
   onError: (message: string) => void;
   fullscreen: boolean;
   onFullscreen: () => void;
+  /** Мини-окно: без дорожек и качества, с кнопкой «развернуть». */
+  mini?: boolean;
+  /** Нет в панели поверх полноэкранного видео. */
+  onMini?: () => void;
 }) {
   const duration = info?.duration ?? 0;
   const position = scrub ?? info?.position ?? 0;
@@ -1625,6 +1779,16 @@ function PlayerControls({
             onChange={(e) => onVolume(Number(e.target.value))}
           />
         </label>
+        {onMini && !fullscreen && (
+          <button
+            className="ghost icon"
+            onClick={onMini}
+            title={mini ? "Развернуть окно: Esc" : "Мини-окно поверх всех окон"}
+            aria-label={mini ? "Развернуть окно" : "Мини-окно"}
+          >
+            <Icon name={mini ? "pip-exit" : "pip"} size={20} />
+          </button>
+        )}
         {/* В правом нижнем углу, на одной линии с краем видео. */}
         <button
           className="ghost icon fullscreen-toggle"
@@ -1669,7 +1833,10 @@ type IconName =
   | "star"
   | "sliders"
   | "play-solid"
-  | "pause-solid";
+  | "pause-solid"
+  | "pip"
+  | "pip-exit"
+  | "cast";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
   chevron: <polyline points="9 6 15 12 9 18" />,
@@ -1835,6 +2002,27 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
     </>
   ),
   crown: <path d="M3 18h18l-2-11-5 5-2-7-2 7-5-5z" />,
+  pip: (
+    <>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <rect x="12" y="12" width="7" height="5" rx="1" />
+    </>
+  ),
+  "pip-exit": (
+    <>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <polyline points="9 9 15 9 15 15" />
+      <line x1="15" y1="9" x2="8" y2="16" />
+    </>
+  ),
+  cast: (
+    <>
+      <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6" />
+      <path d="M2 12a9 9 0 0 1 8 8" />
+      <path d="M2 16a5 5 0 0 1 4 4" />
+      <line x1="2" y1="20" x2="2.01" y2="20" />
+    </>
+  ),
   close: (
     <>
       <line x1="6" y1="6" x2="18" y2="18" />
