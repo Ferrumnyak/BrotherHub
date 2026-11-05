@@ -4,6 +4,7 @@
 mod net;
 mod player;
 mod session;
+mod video;
 
 use tauri::Manager;
 
@@ -11,7 +12,14 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(net::Connection::default())
+        .manage(video::VideoHost::default())
         .setup(|app| {
+            // Окно для встроенного видео (setup выполняется в главном потоке).
+            if let Some(window) = app.get_webview_window("main") {
+                if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {
+                    eprintln!("видео будет в отдельном окне: {e}");
+                }
+            }
             let session = session::Session::start(app.handle().clone());
             app.manage(session);
             Ok(())
@@ -22,7 +30,9 @@ fn main() {
             net::send,
             session::open_file,
             session::open_url,
-            session::player_status
+            session::player_status,
+            session::set_chat_overlay,
+            video::set_video_rect
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherWatch");

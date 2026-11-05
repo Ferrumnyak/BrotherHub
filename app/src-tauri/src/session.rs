@@ -7,6 +7,7 @@
 //! а свои пауза/перемотка у них откатываются к общему состоянию.
 
 use std::{
+    collections::VecDeque,
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -14,10 +15,11 @@ use std::{
 
 use brotherwatch_shared::{is_url, ClientMsg, MemberId, PlaybackState, ServerMsg};
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::player::{Player, PlayerEvent, PlayerEventMsg};
+use crate::video::VideoHost;
 
 /// Допустимое расхождение с главой, секунды.
 const TOLERANCE: f64 = 0.7;
@@ -26,6 +28,10 @@ const SYNC_INTERVAL: Duration = Duration::from_secs(2);
 /// После перемотки даём плееру время загрузиться, прежде чем снова
 /// поправлять позицию (важно для онлайн-видео, где перемотка небыстрая).
 const SEEK_COOLDOWN: Duration = Duration::from_secs(4);
+/// Сколько висят сообщения чата поверх видео.
+const OVERLAY_TTL: Duration = Duration::from_secs(6);
+/// Сколько последних сообщений показывать поверх видео.
+const OVERLAY_LINES: usize = 4;
 
 pub type SharedSession = Arc<Mutex<Session>>;
 
@@ -73,6 +79,9 @@ pub struct Session {
     player_paused: bool,
     loaded: Option<String>,
     last_seek: Option<Instant>,
+    /// Показывать сообщения чата поверх видео (когда панель чата скрыта).
+    overlay_enabled: bool,
+    overlay: VecDeque<(Instant, String, String)>,
 }
 
 impl Session {
@@ -90,6 +99,8 @@ impl Session {
             player_paused: true,
             loaded: None,
             last_seek: None,
+            overlay_enabled: false,
+            overlay: VecDeque::new(),
         }));
 
         // События от mpv.
@@ -169,7 +180,8 @@ impl Session {
 
     async fn ensure_player(&mut self) -> Result<(), String> {
         if self.player.is_none() {
-            let player = Player::spawn(self.player_events.clone()).await?;
+            let wid = self.app.state::<VideoHost>().wid();
+            let player = Player::spawn(self.player_events.clone(), wid).await?;
             self.player = Some(player);
             self.player_paused = true;
             self.loaded = None;
@@ -204,6 +216,7 @@ impl Session {
                 self.set_room(playback.clone()).await;
             }
             ServerMsg::Kicked { .. } => self.disconnected(),
+            ServerMsg::Chat { name, text, .. } => self.push_overlay(name, text),
             _ => {}
         }
     }
@@ -294,6 +307,9 @@ impl Session {
                     self.apply().await;
                 }
             }
+            PlayerEvent::Key(key) => {
+                let _ = self.app.emit("player-key", key);
+            }
             PlayerEvent::FileLoaded => {
                 if !self.is_host() {
                     self.last_seek = None;
@@ -341,8 +357,66 @@ impl Session {
         self.set_local(paused, position);
     }
 
+    // ---------- Чат поверх видео ----------
+
+    pub fn set_overlay_enabled(&mut self, enabled: bool) {
+        self.overlay_enabled = enabled;
+        self.overlay.clear();
+        self.render_overlay();
+    }
+
+    fn push_overlay(&mut self, name: &str, text: &str) {
+        if !self.overlay_enabled {
+            return;
+        }
+        self.overlay
+            .push_back((Instant::now(), name.to_string(), text.to_string()));
+        while self.overlay.len() > OVERLAY_LINES {
+            self.overlay.pop_front();
+        }
+        self.render_overlay();
+    }
+
+    /// Убрать устаревшие сообщения; `true`, если что-то убрали.
+    fn expire_overlay(&mut self) -> bool {
+        let before = self.overlay.len();
+        self.overlay.retain(|(at, _, _)| at.elapsed() < OVERLAY_TTL);
+        self.overlay.len() != before
+    }
+
+    fn render_overlay(&self) {
+        let Some(player) = &self.player else {
+            return;
+        };
+        if self.overlay.is_empty() {
+            player.set_overlay("");
+            return;
+        }
+        // ASS-разметка: левый нижний угол, ник янтарным, текст белым.
+        // Цвета в ASS пишутся как BGR: e0a63a → 3AA6E0.
+        let lines: Vec<String> = self
+            .overlay
+            .iter()
+            .map(|(_, name, text)| {
+                format!(
+                    "{{\\c&H3AA6E0&\\b1}}{}:{{\\b0\\c&HFFFFFF&}} {}",
+                    ass_escape(name),
+                    ass_escape(text)
+                )
+            })
+            .collect();
+        let ass = format!(
+            "{{\\an1\\pos(24,640)\\fs22\\bord1.5\\shad0}}{}",
+            lines.join("\\N")
+        );
+        player.set_overlay(&ass);
+    }
+
     /// Раз в [`SYNC_INTERVAL`]: глава сообщает позицию, остальные сверяются.
     async fn tick(&mut self) {
+        if self.expire_overlay() {
+            self.render_overlay();
+        }
         if !self.is_host() {
             self.apply().await;
             return;
@@ -436,6 +510,14 @@ impl Session {
     }
 }
 
+/// Убрать из текста символы, которые ASS понимает как разметку.
+fn ass_escape(text: &str) -> String {
+    text.replace('\\', "/")
+        .replace('{', "(")
+        .replace('}', ")")
+        .replace('\n', " ")
+}
+
 // ---------- Команды для интерфейса ----------
 
 #[tauri::command]
@@ -451,4 +533,13 @@ pub async fn open_url(session: State<'_, SharedSession>, url: String) -> Result<
 #[tauri::command]
 pub async fn player_status(session: State<'_, SharedSession>) -> Result<PlayerStatus, String> {
     Ok(session.lock().await.status())
+}
+
+#[tauri::command]
+pub async fn set_chat_overlay(
+    session: State<'_, SharedSession>,
+    enabled: bool,
+) -> Result<(), String> {
+    session.lock().await.set_overlay_enabled(enabled);
+    Ok(())
 }

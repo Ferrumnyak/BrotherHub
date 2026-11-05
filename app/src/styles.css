@@ -115,57 +115,177 @@ button.secondary {
 .room {
   height: 100%;
   display: grid;
-  grid-template-columns: 1fr 320px;
   grid-template-rows: auto 1fr;
 }
 
+.room.fullscreen {
+  grid-template-rows: 1fr;
+}
+
 .room header {
-  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
+  gap: 16px;
+  padding: 8px 16px;
   background: var(--panel);
   border-bottom: 1px solid #252a34;
+}
+
+.room header .title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.brand {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.room header .actions {
+  display: flex;
+  gap: 8px;
+}
+
+.room button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  min-height: 0;
+}
+
+.chat-hidden .body {
+  grid-template-columns: 1fr;
 }
 
 .stage {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 18px;
+  min-width: 0;
   min-height: 0;
 }
 
-.now-playing {
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: #13161c;
+  border-bottom: 1px solid #252a34;
+}
+
+.toolbar form {
   flex: 1;
+  min-width: 240px;
+  display: flex;
+  gap: 8px;
+}
+
+.toolbar input {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 14px;
+}
+
+.toolbar.notice {
+  background: #2b2617;
+  justify-content: space-between;
+}
+
+/* Сюда приложение кладёт окно mpv. */
+.video {
+  flex: 1;
+  min-height: 0;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-placeholder {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 12px;
-  background: #000;
+  gap: 10px;
+  color: #5d6272;
+  font-size: 14px;
   text-align: center;
   padding: 20px;
 }
 
-.media-title {
-  font-size: 18px;
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-top: 1px solid #252a34;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.statusbar .media-name {
   font-weight: 600;
-  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statusbar .spacer {
+  flex: 1;
+}
+
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4a4f5c;
+}
+
+.dot.on {
+  background: #5ec27a;
+}
+
+.small {
+  font-size: 12px;
+  margin: 0;
+}
+
+/* Правая панель: участники и чат */
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border-left: 1px solid #252a34;
+  min-height: 0;
 }
 
 .members {
-  padding: 14px;
-  border-radius: 12px;
-  background: var(--panel);
+  padding-bottom: 10px;
+  border-bottom: 1px solid #252a34;
 }
 
 .members h3 {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
   font-weight: 600;
+  text-transform: uppercase;
   margin-bottom: 8px;
 }
 
@@ -174,24 +294,46 @@ button.secondary {
   padding: 0;
   list-style: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .members li {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--panel-2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  font-size: 14px;
 }
 
-.chat {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  background: var(--panel);
-  border-left: 1px solid #252a34;
-  min-height: 0;
+.crown-slot {
+  width: 16px;
+  display: inline-flex;
+}
+
+.member-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.room button.icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  background: none;
+  color: var(--muted);
+}
+
+.room button.icon:hover {
+  color: var(--text);
+  background: var(--panel-2);
 }
 
 .lines {
@@ -233,51 +375,7 @@ button.secondary {
   gap: 8px;
 }
 
-/* Плеер и управление */
-.prompt {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.prompt p {
-  margin: 0;
-}
-
-.host-controls {
-  width: min(520px, 100%);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-}
-
-.host-controls form {
-  display: flex;
-  gap: 8px;
-}
-
-.small {
-  font-size: 12px;
-  margin: 0;
-}
-
-.member-actions {
-  display: inline-flex;
-  gap: 2px;
-  margin-left: 6px;
-}
-
-button.icon {
-  padding: 0 5px;
-  background: none;
-  color: var(--muted);
-  font-size: 13px;
-  font-weight: 400;
-}
-
-button.icon:hover {
-  color: var(--text);
+.composer button {
+  width: 44px;
+  padding: 0;
 }

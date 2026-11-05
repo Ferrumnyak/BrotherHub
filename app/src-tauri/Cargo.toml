@@ -17,3 +17,8 @@ futures-util.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tokio-tungstenite = "0.26"
+
+# Встраивание видео в окно (только Windows).
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

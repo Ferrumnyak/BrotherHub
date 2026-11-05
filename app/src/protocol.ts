@@ -59,3 +59,6 @@ export function isUrl(media: string): boolean {
   const m = media.trimStart().toLowerCase();
   return m.startsWith("http://") || m.startsWith("https://");
 }
+
+/** Клавиши, нажатые в окне видео (событие `player-key`). */
+export type PlayerKey = "fullscreen" | "exit-fullscreen" | "toggle-chat";

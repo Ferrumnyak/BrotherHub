@@ -32,9 +32,33 @@ pub enum PlayerEvent {
     Restart,
     /// Файл загружен.
     FileLoaded,
+    /// Нажата клавиша, которую обрабатывает приложение (см. [`INPUT_CONF`]).
+    Key(PlayerKey),
     /// Окно mpv закрыли или процесс завершился.
     Shutdown,
 }
+
+/// Клавиши в окне видео, которые обрабатывает приложение, а не mpv.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlayerKey {
+    Fullscreen,
+    ExitFullscreen,
+    ToggleChat,
+}
+
+/// Свои настройки клавиш mpv. Выход из плеера отключён (иначе встроенное
+/// видео пропадёт по случайному нажатию `q`), а полный экран и чат
+/// переключает приложение: mpv присылает нам `script-message`.
+const INPUT_CONF: &str = "\
+q ignore
+Q ignore
+CLOSE_WIN ignore
+f script-message bw fullscreen
+MBTN_LEFT_DBL script-message bw fullscreen
+ESC script-message bw exit-fullscreen
+TAB script-message bw toggle-chat
+";
 
 /// Событие с номером плеера, от которого оно пришло.
 pub type PlayerEventMsg = (u64, PlayerEvent);
@@ -52,7 +76,12 @@ pub struct Player {
 }
 
 impl Player {
-    pub async fn spawn(events: mpsc::UnboundedSender<PlayerEventMsg>) -> Result<Self, String> {
+    /// Запустить mpv. `wid` — окно, в которое встроить видео
+    /// (`None` — отдельное окно).
+    pub async fn spawn(
+        events: mpsc::UnboundedSender<PlayerEventMsg>,
+        wid: Option<isize>,
+    ) -> Result<Self, String> {
         let id = NEXT_PLAYER_ID.fetch_add(1, Ordering::Relaxed);
         let ipc = ipc_path(id);
         let mpv = find_mpv();
@@ -69,6 +98,13 @@ impl Player {
         ])
         .arg(format!("--input-ipc-server={ipc}"))
         .kill_on_drop(true);
+        if let Some(wid) = wid {
+            cmd.arg(format!("--wid={wid}"));
+        }
+        let input_conf = std::env::temp_dir().join("brotherwatch-input.conf");
+        if std::fs::write(&input_conf, INPUT_CONF).is_ok() {
+            cmd.arg(format!("--input-conf={}", input_conf.display()));
+        }
         if let Some(ytdlp) = find_ytdlp() {
             cmd.arg(format!("--script-opts=ytdl_hook-ytdl_path={ytdlp}"));
         }
@@ -115,6 +151,7 @@ impl Player {
                         }
                         "playback-restart" => Some(PlayerEvent::Restart),
                         "file-loaded" => Some(PlayerEvent::FileLoaded),
+                        "client-message" => parse_key(&v).map(PlayerEvent::Key),
                         _ => None,
                     };
                     if let Some(ev) = ev {
@@ -185,6 +222,17 @@ impl Player {
         self.command(json!(["seek", position, "absolute"]));
     }
 
+    /// Показать поверх видео текст в формате ASS (пустая строка — убрать).
+    pub fn set_overlay(&self, ass: &str) {
+        let format = if ass.is_empty() { "none" } else { "ass-events" };
+        self.command(json!({
+            "name": "osd-overlay",
+            "id": 1,
+            "format": format,
+            "data": ass,
+        }));
+    }
+
     /// Текущая позиция в секундах (если файл загружен).
     pub async fn time_pos(&self) -> Option<f64> {
         self.get("time-pos").await.and_then(|v| v.as_f64())
@@ -195,6 +243,20 @@ impl Drop for Player {
     fn drop(&mut self) {
         // Вежливо закрыть mpv; если не успеет — процесс убьётся kill_on_drop.
         self.command(json!(["quit"]));
+    }
+}
+
+/// `script-message bw <действие>` из [`INPUT_CONF`].
+fn parse_key(v: &Value) -> Option<PlayerKey> {
+    let args = v.get("args")?.as_array()?;
+    if args.first()?.as_str()? != "bw" {
+        return None;
+    }
+    match args.get(1)?.as_str()? {
+        "fullscreen" => Some(PlayerKey::Fullscreen),
+        "exit-fullscreen" => Some(PlayerKey::ExitFullscreen),
+        "toggle-chat" => Some(PlayerKey::ToggleChat),
+        _ => None,
     }
 }
 
