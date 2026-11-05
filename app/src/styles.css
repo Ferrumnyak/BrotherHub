@@ -448,3 +448,37 @@ button.secondary {
 .controls .volume input {
   width: 90px;
 }
+
+.track-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  min-width: 0;
+}
+
+.track-select select {
+  max-width: 180px;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #2c313c;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.track-select select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* В узком окне списки дорожек уже. */
+@media (max-width: 900px) {
+  .track-select select {
+    max-width: 110px;
+  }
+}

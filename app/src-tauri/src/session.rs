@@ -50,13 +50,62 @@ pub struct PlaybackInfo {
 }
 
 /// Кнопки панели управления.
-#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Control {
     TogglePause,
-    Seek { position: f64 },
-    SeekBy { delta: f64 },
-    Volume { value: f64 },
+    Seek {
+        position: f64,
+    },
+    SeekBy {
+        delta: f64,
+    },
+    Volume {
+        value: f64,
+    },
+    /// Аудиодорожка (`None` — без звука).
+    SetAudio {
+        id: Option<i64>,
+    },
+    /// Субтитры (`None` — выключить).
+    SetSubtitle {
+        id: Option<i64>,
+    },
+    /// Подключить субтитры из файла.
+    AddSubtitle {
+        path: String,
+    },
+}
+
+/// Дорожка видео/аудио/субтитров (событие `player-tracks`).
+#[derive(Debug, Clone, Serialize)]
+pub struct Track {
+    id: i64,
+    /// `audio`, `sub` или `video`.
+    kind: String,
+    title: Option<String>,
+    lang: Option<String>,
+    codec: Option<String>,
+    channels: Option<i64>,
+    /// Отдельный файл (а не дорожка внутри видео).
+    external: bool,
+    selected: bool,
+}
+
+impl Track {
+    fn from_mpv(v: &serde_json::Value) -> Option<Self> {
+        let text = |key: &str| v.get(key).and_then(|x| x.as_str()).map(String::from);
+        Some(Self {
+            id: v.get("id")?.as_i64()?,
+            kind: text("type")?,
+            title: text("title"),
+            lang: text("lang"),
+            codec: text("codec"),
+            channels: v.get("demux-channel-count").and_then(|x| x.as_i64()),
+            external: v.get("external").and_then(|x| x.as_bool()).unwrap_or(false),
+            selected: v.get("selected").and_then(|x| x.as_bool()).unwrap_or(false),
+        })
+    }
 }
 
 /// Состояние плеера для интерфейса (событие `player-status`).
@@ -331,6 +380,7 @@ impl Session {
                 self.player = None;
                 self.loaded = None;
                 self.emit_status();
+                self.emit_tracks().await;
             }
             PlayerEvent::Pause(paused) => {
                 self.player_paused = paused;
@@ -347,6 +397,7 @@ impl Session {
                     self.apply().await;
                 }
             }
+            PlayerEvent::TracksChanged => self.emit_tracks().await,
             PlayerEvent::Key(key) => {
                 let _ = self.app.emit("player-key", key);
             }
@@ -459,6 +510,22 @@ impl Session {
 
     // ---------- Панель управления ----------
 
+    /// Отправить интерфейсу список дорожек.
+    async fn emit_tracks(&self) {
+        let tracks: Vec<Track> = match &self.player {
+            Some(player) => player
+                .get("track-list")
+                .await
+                .and_then(|v| v.as_array().cloned())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(Track::from_mpv)
+                .collect(),
+            None => Vec::new(),
+        };
+        let _ = self.app.emit("player-tracks", tracks);
+    }
+
     pub async fn info(&self) -> PlaybackInfo {
         let Some(player) = &self.player else {
             return PlaybackInfo {
@@ -480,9 +547,13 @@ impl Session {
         let Some(player) = &self.player else {
             return Ok(());
         };
-        // Громкость у каждого своя, а паузой и перемоткой управляет глава.
-        // Его действия попадут в mpv, а оттуда событиями — на сервер.
-        if !matches!(control, Control::Volume { .. }) && !self.is_host() {
+        // Громкость и дорожки у каждого свои, а паузой и перемоткой
+        // управляет глава. Его действия попадут в mpv, а оттуда — на сервер.
+        let shared = matches!(
+            control,
+            Control::TogglePause | Control::Seek { .. } | Control::SeekBy { .. }
+        );
+        if shared && !self.is_host() {
             return Err("Паузой и перемоткой управляет глава лобби".into());
         }
         match control {
@@ -490,6 +561,9 @@ impl Session {
             Control::Seek { position } => player.seek(position.max(0.0)),
             Control::SeekBy { delta } => player.seek_by(delta),
             Control::Volume { value } => player.set_volume(value),
+            Control::SetAudio { id } => player.set_track("aid", id),
+            Control::SetSubtitle { id } => player.set_track("sid", id),
+            Control::AddSubtitle { path } => player.add_subtitle(&path),
         }
         Ok(())
     }

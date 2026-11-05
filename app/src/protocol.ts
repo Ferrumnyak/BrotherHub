@@ -76,4 +76,19 @@ export type Control =
   | { type: "toggle_pause" }
   | { type: "seek"; position: number }
   | { type: "seek_by"; delta: number }
-  | { type: "volume"; value: number };
+  | { type: "volume"; value: number }
+  | { type: "set_audio"; id: number | null }
+  | { type: "set_subtitle"; id: number | null }
+  | { type: "add_subtitle"; path: string };
+
+/** Дорожка в плеере (событие `player-tracks`). */
+export interface Track {
+  id: number;
+  kind: "audio" | "sub" | "video" | string;
+  title: string | null;
+  lang: string | null;
+  codec: string | null;
+  channels: number | null;
+  external: boolean;
+  selected: boolean;
+}

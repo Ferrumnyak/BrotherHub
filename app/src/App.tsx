@@ -14,6 +14,7 @@ import {
   type PlayerKey,
   type PlayerStatus,
   type ServerMsg,
+  type Track,
 } from "./protocol";
 
 type ChatLine =
@@ -60,6 +61,33 @@ function formatTime(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+const SUBTITLE_EXTENSIONS = ["srt", "ass", "ssa", "vtt", "sub", "sup"];
+
+/** Выбрать файл субтитров. */
+async function pickSubtitleFile(): Promise<string | null> {
+  const path = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Субтитры", extensions: SUBTITLE_EXTENSIONS }],
+  });
+  return typeof path === "string" ? path : null;
+}
+
+const CHANNEL_NAMES: Record<number, string> = { 1: "1.0", 2: "2.0", 6: "5.1", 8: "7.1" };
+
+/** «Дубляж · RU · AC3 5.1 · внешняя» */
+function trackLabel(t: Track): string {
+  const parts: string[] = [];
+  if (t.title) parts.push(t.title);
+  if (t.lang) parts.push(t.lang.toUpperCase());
+  const tech = [t.codec?.toUpperCase(), t.channels ? CHANNEL_NAMES[t.channels] ?? `${t.channels}ch` : null]
+    .filter(Boolean)
+    .join(" ");
+  if (tech) parts.push(tech);
+  if (t.external) parts.push("отдельный файл");
+  return parts.length ? parts.join(" · ") : `Дорожка ${t.id}`;
+}
+
 /** Выбрать видеофайл в стандартном окне Windows. */
 async function pickVideoFile(): Promise<string | null> {
   const path = await open({
@@ -93,6 +121,7 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(false);
   const [info, setInfo] = useState<PlaybackInfo | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
+  const [tracks, setTracks] = useState<Track[]>([]);
 
   const meRef = useRef<MemberId | null>(null);
   const membersRef = useRef<Member[]>([]);
@@ -193,6 +222,7 @@ export default function App() {
     listen<ServerMsg>("server-message", (e) => onMessage(e.payload)).then(keep);
     listen<PlayerStatus>("player-status", (e) => setPlayer(e.payload)).then(keep);
     listen<string>("player-error", (e) => setError(e.payload)).then(keep);
+    listen<Track[]>("player-tracks", (e) => setTracks(e.payload)).then(keep);
     listen<PlayerKey>("player-key", (e) => onKeyRef.current(e.payload)).then(keep);
     listen("disconnected", () => {
       setJoinedRoom(null);
@@ -330,6 +360,7 @@ export default function App() {
   useEffect(() => {
     if (!joinedRoom || !player.running) {
       setInfo(null);
+      setTracks([]);
       return;
     }
     let active = true;
@@ -516,6 +547,7 @@ export default function App() {
             controlHint={isHost ? "Сначала открой файл или ссылку" : `Управляет ${hostName ?? "глава лобби"}`}
             scrub={scrub}
             onScrub={setScrub}
+            tracks={tracks}
             onError={(err) => setError(err)}
             fullscreen={fullscreen}
             onFullscreen={() => applyFullscreen(!fullscreen)}
@@ -622,6 +654,7 @@ function PlayerControls({
   controlHint,
   scrub,
   onScrub,
+  tracks,
   onError,
   fullscreen,
   onFullscreen,
@@ -631,6 +664,7 @@ function PlayerControls({
   controlHint: string;
   scrub: number | null;
   onScrub: (value: number | null) => void;
+  tracks: Track[];
   onError: (message: string) => void;
   fullscreen: boolean;
   onFullscreen: () => void;
@@ -640,6 +674,23 @@ function PlayerControls({
   const paused = info?.paused ?? true;
   const volume = info?.volume ?? 100;
   const send = (c: Control) => control(c).catch((err) => onError(String(err)));
+
+  const audioTracks = tracks.filter((t) => t.kind === "audio");
+  const subTracks = tracks.filter((t) => t.kind === "sub");
+  const audioValue = String(audioTracks.find((t) => t.selected)?.id ?? "off");
+  const subValue = String(subTracks.find((t) => t.selected)?.id ?? "off");
+
+  const onAudio = (value: string) =>
+    send({ type: "set_audio", id: value === "off" ? null : Number(value) });
+
+  const onSubtitle = async (value: string) => {
+    if (value === "file") {
+      const path = await pickSubtitleFile();
+      if (path) send({ type: "add_subtitle", path });
+      return;
+    }
+    send({ type: "set_subtitle", id: value === "off" ? null : Number(value) });
+  };
 
   const commitScrub = () => {
     if (scrub !== null) {
@@ -676,6 +727,39 @@ function PlayerControls({
         onKeyUp={commitScrub}
       />
       <span className="time">{duration ? formatTime(duration) : "--:--"}</span>
+      <label className="track-select" title="Озвучка (у каждого своя)">
+        <Icon name="audio-track" />
+        <select
+          value={audioValue}
+          disabled={audioTracks.length === 0}
+          onChange={(e) => onAudio(e.target.value)}
+          aria-label="Озвучка"
+        >
+          {audioTracks.length === 0 && <option value="off">Нет звука</option>}
+          {audioTracks.map((t) => (
+            <option key={t.id} value={t.id}>
+              {trackLabel(t)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="track-select" title="Субтитры (у каждого свои)">
+        <Icon name="subtitles" />
+        <select
+          value={subValue}
+          disabled={!info}
+          onChange={(e) => onSubtitle(e.target.value)}
+          aria-label="Субтитры"
+        >
+          <option value="off">Без субтитров</option>
+          {subTracks.map((t) => (
+            <option key={t.id} value={t.id}>
+              {trackLabel(t)}
+            </option>
+          ))}
+          <option value="file">Загрузить из файла…</option>
+        </select>
+      </label>
       <span className="volume">
         <Icon name={volume > 0 ? "volume" : "mute"} />
         <input
@@ -714,7 +798,9 @@ type IconName =
   | "play"
   | "pause"
   | "volume"
-  | "mute";
+  | "mute"
+  | "audio-track"
+  | "subtitles";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
   panel: (
@@ -740,6 +826,21 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
     </>
   ),
   play: <polygon points="7 4 20 12 7 20 7 4" />,
+  "audio-track": (
+    <>
+      <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+      <rect x="3" y="15" width="4" height="6" rx="1" />
+      <rect x="17" y="15" width="4" height="6" rx="1" />
+    </>
+  ),
+  subtitles: (
+    <>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <line x1="6" y1="11" x2="11" y2="11" />
+      <line x1="13" y1="11" x2="18" y2="11" />
+      <line x1="6" y1="15" x2="15" y2="15" />
+    </>
+  ),
   pause: (
     <>
       <rect x="6" y="4" width="4" height="16" rx="1" />

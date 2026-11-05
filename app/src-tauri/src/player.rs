@@ -32,6 +32,8 @@ pub enum PlayerEvent {
     Restart,
     /// Файл загружен.
     FileLoaded,
+    /// Изменился список дорожек (загрузился файл, подхватились внешние).
+    TracksChanged,
     /// Нажата клавиша, которую обрабатывает приложение (см. [`INPUT_CONF`]).
     Key(PlayerKey),
     /// Окно mpv закрыли или процесс завершился.
@@ -105,6 +107,14 @@ impl Player {
             "--sub-font=Segoe UI Semibold",
             "--sub-border-size=2.5",
             "--sub-shadow-offset=1",
+            // Озвучка и субтитры отдельными файлами рядом с видео или в
+            // типичных подпапках раздач — подхватываются автоматически.
+            "--audio-file-auto=fuzzy",
+            "--sub-auto=fuzzy",
+            "--audio-file-paths=Rus Sound;RUS Sound;Sound;Sounds;Audio;Звук;Озвучка",
+            "--sub-file-paths=Subs;Subtitles;Rus Subs;RUS Subs;Sub;Субтитры",
+            // По умолчанию — русская озвучка, если она есть.
+            "--alang=ru,rus,russian",
         ])
         .arg(format!("--input-ipc-server={ipc}"))
         .kill_on_drop(true);
@@ -162,6 +172,11 @@ impl Player {
                                 .and_then(Value::as_bool)
                                 .map(PlayerEvent::Pause)
                         }
+                        "property-change"
+                            if v.get("name").and_then(Value::as_str) == Some("track-list") =>
+                        {
+                            Some(PlayerEvent::TracksChanged)
+                        }
                         "playback-restart" => Some(PlayerEvent::Restart),
                         "file-loaded" => Some(PlayerEvent::FileLoaded),
                         "client-message" => parse_key(&v).map(PlayerEvent::Key),
@@ -187,6 +202,7 @@ impl Player {
             _child: child,
         };
         player.command(json!(["observe_property", 1, "pause"]));
+        player.command(json!(["observe_property", 2, "track-list"]));
         Ok(player)
     }
 
@@ -249,6 +265,20 @@ impl Player {
     /// Перемотать относительно текущей позиции.
     pub fn seek_by(&self, delta: f64) {
         self.command(json!(["seek", delta, "relative"]));
+    }
+
+    /// Выбрать дорожку: `kind` — `aid` (аудио) или `sid` (субтитры),
+    /// `None` — выключить.
+    pub fn set_track(&self, kind: &str, id: Option<i64>) {
+        match id {
+            Some(id) => self.command(json!(["set_property", kind, id])),
+            None => self.command(json!(["set_property", kind, "no"])),
+        }
+    }
+
+    /// Подключить субтитры из файла и сразу их включить.
+    pub fn add_subtitle(&self, path: &str) {
+        self.command(json!(["sub-add", path, "select"]));
     }
 
     pub fn set_volume(&self, volume: f64) {
