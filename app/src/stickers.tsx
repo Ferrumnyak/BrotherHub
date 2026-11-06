@@ -179,6 +179,63 @@ export const STICKERS: Sticker[] = [
       </g>
     ),
   },
+  {
+    id: "plot-dead",
+    title: "Сюжет — всё",
+    art: (
+      <>
+        <g className="st-nod" style={{ transformOrigin: "60px 52px" }}>
+          <path
+            d="M60 16c-20 0-34 14-34 32 0 11 5 19 12 24v12h44V72c7-5 12-13 12-24 0-18-14-32-34-32z"
+            fill="#efe6dc"
+          />
+          <circle cx="46" cy="50" r="9" fill="#2a2024" />
+          <circle cx="74" cy="50" r="9" fill="#2a2024" />
+          <path d="M57 66l3-6 3 6z" fill="#2a2024" />
+          <path d="M46 78v6M54 78v6M62 78v6M70 78v6" stroke="#2a2024" strokeWidth="3" />
+        </g>
+        <rect x="18" y="92" width="84" height="20" rx="5" fill="#2a2024" />
+        <text x="60" y="107" textAnchor="middle" fontSize="12" fontWeight="700" fill="#efe6dc" fontFamily={font}>
+          СЮЖЕТ — ВСЁ
+        </text>
+      </>
+    ),
+  },
+  {
+    id: "one-more",
+    title: "Ещё серию?",
+    art: (
+      <>
+        <g className="st-pop">
+          <rect x="22" y="22" width="76" height="52" rx="8" fill="#2a2024" stroke="#f2c879" strokeWidth="4" />
+          <path d="M52 36v24l20-12z" fill="#f2c879" />
+        </g>
+        <text x="60" y="98" textAnchor="middle" fontSize="15" fontWeight="700" fill="#f2c879" fontFamily={font}>
+          ЕЩЁ СЕРИЮ?
+        </text>
+        <g fill="#f2c879" className="st-twinkle">
+          <path d="M104 18l2 5 5 2-5 2-2 5-2-5-5-2 5-2z" />
+          <path d="M14 70l2 4 4 2-4 2-2 4-2-4-4-2 4-2z" />
+        </g>
+      </>
+    ),
+  },
+  {
+    id: "cringe",
+    title: "Кринж",
+    art: (
+      <>
+        <g className="st-shake">
+          <circle cx="60" cy="50" r="32" fill="#9fd0a8" />
+          <path d="M44 44l8 4-8 4M76 44l-8 4 8 4" stroke="#2a2024" strokeWidth="4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M44 64c6 4 10-2 16 2s10-2 16 2" stroke="#2a2024" strokeWidth="4" fill="none" strokeLinecap="round" />
+        </g>
+        <text x="60" y="106" textAnchor="middle" fontSize="20" fontWeight="700" fill="#9fd0a8" fontFamily={font}>
+          КРИНЖ
+        </text>
+      </>
+    ),
+  },
 ];
 
 const BY_ID = new Map(STICKERS.map((s) => [s.id, s]));

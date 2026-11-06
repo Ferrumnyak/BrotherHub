@@ -26,11 +26,29 @@ pub enum ClientMsg {
         /// обрыва связи (тот же id, та же роль ведущего).
         #[serde(default)]
         resume: Option<String>,
+        /// Аватарка: `emoji:🍿` или `color:3`.
+        #[serde(default)]
+        avatar: Option<String>,
     },
     /// Выйти из комнаты насовсем (без ожидания переподключения).
     Leave,
-    /// Сообщение в текстовый чат.
-    Chat { text: String },
+    /// Сообщение в текстовый чат (`reply` — ответ на чьё-то сообщение).
+    Chat {
+        text: String,
+        #[serde(default)]
+        reply: Option<ChatReply>,
+    },
+    /// Я печатаю — чтобы остальные видели «… печатает».
+    Typing,
+    /// Мой статус («отошёл») и аватарка. `None` — без статуса / как по умолчанию.
+    Profile {
+        #[serde(default)]
+        status: Option<String>,
+        #[serde(default)]
+        avatar: Option<String>,
+    },
+    /// Предложить сразу несколько (серии из плейлиста).
+    SuggestMany { media: Vec<String> },
     /// Предложить, что посмотреть (ссылку или название файла).
     Suggest { media: String },
     /// Убрать предложение (своё — любой, чужое — только ведущий).
@@ -130,6 +148,18 @@ pub enum ServerMsg {
         from: MemberId,
         name: String,
         text: String,
+        #[serde(default)]
+        reply: Option<ChatReply>,
+    },
+    /// Участник печатает.
+    Typing {
+        id: MemberId,
+    },
+    /// Участник сменил статус или аватарку.
+    MemberProfile {
+        id: MemberId,
+        status: Option<String>,
+        avatar: Option<String>,
     },
     /// Новое состояние воспроизведения.
     /// `action` и `by` пустые, если это просто регулярная синхронизация.
@@ -181,6 +211,13 @@ pub enum ServerMsg {
     RouletteCancelled {
         by: Option<String>,
     },
+}
+
+/// На какое сообщение ответили: кто написал и начало текста.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChatReply {
+    pub name: String,
+    pub text: String,
 }
 
 /// Отсчёт до кручения рулетки.
@@ -242,6 +279,12 @@ pub struct Member {
     /// Выключил себе звук от всех.
     #[serde(default)]
     pub deaf: bool,
+    /// Статус: «отошёл», «смотрю краем глаза»…
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Аватарка: `emoji:🍿` или `color:3` (`None` — буква на цветном круге).
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 fn yes() -> bool {
@@ -294,7 +337,14 @@ mod tests {
         ));
 
         let chat: ClientMsg = serde_json::from_str(r#"{"type":"chat","text":"привет"}"#).unwrap();
-        assert!(matches!(chat, ClientMsg::Chat { text } if text == "привет"));
+        assert!(matches!(chat, ClientMsg::Chat { text, reply: None } if text == "привет"));
+        let reply: ClientMsg = serde_json::from_str(
+            r#"{"type":"chat","text":"да","reply":{"name":"Аня","text":"идём?"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(reply, ClientMsg::Chat { reply: Some(r), .. } if r.name == "Аня"));
+        let typing: ClientMsg = serde_json::from_str(r#"{"type":"typing"}"#).unwrap();
+        assert!(matches!(typing, ClientMsg::Typing));
 
         let leave: ClientMsg = serde_json::from_str(r#"{"type":"leave"}"#).unwrap();
         assert!(matches!(leave, ClientMsg::Leave));

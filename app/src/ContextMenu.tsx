@@ -34,7 +34,14 @@ function itemsFor(target: Element): Item[] {
     items.push({ label: "Копировать ссылку", run: () => copy(link.href) });
   }
 
-  const message = target.closest(".message");
+  const message = target.closest(".message") as HTMLElement | null;
+  const key = Number(message?.dataset.key);
+  if (message && Number.isFinite(key)) {
+    items.unshift({
+      label: "Ответить",
+      run: () => window.dispatchEvent(new CustomEvent("bh-reply", { detail: key })),
+    });
+  }
   const text = message?.querySelector(".rich")?.textContent ?? "";
   if (message && text.trim() && !selected.trim()) {
     items.push({ label: "Копировать сообщение", run: () => copy(text) });

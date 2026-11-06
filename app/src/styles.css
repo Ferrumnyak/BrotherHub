@@ -2543,6 +2543,221 @@ button.browse-open.active {
   cursor: pointer;
 }
 
+/* ----- Ответы, упоминания, «печатает» ----- */
+
+.message {
+  position: relative;
+}
+
+.message.mention {
+  box-shadow: 0 0 0 2px var(--lamp);
+}
+
+.reply-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 2px 0 3px;
+  padding: 3px 8px;
+  border-left: 3px solid currentColor;
+  border-radius: 4px;
+  background: rgba(var(--shade-rgb), 0.18);
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.reply-quote span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.reply-button {
+  position: absolute;
+  top: 50%;
+  right: -34px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: var(--raised-2);
+  color: var(--text-2);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.message.mine .reply-button {
+  right: auto;
+  left: -34px;
+}
+
+.message:hover .reply-button,
+.reply-button:focus-visible {
+  opacity: 1;
+}
+
+.typing-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.typing-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 6px 6px 6px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  border-left: 3px solid var(--lamp);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.reply-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mention-list {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: calc(100% - 4px);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--popover);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+
+.mention-list button {
+  justify-content: flex-start;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.mention-list button.active,
+.mention-list button:hover {
+  background: var(--popover-hover);
+}
+
+/* ----- Статус и аватарка ----- */
+
+.seat.emoji img.emoji3d {
+  width: 72%;
+  height: 72%;
+}
+
+.profile-label {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+button.status-chip {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+button.status-chip.active {
+  background: var(--lamp);
+  color: var(--lamp-ink);
+}
+
+.status-custom {
+  display: flex;
+  gap: 4px;
+  padding: 6px 4px 2px;
+}
+
+.status-custom input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12.5px;
+}
+
+.status-custom button.ghost {
+  height: 32px;
+}
+
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(34px, 1fr));
+  gap: 4px;
+  padding: 0 4px 4px;
+}
+
+button.avatar-choice {
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+button.avatar-choice.active {
+  box-shadow: 0 0 0 2px var(--lamp);
+}
+
 /* ----- Отсчёт рулетки ----- */
 
 .roulette-timer {

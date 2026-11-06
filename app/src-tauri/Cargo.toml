@@ -14,7 +14,7 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "fs"] }
 futures-util.workspace = true
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 # Обновление по кнопке (update.rs). TLS — тот же SChannel, что и у остального.
 tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }

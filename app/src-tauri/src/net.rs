@@ -53,6 +53,7 @@ pub async fn connect(
     room: String,
     name: String,
     password: Option<String>,
+    avatar: Option<String>,
 ) -> Result<(), String> {
     let my_generation = conn.generation.fetch_add(1, Ordering::SeqCst) + 1;
     // Было старое подключение — выходим из той комнаты по-честному.
@@ -76,6 +77,7 @@ pub async fn connect(
         name,
         password: password.filter(|p| !p.is_empty()),
         resume: None,
+        avatar,
     };
     tauri::async_runtime::spawn(supervise(Supervisor {
         app,

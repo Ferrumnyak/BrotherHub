@@ -8,11 +8,13 @@ mod logs;
 mod net;
 mod overlay;
 mod player;
+mod playlist;
 mod ptt;
 mod reactions;
 mod session;
 mod sites;
 mod titles;
+mod tray;
 mod tools;
 mod update;
 mod video;
@@ -26,7 +28,7 @@ fn main() {
         // Первым: второй запуск (в том числе по ссылке-приглашению)
         // отдаёт ссылку уже открытому приложению и закрывается.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            deeplink::show_main(app);
+            tray::show_app(app);
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
@@ -40,6 +42,13 @@ fn main() {
                 app.manage(overlay::MainWindow(window.clone()));
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        if tray::close_to_tray() {
+                            api.prevent_close();
+                            tray::hide_app(&handle);
+                        }
+                        return;
+                    }
                     if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
                         overlay::follow(&handle);
                         browser::follow(&handle);
@@ -51,6 +60,9 @@ fn main() {
                 }
             }
             deeplink::setup(app);
+            if let Err(e) = tray::setup(app) {
+                logs::warn(format!("значок в трее не появился: {e}"));
+            }
             player::update_bundled_ytdlp();
             let session = session::Session::start(app.handle().clone());
             app.manage(session);
@@ -92,7 +104,10 @@ fn main() {
             update::update_install,
             deeplink::deep_link_take,
             reactions::reactions_place,
-            titles::media_title
+            titles::media_title,
+            playlist::playlist_entries,
+            tray::tray_close_to_tray,
+            tray::tray_hide
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherHub");

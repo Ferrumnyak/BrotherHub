@@ -9,10 +9,18 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { currentMonitor, getCurrentWindow, LogicalSize, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
+import {
+  currentMonitor,
+  getCurrentWindow,
+  LogicalSize,
+  PhysicalPosition,
+  PhysicalSize,
+  UserAttentionType,
+} from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   isUrl,
+  type ChatReply,
   type ClientMsg,
   type Control,
   type Cover,
@@ -45,7 +53,17 @@ type VoiceMode = "open" | "ptt";
 type EventIcon = "enter" | "leave" | "play" | "pause" | "seek" | "media" | "host" | "suggest" | "roulette";
 
 type ChatLine =
-  | { key: number; kind: "chat"; name: string; text: string; mine: boolean }
+  | {
+      key: number;
+      kind: "chat";
+      name: string;
+      text: string;
+      mine: boolean;
+      /** Ответ на сообщение: кто и что написал. */
+      reply?: ChatReply | null;
+      /** Обратились ко мне: @имя или ответ на моё сообщение. */
+      mention?: boolean;
+    }
   | {
       key: number;
       kind: "system";
@@ -468,7 +486,18 @@ export default function App() {
   const [playback, setPlayback] = useState<PlaybackState | null>(null);
   const [player, setPlayer] = useState<PlayerStatus>({ running: false, loaded: null });
   const [lines, setLines] = useState<ChatLine[]>([]);
+  const linesRef = useRef(lines);
+  linesRef.current = lines;
   const [draft, setDraft] = useState("");
+  // Ответ на сообщение, который сейчас пишем.
+  const [replyTo, setReplyTo] = useState<ChatReply | null>(null);
+  // Кто печатает: id → до какого времени показывать.
+  const [typing, setTyping] = useState<Map<MemberId, number>>(new Map());
+  const typingSentRef = useRef(0);
+  // Мой статус («отошёл») и аватарка.
+  const [myStatus, setMyStatus] = useState<string | null>(null);
+  const [myAvatar, setMyAvatar] = useState<string | null>(() => load("avatar", "") || null);
+  const oldServerWarnedRef = useRef(false);
   const [url, setUrl] = useState("");
   const [chatOpen, setChatOpen] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
@@ -542,6 +571,23 @@ export default function App() {
   );
   const [micOn, setMicOn] = useState(true);
   const [sounds, setSounds] = useState(soundsEnabled);
+  const [closeToTray, setCloseToTray] = useState(() => load("closeToTray", "0") === "1");
+  useEffect(() => {
+    invoke("tray_close_to_tray", { enabled: closeToTray }).catch(() => {});
+  }, [closeToTray]);
+  // Окно вернулось из трея — окна поверх видео заново встают на места.
+  const [shownTick, setShownTick] = useState(0);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    listen("app-shown", () => setShownTick((t) => t + 1)).then((u) =>
+      active ? (unlisten = u) : u(),
+    );
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
   const [noise, setNoise] = useState<"standard" | "strong">(() =>
     load("noise", "strong") === "standard" ? "standard" : "strong",
   );
@@ -626,6 +672,7 @@ export default function App() {
           setMembers(msg.members);
           setPlayback(msg.playback);
           setSuggestions(msg.suggestions ?? []);
+          if (!msg.resumed) setMyStatus(null);
           setRoulettePending(
             msg.roulette ? { at: Date.now() + msg.roulette.seconds * 1000, by: msg.roulette.by } : null,
           );
@@ -673,7 +720,14 @@ export default function App() {
             "host",
           );
           break;
-        case "chat":
+        case "chat": {
+          const mine = msg.from === meRef.current;
+          const myName = membersRef.current.find((m) => m.id === meRef.current)?.name ?? "";
+          const mention =
+            !mine &&
+            myName !== "" &&
+            (msg.text.toLowerCase().includes(`@${myName.toLowerCase()}`) ||
+              msg.reply?.name === myName);
           setLines((l) => [
             ...l,
             {
@@ -681,9 +735,35 @@ export default function App() {
               kind: "chat",
               name: msg.name,
               text: msg.text,
-              mine: msg.from === meRef.current,
+              mine,
+              reply: msg.reply ?? null,
+              mention,
             },
           ]);
+          setTyping((t) => {
+            if (!t.has(msg.from)) return t;
+            const next = new Map(t);
+            next.delete(msg.from);
+            return next;
+          });
+          if (mention) {
+            sound.mention();
+            getCurrentWindow()
+              .isFocused()
+              .then((focused) => {
+                if (!focused) getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
+              })
+              .catch(() => {});
+          }
+          break;
+        }
+        case "typing":
+          setTyping((t) => new Map(t).set(msg.id, Date.now() + 5000));
+          break;
+        case "member_profile":
+          setMembers((m) =>
+            m.map((x) => (x.id === msg.id ? { ...x, status: msg.status, avatar: msg.avatar } : x)),
+          );
           break;
         case "playback": {
           setPlayback(msg.playback);
@@ -720,12 +800,15 @@ export default function App() {
           break;
         }
         case "error":
-          // Старый сервер не знает новых сообщений (реакции, субтитры для всех).
-          setError(
-            msg.message.includes("unknown variant")
-              ? "Сервер старой версии — реакции и субтитры для всех заработают после его обновления"
-              : msg.message,
-          );
+          // Старый сервер не знает новых сообщений — говорим об этом один раз.
+          if (msg.message.includes("unknown variant")) {
+            if (!oldServerWarnedRef.current) {
+              oldServerWarnedRef.current = true;
+              setError("Сервер старой версии — часть новых функций заработает после его обновления");
+            }
+            break;
+          }
+          setError(msg.message);
           break;
         case "suggestions": {
           const known = new Set(suggestionsRef.current.map((x) => x.id));
@@ -833,7 +916,7 @@ export default function App() {
     save("room", room);
     save("password", password);
     try {
-      await invoke("connect", { server, room, name, password: password || null });
+      await invoke("connect", { server, room, name, password: password || null, avatar: myAvatar });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -855,9 +938,89 @@ export default function App() {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
+    const reply = replyTo;
     setDraft("");
+    setReplyTo(null);
     setEmojiOpen(false);
-    await run(() => send({ type: "chat", text }));
+    typingSentRef.current = 0;
+    await run(() => send({ type: "chat", text, reply }));
+  }
+
+  /** Пишу сообщение — раз в 3 секунды сообщаем остальным «печатает». */
+  function onDraftChange(value: string) {
+    setDraft(value);
+    const now = Date.now();
+    if (value.trim() && now - typingSentRef.current > 3000) {
+      typingSentRef.current = now;
+      send({ type: "typing" }).catch(() => {});
+    }
+  }
+
+  /** Ответить на сообщение из чата. */
+  function startReply(line: { name: string; text: string }) {
+    const sticker = stickerFromMessage(line.text);
+    const text = sticker ? `Стикер «${sticker.title}»` : line.text;
+    setReplyTo({ name: line.name, text: text.length > 120 ? `${text.slice(0, 120)}…` : text });
+    setSideTab("chat");
+    requestAnimationFrame(() => draftRef.current?.focus());
+  }
+
+  // Упоминание: пишешь «@» — список людей, Tab или клик вставляет имя.
+  const mentionQuery = (() => {
+    const input = draftRef.current;
+    const caret = input?.selectionStart ?? draft.length;
+    const m = /(^|\s)@([^\s@]*)$/.exec(draft.slice(0, caret));
+    return m ? m[2].toLowerCase() : null;
+  })();
+  const mentionOptions =
+    mentionQuery === null
+      ? []
+      : members
+          .filter((m) => m.id !== me && m.name.toLowerCase().startsWith(mentionQuery))
+          .slice(0, 6);
+
+  function insertMention(name: string) {
+    const input = draftRef.current;
+    const caret = input?.selectionStart ?? draft.length;
+    const before = draft.slice(0, caret).replace(/@([^\s@]*)$/, `@${name} `);
+    const next = before + draft.slice(caret);
+    setDraft(next);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(before.length, before.length);
+    });
+  }
+
+  // Строчка «… печатает» гаснет сама, если человек перестал печатать.
+  useEffect(() => {
+    if (typing.size === 0) return;
+    const t = setInterval(() => {
+      const now = Date.now();
+      setTyping((map) => {
+        const next = new Map([...map].filter(([, until]) => until > now));
+        return next.size === map.size ? map : next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [typing.size]);
+
+  // «Ответить» из меню правой кнопки.
+  useEffect(() => {
+    const onReply = (e: Event) => {
+      const key = (e as CustomEvent<number>).detail;
+      const line = linesRef.current.find((l) => l.key === key);
+      if (line && line.kind === "chat") startReply(line);
+    };
+    window.addEventListener("bh-reply", onReply);
+    return () => window.removeEventListener("bh-reply", onReply);
+  }, []);
+
+  // Статус и аватарка — всем в зале.
+  function changeProfile(status: string | null, avatar: string | null) {
+    setMyStatus(status);
+    setMyAvatar(avatar);
+    save("avatar", avatar ?? "");
+    if (joinedRoom) run(() => send({ type: "profile", status, avatar }));
   }
 
   async function handleOpenFile() {
@@ -873,8 +1036,60 @@ export default function App() {
       await handleSuggest();
       return;
     }
+    if (await offerPlaylist(link, "watch")) return;
     await run(() => invoke("open_url", { url: link }));
     setUrl("");
+  }
+
+  // ----- Плейлист или сезон сериала по ссылке -----
+
+  const [playlistOffer, setPlaylistOffer] = useState<{
+    link: string;
+    mode: "watch" | "suggest";
+    entries: { url: string; title: string | null }[];
+  } | null>(null);
+  const [playlistLoading, setPlaylistLoading] = useState(false);
+
+  /** Ссылка на плейлист — предложить взять все серии. `true` — предложили. */
+  async function offerPlaylist(link: string, mode: "watch" | "suggest"): Promise<boolean> {
+    if (!looksLikePlaylist(link)) return false;
+    setPlaylistLoading(true);
+    try {
+      const entries = await invoke<{ url: string; title: string | null }[]>("playlist_entries", {
+        url: link,
+      });
+      if (entries.length < 2) return false;
+      for (const e of entries) rememberTitle(e.url, e.title);
+      setPlaylistOffer({ link, mode, entries });
+      setUrl("");
+      return true;
+    } catch {
+      return false; // не вышло — просто как одно видео
+    } finally {
+      setPlaylistLoading(false);
+    }
+  }
+
+  async function acceptPlaylist(all: boolean) {
+    const offer = playlistOffer;
+    if (!offer) return;
+    setPlaylistOffer(null);
+    const [first, ...rest] = offer.entries;
+    if (!all) {
+      // Только одно видео: то, что в ссылке, или первая серия.
+      const single = /[?&]v=/.test(offer.link) ? offer.link : first.url;
+      if (offer.mode === "watch") await run(() => invoke("open_url", { url: single }));
+      else await run(() => send({ type: "suggest", media: single }));
+      return;
+    }
+    if (offer.mode === "watch") {
+      await run(() => invoke("open_url", { url: first.url }));
+      if (rest.length > 0) await run(() => send({ type: "suggest_many", media: rest.map((e) => e.url) }));
+    } else {
+      await run(() => send({ type: "suggest_many", media: offer.entries.map((e) => e.url) }));
+    }
+    setSideTab("suggest");
+    if (!mini) setChatOpen(true);
   }
 
   // «Позвать»: приглашение для друга в буфер обмена (без пароля).
@@ -901,6 +1116,7 @@ export default function App() {
       setError("Ссылка должна начинаться с http:// или https://");
       return;
     }
+    if (await offerPlaylist(link, "suggest")) return;
     await run(() => send({ type: "suggest", media: link }));
     setUrl("");
     setSideTab("suggest");
@@ -1511,6 +1727,13 @@ export default function App() {
     };
   }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, browsing, cover, playback?.media]);
 
+  // Вернулись из трея с открытым «Обзором» — показать сайт обратно.
+  useEffect(() => {
+    if (shownTick === 0 || browsing !== "site") return;
+    const rect = videoArea();
+    if (rect) invoke("browser_place", { rect }).catch(() => {});
+  }, [shownTick]);
+
   // Видео закрыли — обложка прошлого трека не нужна.
   useEffect(() => {
     if ((playback?.media ?? null) === null) setCover(null);
@@ -1544,7 +1767,7 @@ export default function App() {
       observer.disconnect();
       window.removeEventListener("resize", place);
     };
-  }, [joinedRoom, browsing, chatOpen, fullscreen, mini]);
+  }, [joinedRoom, browsing, chatOpen, fullscreen, mini, shownTick]);
 
   // История: при входе в комнату — её список, при открытии видео — запись.
   useEffect(() => {
@@ -1564,6 +1787,30 @@ export default function App() {
       return next;
     });
   }, [joinedRoom, playback?.media, player.loaded, info?.title]);
+
+  // ----- Продолжить с места -----
+  // Где остановились в длинных видео (у каждого своё; по ссылке).
+  const [resumeOffer, setResumeOffer] = useState<{ media: string; at: number } | null>(null);
+  const resumeAskedRef = useRef<string | null>(null);
+  const resumeSavedRef = useRef(0);
+  useEffect(() => {
+    const media = playback?.media ?? null;
+    const pos = info?.position ?? null;
+    const dur = info?.duration ?? null;
+    if (!media || !isUrl(media) || player.loaded !== media || pos === null || !dur) return;
+    // Предложить продолжить — тому, у кого пульт, в самом начале видео.
+    if (isHost && resumeAskedRef.current !== media && pos < 10) {
+      resumeAskedRef.current = media;
+      const at = loadResume(media);
+      setResumeOffer(at !== null && at > 60 && at < dur - 60 ? { media, at } : null);
+    }
+    if (resumeOffer && resumeOffer.media !== media) setResumeOffer(null);
+    if (resumeOffer && pos > resumeOffer.at - 5) setResumeOffer(null);
+    // Запоминаем место раз в 5 секунд, только в длинных видео.
+    if (dur < 600 || Math.abs(pos - resumeSavedRef.current) < 5) return;
+    resumeSavedRef.current = pos;
+    saveResume(media, info?.ended || pos > dur - 60 ? null : pos > 30 ? pos : null);
+  }, [playback?.media, player.loaded, info?.position, info?.duration, info?.ended, isHost, resumeOffer]);
 
   // Доиграло до конца — у того, у кого пульт, включается следующее из списка.
   useEffect(() => {
@@ -1606,7 +1853,7 @@ export default function App() {
       observer.disconnect();
       window.removeEventListener("resize", place);
     };
-  }, [fullscreen, mini, chatOpen]);
+  }, [fullscreen, mini, chatOpen, shownTick]);
 
   // Вне полного экрана и мини-окна панели быть не должно — на всякий случай
   // закрываем ещё раз, если что-то её оставило.
@@ -2010,6 +2257,53 @@ export default function App() {
             </label>
           </form>
         )}
+        {!fullscreen && !mini && playlistLoading && (
+          <div className="notice" role="status">
+            <span>Смотрю, что в плейлисте…</span>
+          </div>
+        )}
+        {!fullscreen && !mini && playlistOffer && (
+          <div className="notice playlist-offer">
+            <span>
+              В плейлисте {playlistOffer.entries.length} видео
+              {playlistOffer.entries[0].title ? ` — начиная с «${playlistOffer.entries[0].title}»` : ""}.{" "}
+              {playlistOffer.mode === "watch"
+                ? "Включить первое, а остальные поставить в очередь?"
+                : "Добавить все в «Что посмотреть»?"}
+            </span>
+            <button className="primary" onClick={() => acceptPlaylist(true)}>
+              {playlistOffer.mode === "watch" ? "Да, по порядку" : `Добавить все (${playlistOffer.entries.length})`}
+            </button>
+            <button className="ghost" onClick={() => acceptPlaylist(false)}>
+              Только одно
+            </button>
+            <button
+              className="ghost icon-only"
+              onClick={() => setPlaylistOffer(null)}
+              aria-label="Отмена"
+              title="Отмена"
+            >
+              <Icon name="close" size={16} />
+            </button>
+          </div>
+        )}
+        {!fullscreen && !mini && resumeOffer && (
+          <div className="notice">
+            <span>Ты остановился на {formatTime(resumeOffer.at)}.</span>
+            <button
+              className="primary"
+              onClick={() => {
+                control({ type: "seek", position: resumeOffer.at }).catch((err) => setError(String(err)));
+                setResumeOffer(null);
+              }}
+            >
+              Продолжить
+            </button>
+            <button className="ghost" onClick={() => setResumeOffer(null)}>
+              С начала
+            </button>
+          </div>
+        )}
         {!fullscreen && !mini && needsFile && (
           <div className="notice">
             <span>
@@ -2167,8 +2461,9 @@ export default function App() {
             <ul onScroll={() => setMemberMenu(null)}>
               {members.map((m) => {
                 const speaking = speakers.has(String(m.id));
-                // По любому, кроме себя, — меню: громкость, а у кого пульт — ещё и управление.
-                const manageable = m.id !== me;
+                // По любому — меню: у себя статус и аватарка, у других громкость,
+                // а у кого пульт — ещё и управление.
+                const manageable = true;
                 return (
                   <li
                     key={m.id}
@@ -2178,11 +2473,11 @@ export default function App() {
                     role={manageable ? "button" : undefined}
                     tabIndex={manageable ? 0 : undefined}
                     title={
-                      manageable
-                        ? isHost
+                      m.id === me
+                        ? "Статус и аватарка"
+                        : isHost
                           ? "Громкость, передать пульт или выгнать"
                           : "Громкость этого человека — только у тебя"
-                        : undefined
                     }
                     aria-haspopup={manageable ? "menu" : undefined}
                     aria-expanded={manageable ? memberMenu?.id === m.id : undefined}
@@ -2198,15 +2493,7 @@ export default function App() {
                         : undefined
                     }
                   >
-                    <span
-                      className={["seat", speaking && "speaking", !m.online && "offline"]
-                        .filter(Boolean)
-                        .join(" ")}
-                      style={{ background: SEAT_COLORS[colorIndex(m.name)] }}
-                      title={speaking ? "Говорит" : undefined}
-                    >
-                      {initial(m.name)}
-                    </span>
+                    <SeatBadge member={m} speaking={speaking} offline={!m.online} />
                     <span className="seat-name">
                       <span>
                         {m.name}
@@ -2215,7 +2502,11 @@ export default function App() {
                       {!m.online ? (
                         <span className="seat-role">переподключается…</span>
                       ) : (
-                        m.id === host && <span className="seat-role">держит пульт</span>
+                        (m.id === host || m.status) && (
+                          <span className="seat-role">
+                            {[m.id === host && "держит пульт", m.status].filter(Boolean).join(" · ")}
+                          </span>
+                        )
                       )}
                     </span>
                     {(m.deaf || (m.in_voice && !m.mic)) && (
@@ -2244,6 +2535,18 @@ export default function App() {
             {memberMenu &&
               (() => {
                 const m = members.find((x) => x.id === memberMenu.id);
+                if (m && m.id === me) {
+                  return (
+                    <ProfileMenu
+                      key={m.id}
+                      member={m}
+                      anchor={memberMenu}
+                      status={myStatus}
+                      avatar={myAvatar}
+                      onChange={changeProfile}
+                    />
+                  );
+                }
                 return (
                   m && (
                     <MemberMenu
@@ -2280,7 +2583,18 @@ export default function App() {
                     if (e.target.checked) sound.join();
                   }}
                 />
-                Звуки: микрофон, вход и выход людей
+                Звуки: микрофон, вход и выход людей, упоминания
+              </label>
+              <label className="setting-check">
+                <input
+                  type="checkbox"
+                  checked={closeToTray}
+                  onChange={(e) => {
+                    setCloseToTray(e.target.checked);
+                    save("closeToTray", e.target.checked ? "1" : "0");
+                  }}
+                />
+                Крестик сворачивает в трей (значок у часов), а не закрывает
               </label>
               <h3 className="settings-sub">Голос</h3>
               <fieldset>
@@ -2518,10 +2832,22 @@ export default function App() {
                     <span>{l.media ? l.text.replace("{title}", mediaTitle(l.media)) : l.text}</span>
                   </div>
                 ) : (
-                  <div key={l.key} className={l.mine ? "message mine" : "message"}>
+                  <div
+                    key={l.key}
+                    data-key={l.key}
+                    className={["message", l.mine && "mine", l.mention && "mention"]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
                     <span className="author" style={{ color: NAME_COLORS[colorIndex(l.name)] }}>
                       {l.name}
                     </span>
+                    {l.reply && (
+                      <span className="reply-quote">
+                        <strong>{l.reply.name}</strong>
+                        <span>{l.reply.text}</span>
+                      </span>
+                    )}
                     {(() => {
                       const sticker = stickerFromMessage(l.text);
                       return sticker ? (
@@ -2530,6 +2856,15 @@ export default function App() {
                         <RichText text={l.text} />
                       );
                     })()}
+                    <button
+                      type="button"
+                      className="reply-button"
+                      onClick={() => startReply(l)}
+                      title="Ответить"
+                      aria-label="Ответить"
+                    >
+                      <Icon name="reply" size={14} />
+                    </button>
                   </div>
                 ),
               )}
@@ -2599,11 +2934,74 @@ export default function App() {
                   ))}
                 </div>
               )}
+              {typing.size > 0 && (
+                <div className="typing-line" aria-live="polite">
+                  <span className="typing-dots" aria-hidden="true">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                  {(() => {
+                    const names = [...typing.keys()]
+                      .map((id) => members.find((m) => m.id === id)?.name)
+                      .filter(Boolean) as string[];
+                    if (names.length === 1) return `${names[0]} печатает…`;
+                    if (names.length === 2) return `${names[0]} и ${names[1]} печатают…`;
+                    return "Несколько человек печатают…";
+                  })()}
+                </div>
+              )}
+              {replyTo && (
+                <div className="reply-bar">
+                  <Icon name="reply" size={14} />
+                  <span className="reply-bar-text">
+                    Ответ <strong>{replyTo.name}</strong>: {replyTo.text}
+                  </span>
+                  <button
+                    type="button"
+                    className="icon"
+                    onClick={() => setReplyTo(null)}
+                    aria-label="Не отвечать"
+                    title="Не отвечать (Esc)"
+                  >
+                    <Icon name="close" size={14} />
+                  </button>
+                </div>
+              )}
+              {mentionOptions.length > 0 && (
+                <div className="mention-list" role="listbox" aria-label="Кого упомянуть">
+                  {mentionOptions.map((m, i) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      role="option"
+                      aria-selected={i === 0}
+                      className={i === 0 ? "active" : ""}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        insertMention(m.name);
+                      }}
+                    >
+                      <SeatBadge member={m} small />
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="composer-row">
                 <input
                   ref={draftRef}
                   value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
+                  onChange={(e) => onDraftChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if ((e.key === "Tab" || e.key === "Enter") && mentionOptions.length > 0) {
+                      e.preventDefault();
+                      insertMention(mentionOptions[0].name);
+                    } else if (e.key === "Escape" && replyTo) {
+                      e.stopPropagation();
+                      setReplyTo(null);
+                    }
+                  }}
                   onFocus={() => setSideTab("chat")}
                   disabled={reconnecting}
                   placeholder={reconnecting ? "Ждём связь с сервером…" : "Написать в зал"}
@@ -2796,6 +3194,36 @@ function spinWeights(list: Suggestion[], percents: Map<number, number>): Array<[
 }
 
 /** Список «Что посмотреть» и рулетка по нему. */
+// ---------- Где остановились ----------
+
+const RESUME_KEY = "resume";
+
+function loadResumeMap(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(RESUME_KEY) ?? "{}") as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function loadResume(media: string): number | null {
+  const at = loadResumeMap()[media];
+  return typeof at === "number" ? at : null;
+}
+
+/** `null` — досмотрели, место больше не нужно. Храним последние 50 видео. */
+function saveResume(media: string, at: number | null) {
+  try {
+    const map = loadResumeMap();
+    delete map[media];
+    if (at !== null) map[media] = Math.round(at);
+    const entries = Object.entries(map).slice(-50);
+    localStorage.setItem(RESUME_KEY, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // Не сохранилось — не страшно.
+  }
+}
+
 // ---------- История просмотров ----------
 
 interface HistoryEntry {
@@ -3050,6 +3478,156 @@ type MenuAnchor = { id: MemberId; top: number; bottom: number; left: number; wid
  * Меню участника для ведущего: передать управление или выгнать из зала.
  * Действие подтверждается тут же, вторым нажатием, без системных окон.
  */
+/** Похоже на плейлист или сезон: YouTube `list=`, VK и Rutube — плейлисты. */
+function looksLikePlaylist(link: string): boolean {
+  try {
+    const u = new URL(link);
+    const host = u.hostname.replace(/^www\.|^m\./, "");
+    const list = u.searchParams.get("list");
+    // Миксы YouTube (RD…) бесконечные — это не сезон.
+    if ((host === "youtube.com" || host === "youtu.be") && list && !list.startsWith("RD")) return true;
+    if (host.endsWith("vkvideo.ru") || host.endsWith("vk.com")) {
+      return /\/playlist\//.test(u.pathname) || /playlist/.test(u.searchParams.get("section") ?? "");
+    }
+    if (host.endsWith("rutube.ru")) return /^\/plst\//.test(u.pathname);
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Кружок участника: аватарка-эмодзи, свой цвет или буква на цветном круге. */
+function SeatBadge({
+  member,
+  small = false,
+  speaking = false,
+  offline = false,
+}: {
+  member: { name: string; avatar?: string | null };
+  small?: boolean;
+  speaking?: boolean;
+  offline?: boolean;
+}) {
+  const avatar = member.avatar ?? "";
+  const emoji = avatar.startsWith("emoji:") ? avatar.slice(6) : null;
+  const color = avatar.startsWith("color:") ? Number(avatar.slice(6)) : NaN;
+  const background = emoji
+    ? "var(--raised-2)"
+    : SEAT_COLORS[(Number.isFinite(color) ? color : colorIndex(member.name)) % SEAT_COLORS.length];
+  return (
+    <span
+      className={["seat", small && "small", speaking && "speaking", offline && "offline", emoji && "emoji"]
+        .filter(Boolean)
+        .join(" ")}
+      style={{ background }}
+      title={speaking ? "Говорит" : undefined}
+    >
+      {emoji ? <EmojiGlyph emoji={emoji} /> : initial(member.name)}
+    </span>
+  );
+}
+
+/** Готовые статусы — одним кликом. */
+const STATUSES = ["🚶 Отошёл", "👀 Смотрю краем глаза", "🍕 Ем", "📱 В телефоне", "😴 Засыпаю"];
+/** Аватарки-эмодзи — из объёмных смайликов. */
+const AVATAR_EMOJI = ["🍿", "😎", "🤡", "👻", "💀", "🗿", "🥶", "🤪", "😴", "🫡", "🤯", "🥳", "🔥", "👀", "💩", "🎬"];
+
+/** Своё меню: статус и аватарка (видят все в зале). */
+function ProfileMenu({
+  member,
+  anchor,
+  status,
+  avatar,
+  onChange,
+}: {
+  member: Member;
+  anchor: MenuAnchor;
+  status: string | null;
+  avatar: string | null;
+  onChange: (status: string | null, avatar: string | null) => void;
+}) {
+  const [custom, setCustom] = useState(
+    status && !STATUSES.includes(status) ? status : "",
+  );
+  const below = window.innerHeight - anchor.bottom > 380;
+  const style: CSSProperties = {
+    left: anchor.left,
+    width: Math.max(anchor.width, 280),
+    ...(below ? { top: anchor.bottom + 6 } : { bottom: window.innerHeight - anchor.top + 6 }),
+  };
+  return (
+    <div className="member-menu profile-menu" role="menu" style={style}>
+      <div className="member-menu-head">
+        <SeatBadge member={{ name: member.name, avatar }} small />
+        <span className="member-menu-name">{member.name}</span>
+      </div>
+      <span className="profile-label">Статус</span>
+      <div className="status-chips">
+        <button className={status === null ? "status-chip active" : "status-chip"} onClick={() => onChange(null, avatar)}>
+          Без статуса
+        </button>
+        {STATUSES.map((s) => (
+          <button
+            key={s}
+            className={status === s ? "status-chip active" : "status-chip"}
+            onClick={() => onChange(s, avatar)}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+      <form
+        className="status-custom"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onChange(custom.trim() || null, avatar);
+        }}
+      >
+        <input
+          value={custom}
+          onChange={(e) => setCustom(e.target.value)}
+          maxLength={40}
+          placeholder="Свой статус"
+          aria-label="Свой статус"
+        />
+        <button type="submit" className="ghost" disabled={!custom.trim()}>
+          Ок
+        </button>
+      </form>
+      <span className="profile-label">Аватарка</span>
+      <div className="avatar-grid">
+        <button
+          className={avatar === null ? "avatar-choice active" : "avatar-choice"}
+          onClick={() => onChange(status, null)}
+          title="Буква"
+        >
+          <SeatBadge member={{ name: member.name }} small />
+        </button>
+        {SEAT_COLORS.map((_, i) => (
+          <button
+            key={`c${i}`}
+            className={avatar === `color:${i}` ? "avatar-choice active" : "avatar-choice"}
+            onClick={() => onChange(status, `color:${i}`)}
+            title="Цвет"
+          >
+            <SeatBadge member={{ name: member.name, avatar: `color:${i}` }} small />
+          </button>
+        ))}
+        {AVATAR_EMOJI.map((e) => (
+          <button
+            key={e}
+            className={avatar === `emoji:${e}` ? "avatar-choice active" : "avatar-choice"}
+            onClick={() => onChange(status, `emoji:${e}`)}
+            title={e}
+          >
+            <SeatBadge member={{ name: member.name, avatar: `emoji:${e}` }} small />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MemberMenu({
   member,
   anchor,
@@ -3084,9 +3662,7 @@ function MemberMenu({
   return (
     <div className="member-menu" role="menu" style={style}>
       <div className="member-menu-head">
-        <span className="seat small" style={{ background: SEAT_COLORS[colorIndex(member.name)] }}>
-          {initial(member.name)}
-        </span>
+        <SeatBadge member={member} small />
         <span className="member-menu-name">{member.name}</span>
       </div>
 
@@ -3625,6 +4201,7 @@ type IconName =
   | "dice"
   | "grid"
   | "back"
+  | "reply"
   | "sticker";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
@@ -3846,6 +4423,12 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
     <>
       <line x1="5" y1="12" x2="19" y2="12" />
       <polyline points="13 6 19 12 13 18" />
+    </>
+  ),
+  reply: (
+    <>
+      <polyline points="9 7 4 12 9 17" />
+      <path d="M4 12h10a6 6 0 0 1 6 6v1" />
     </>
   ),
   grid: (

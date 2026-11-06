@@ -465,3 +465,43 @@ async fn roulette_waits_and_can_be_cancelled() {
         }
     }
 }
+
+#[tokio::test]
+async fn replies_typing_profiles_and_series() {
+    let url = start(Config::default()).await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    let mut b = Client::connect(&url).await;
+    b.send(json!({"type": "join", "room": "r", "name": "Боря", "avatar": "emoji:🍿"}))
+        .await;
+    let wb = b.expect("welcome").await;
+    assert_eq!(wb["members"][1]["avatar"], "emoji:🍿");
+    assert_eq!(a.expect("member_joined").await["member"]["avatar"], "emoji:🍿");
+
+    // Ответ на сообщение доходит вместе с цитатой.
+    b.send(json!({"type": "chat", "text": "да", "reply": {"name": "Аня", "text": "идём?"}}))
+        .await;
+    let chat = a.expect("chat").await;
+    assert_eq!(chat["reply"]["name"], "Аня");
+
+    // «Печатает» — только остальным.
+    b.send(json!({"type": "typing"})).await;
+    assert_eq!(a.expect("typing").await["id"], wb["you"]);
+
+    // Статус и аватарка — всем и тем, кто зайдёт позже.
+    b.send(json!({"type": "profile", "status": "отошёл", "avatar": "color:3"}))
+        .await;
+    let p = a.expect("member_profile").await;
+    assert_eq!(p["status"], "отошёл");
+    let (_c, wc) = Client::join(&url, "r", "Вася").await;
+    assert_eq!(wc["members"][1]["status"], "отошёл");
+    // Чужое не пройдёт как аватарка.
+    b.send(json!({"type": "profile", "status": null, "avatar": "<script>"}))
+        .await;
+    assert!(a.expect("member_profile").await["avatar"].is_null());
+
+    // Серии из плейлиста — одним списком, без повторов.
+    b.send(json!({"type": "suggest_many", "media": ["https://e.com/1", "https://e.com/2", "https://e.com/1"]}))
+        .await;
+    let list = a.expect("suggestions").await;
+    assert_eq!(list["list"].as_array().unwrap().len(), 2);
+}

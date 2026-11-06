@@ -14,6 +14,16 @@ export interface Member {
   mic?: boolean;
   /** Выключил себе звук от всех. */
   deaf?: boolean;
+  /** Статус: «отошёл», «смотрю краем глаза»… */
+  status?: string | null;
+  /** Аватарка: `emoji:🍿` или `color:3`. */
+  avatar?: string | null;
+}
+
+/** На какое сообщение ответили. */
+export interface ChatReply {
+  name: string;
+  text: string;
 }
 
 /** Предложение, что посмотреть. */
@@ -53,7 +63,10 @@ export type ClientMsg =
       resume?: string | null;
     }
   | { type: "leave" }
-  | { type: "chat"; text: string }
+  | { type: "chat"; text: string; reply?: ChatReply | null }
+  | { type: "typing" }
+  | { type: "profile"; status: string | null; avatar: string | null }
+  | { type: "suggest_many"; media: string[] }
   | { type: "suggest"; media: string }
   | { type: "remove_suggestion"; id: number }
   | { type: "loaded"; media: string }
@@ -92,7 +105,9 @@ export type ServerMsg =
   | { type: "member_left"; id: MemberId; kicked: boolean }
   | { type: "kicked"; by: string }
   | { type: "host_changed"; host: MemberId }
-  | { type: "chat"; from: MemberId; name: string; text: string }
+  | { type: "chat"; from: MemberId; name: string; text: string; reply?: ChatReply | null }
+  | { type: "typing"; id: MemberId }
+  | { type: "member_profile"; id: MemberId; status: string | null; avatar: string | null }
   | {
       type: "playback";
       playback: PlaybackState;

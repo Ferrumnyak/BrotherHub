@@ -39,7 +39,7 @@ pub fn setup(app: &tauri::App) {
         };
         keep(&handle, url);
         let _ = handle.emit("deep-link", ());
-        show_main(&handle);
+        crate::tray::show_app(&handle);
     });
 }
 

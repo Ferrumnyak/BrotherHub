@@ -34,7 +34,7 @@ use axum::{
     Router,
 };
 use brotherwatch_shared::{
-    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, RouletteCountdown, ServerMsg, SubtitleFile,
+    ChatReply, ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, RouletteCountdown, ServerMsg, SubtitleFile,
     Suggestion, VoiceAccess,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -47,7 +47,12 @@ const MAX_NAME_LEN: usize = 32;
 const MAX_CHAT_LEN: usize = 2000;
 const MAX_MEDIA_LEN: usize = 2000;
 /// Сколько предложений «что посмотреть» держит комната.
-const MAX_SUGGESTIONS: usize = 30;
+/// С запасом под сезон сериала из плейлиста.
+const MAX_SUGGESTIONS: usize = 60;
+const MAX_STATUS_LEN: usize = 40;
+const MAX_AVATAR_LEN: usize = 24;
+/// Сколько текста цитаты хранить в ответе.
+const MAX_REPLY_LEN: usize = 200;
 /// С запасом под файл субтитров (сам файл — до [`MAX_SUBTITLES_BYTES`]).
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// Субтитры к фильму обычно 50–150 КБ.
@@ -133,6 +138,8 @@ struct Peer {
     in_voice: bool,
     mic: bool,
     deaf: bool,
+    status: Option<String>,
+    avatar: Option<String>,
 }
 
 struct Room {
@@ -254,6 +261,8 @@ impl Room {
                 in_voice: p.in_voice,
                 mic: p.mic,
                 deaf: p.deaf,
+                status: p.status.clone(),
+                avatar: p.avatar.clone(),
             })
             .collect();
         members.sort_by_key(|m| m.id);
@@ -374,6 +383,17 @@ impl RateLimit {
 
 fn random_u64() -> u64 {
     RandomState::new().build_hasher().finish()
+}
+
+/// Аватарка — только короткая строка вида `emoji:…` или `color:…`.
+fn clean_avatar(avatar: Option<String>) -> Option<String> {
+    avatar
+        .map(|a| a.trim().to_string())
+        .filter(|a| {
+            !a.is_empty()
+                && a.chars().count() <= MAX_AVATAR_LEN
+                && (a.starts_with("emoji:") || a.starts_with("color:"))
+        })
 }
 
 /// Время вышло — крутим рулетку, если её не отменили и не запустили заново.
@@ -507,7 +527,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, ip: IpAddr) {
         if matches!(cmd, ClientMsg::React { .. }) && !reactions.allow() {
             continue;
         }
-        let is_chat = matches!(cmd, ClientMsg::Chat { .. } | ClientMsg::Suggest { .. });
+        let is_chat = matches!(
+            cmd,
+            ClientMsg::Chat { .. } | ClientMsg::Suggest { .. } | ClientMsg::SuggestMany { .. }
+        );
         if !messages.allow() || (is_chat && !chat.allow()) {
             flood_warnings += 1;
             if flood_warnings > 20 {
@@ -570,8 +593,10 @@ async fn handle_command(
         name,
         password,
         resume,
+        avatar,
     } = cmd
     {
+        let avatar = clean_avatar(avatar);
         if seat.is_some() {
             return error("ты уже в комнате");
         }
@@ -603,6 +628,9 @@ async fn handle_command(
                     peer.tx = Some(tx.clone());
                     peer.conn = conn;
                     peer.gone_since = None;
+                    if avatar.is_some() {
+                        peer.avatar = avatar;
+                    }
                     r.broadcast_except(id, &ServerMsg::MemberStatus { id, online: true });
                     let welcome = welcome(state, r, &room, id, token, true);
                     send(tx, welcome);
@@ -630,6 +658,8 @@ async fn handle_command(
                 in_voice: false,
                 mic: false,
                 deaf: false,
+                status: None,
+                avatar: avatar.clone(),
             },
         });
         let token = new_token();
@@ -644,6 +674,8 @@ async fn handle_command(
                 in_voice: false,
                 mic: false,
                 deaf: false,
+                status: None,
+                avatar,
             },
         );
         let welcome = welcome(state, r, &room, id, token, false);
@@ -668,7 +700,7 @@ async fn handle_command(
         return error("ты больше не в этой комнате");
     };
 
-    if let ClientMsg::Chat { text } = cmd {
+    if let ClientMsg::Chat { text, reply } = cmd {
         let text = text.trim();
         if text.is_empty() {
             return false;
@@ -676,16 +708,69 @@ async fn handle_command(
         if text.chars().count() > MAX_CHAT_LEN {
             return error("слишком длинное сообщение");
         }
+        let reply = reply.map(|r| ChatReply {
+            name: r.name.chars().take(MAX_NAME_LEN).collect(),
+            text: r.text.chars().take(MAX_REPLY_LEN).collect(),
+        });
         room.broadcast(&ServerMsg::Chat {
             from: id,
             name,
             text: text.to_string(),
+            reply,
         });
         return false;
     }
 
     // Это может делать любой участник.
     match cmd {
+        ClientMsg::Typing => {
+            room.broadcast_except(id, &ServerMsg::Typing { id });
+            return false;
+        }
+        ClientMsg::Profile { status, avatar } => {
+            let status = status
+                .map(|s| s.trim().chars().take(MAX_STATUS_LEN).collect::<String>())
+                .filter(|s| !s.is_empty());
+            let avatar = clean_avatar(avatar);
+            if let Some(peer) = room.peers.get_mut(&id) {
+                if peer.status == status && peer.avatar == avatar {
+                    return false;
+                }
+                peer.status = status.clone();
+                peer.avatar = avatar.clone();
+            }
+            room.broadcast(&ServerMsg::MemberProfile { id, status, avatar });
+            return false;
+        }
+        ClientMsg::SuggestMany { media } => {
+            let mut added = 0;
+            for item in media {
+                let item = item.trim();
+                if item.is_empty()
+                    || item.chars().count() > MAX_MEDIA_LEN
+                    || room.suggestions.iter().any(|s| s.media == item)
+                {
+                    continue;
+                }
+                if room.suggestions.len() >= MAX_SUGGESTIONS {
+                    break;
+                }
+                let suggestion_id = room.next_suggestion;
+                room.next_suggestion += 1;
+                room.suggestions.push(Suggestion {
+                    id: suggestion_id,
+                    media: item.to_string(),
+                    by: id,
+                    name: name.clone(),
+                });
+                added += 1;
+            }
+            if added == 0 {
+                return error("ничего не добавилось: всё уже в списке или он полон");
+            }
+            room.broadcast_suggestions();
+            return false;
+        }
         ClientMsg::Suggest { media } => {
             let media = media.trim();
             if media.is_empty() || media.chars().count() > MAX_MEDIA_LEN {
@@ -849,7 +934,10 @@ fn handle_host_command(
         | ClientMsg::VoiceState { .. }
         | ClientMsg::React { .. }
         | ClientMsg::Spin { .. }
-        | ClientMsg::CancelRoulette => {
+        | ClientMsg::CancelRoulette
+        | ClientMsg::Typing
+        | ClientMsg::Profile { .. }
+        | ClientMsg::SuggestMany { .. } => {
             unreachable!("обработано выше")
         }
         ClientMsg::SetSubtitles { subtitles } => {
