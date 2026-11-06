@@ -17,6 +17,16 @@ import { initTheme } from "./theme";
 initTheme();
 blockBrowserMenu();
 
+// Медиаклавиши и автопауза наушников не должны трогать голосовой чат
+// (звук друзей играет через <audio> в окне приложения).
+try {
+  for (const action of ["play", "pause", "stop", "seekbackward", "seekforward", "previoustrack", "nexttrack"] as const) {
+    navigator.mediaSession?.setActionHandler(action, () => {});
+  }
+} catch {
+  // Не поддерживается — не страшно.
+}
+
 // Окно панели плеера поверх видео (полный экран) открывается тем же
 // интерфейсом с пометкой __BW_VIEW = "controls".
 declare global {
