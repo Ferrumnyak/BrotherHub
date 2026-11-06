@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BrotherHub — приглашение в зал</title>
+  <meta name="description" content="Смотрим вместе в BrotherHub" />
+  <meta property="og:title" content="Заходи смотреть в BrotherHub" />
+  <meta property="og:description" content="Кинозал для своих: один фильм, одна пауза, общий голосовой чат." />
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f0d10;
+      --card: #1a171b;
+      --line: #2c2629;
+      --text: #f4efe9;
+      --muted: #a39a9e;
+      --accent: #ff8c2a;
+      --accent-soft: #ffa64d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: radial-gradient(ellipse at 50% 0%, #2a1c12 0%, var(--bg) 60%);
+      color: var(--text);
+      font: 16px/1.5 "Segoe UI", system-ui, sans-serif;
+    }
+    main {
+      width: 100%;
+      max-width: 420px;
+      padding: 32px 28px;
+      border-radius: 24px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      text-align: center;
+    }
+    img { width: 88px; height: 88px; }
+    h1 { margin: 16px 0 4px; font-size: 22px; }
+    p { margin: 0; color: var(--muted); }
+    .room { color: var(--text); font-weight: 700; }
+    .open {
+      display: block;
+      margin: 24px 0 12px;
+      padding: 14px 20px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #1a0f05;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .open:hover { background: var(--accent-soft); }
+    .download { color: var(--accent-soft); font-weight: 600; }
+    small { display: block; margin-top: 20px; color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="logo.svg" alt="" />
+    <h1>Заходи смотреть вместе</h1>
+    <p id="where">Зовут в BrotherHub</p>
+    <a class="open" id="open" href="brotherhub://join">Открыть в BrotherHub</a>
+    <p>Нет приложения? <a class="download" href="https://github.com/Ferrumnyak/Brotherwatch/releases/latest">Скачать BrotherHub</a></p>
+    <small>Windows 10 или 11. После установки вернись на эту страницу и нажми «Открыть».</small>
+  </main>
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var room = (q.get("room") || "").trim().slice(0, 32);
+      var server = (q.get("server") || "").trim();
+      var link = new URLSearchParams();
+      if (room) link.set("room", room);
+      if (/^wss?:\/\//.test(server)) link.set("server", server);
+      var href = "brotherhub://join?" + link.toString();
+      document.getElementById("open").href = href;
+      if (room) {
+        var where = document.getElementById("where");
+        where.textContent = "Комната ";
+        var b = document.createElement("span");
+        b.className = "room";
+        b.textContent = "«" + room + "»";
+        where.appendChild(b);
+        // Сразу пробуем открыть приложение; не установлено — останется страница.
+        location.href = href;
+      }
+    })();
+  </script>
+</body>
+</html>

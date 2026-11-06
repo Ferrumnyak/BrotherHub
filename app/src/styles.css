@@ -2485,6 +2485,22 @@ button.browse-open.active {
   }
 }
 
+/* ----- Полосы прокрутки: тонкие, в цвет темы ----- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* В чате полоса видна, только когда мышь над ним. */
+.lines {
+  scrollbar-color: transparent transparent;
+}
+
+.lines:hover {
+  scrollbar-color: var(--line-strong) transparent;
+}
+
 /* ----- Обновление ----- */
 
 .header-actions button.update-pill {

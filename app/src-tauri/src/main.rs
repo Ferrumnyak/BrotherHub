@@ -3,6 +3,7 @@
 
 mod browser;
 mod certs;
+mod deeplink;
 mod logs;
 mod net;
 mod overlay;
@@ -20,10 +21,17 @@ fn main() {
     logs::init();
     update::cleanup();
     tauri::Builder::default()
+        // Первым: второй запуск (в том числе по ссылке-приглашению)
+        // отдаёт ссылку уже открытому приложению и закрывается.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            deeplink::show_main(app);
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(net::Connection::default())
         .manage(video::VideoHost::default())
+        .manage(deeplink::Pending::default())
         .setup(|app| {
             // Окно для встроенного видео (setup выполняется в главном потоке).
             if let Some(window) = app.get_webview_window("main") {
@@ -39,6 +47,7 @@ fn main() {
                     logs::warn(format!("видео будет в отдельном окне: {e}"));
                 }
             }
+            deeplink::setup(app);
             player::update_bundled_ytdlp();
             let session = session::Session::start(app.handle().clone());
             app.manage(session);
@@ -75,7 +84,8 @@ fn main() {
             browser::browser_back,
             browser::browser_close,
             update::update_check,
-            update::update_install
+            update::update_install,
+            deeplink::deep_link_take
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherHub");

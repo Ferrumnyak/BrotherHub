@@ -19,6 +19,9 @@ tauri-plugin-dialog = "2"
 # Обновление по кнопке (update.rs). TLS — тот же SChannel, что и у остального.
 tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }
 semver = "1"
+# Ссылки-приглашения brotherhub:// (deeplink.rs); второй запуск — в то же окно.
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # native-tls — шифрование (wss://) через встроенный в Windows SChannel.
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 # Загрузка страниц сайтов, которые yt-dlp не знает (см. sites.rs), и
