@@ -75,8 +75,46 @@ pub struct Player {
     pub id: u64,
     write_tx: mpsc::UnboundedSender<String>,
     pending: Pending,
-    next_request: AtomicU64,
+    next_request: Arc<AtomicU64>,
     _child: Child,
+}
+
+/// Чтение свойств mpv без самого плеера: его можно взять из сессии и
+/// отпустить её блокировку, пока mpv отвечает (до 2 секунд на свойство).
+/// Иначе медленный ответ mpv держал всю сессию — и кнопки «зависали».
+#[derive(Clone)]
+pub struct Probe {
+    write_tx: mpsc::UnboundedSender<String>,
+    pending: Pending,
+    next_request: Arc<AtomicU64>,
+}
+
+impl Probe {
+    pub async fn get(&self, property: &str) -> Option<Value> {
+        let id = self.next_request.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(id, tx);
+        let mut line = json!({ "command": ["get_property", property], "request_id": id }).to_string();
+        line.push('\n');
+        let _ = self.write_tx.send(line);
+
+        let reply = tokio::time::timeout(Duration::from_secs(2), rx).await;
+        let reply = match reply {
+            Ok(Ok(v)) => v,
+            _ => {
+                self.pending.lock().await.remove(&id);
+                return None;
+            }
+        };
+        if reply.get("error").and_then(Value::as_str) != Some("success") {
+            return None;
+        }
+        reply.get("data").cloned()
+    }
+
+    pub async fn get_f64(&self, property: &str) -> Option<f64> {
+        self.get(property).await.and_then(|v| v.as_f64())
+    }
 }
 
 impl Player {
@@ -240,7 +278,7 @@ impl Player {
             id,
             write_tx,
             pending,
-            next_request: AtomicU64::new(1),
+            next_request: Arc::new(AtomicU64::new(1)),
             _child: child,
         };
         player.command(json!(["observe_property", 1, "pause"]));
@@ -260,25 +298,18 @@ impl Player {
         self.send_line(id, args);
     }
 
+    /// Читалка свойств, не привязанная к сессии.
+    pub fn probe(&self) -> Probe {
+        Probe {
+            write_tx: self.write_tx.clone(),
+            pending: self.pending.clone(),
+            next_request: self.next_request.clone(),
+        }
+    }
+
     /// Прочитать свойство mpv.
     pub async fn get(&self, property: &str) -> Option<Value> {
-        let id = self.next_request.fetch_add(1, Ordering::Relaxed);
-        let (tx, rx) = oneshot::channel();
-        self.pending.lock().await.insert(id, tx);
-        self.send_line(id, json!(["get_property", property]));
-
-        let reply = tokio::time::timeout(Duration::from_secs(2), rx).await;
-        let reply = match reply {
-            Ok(Ok(v)) => v,
-            _ => {
-                self.pending.lock().await.remove(&id);
-                return None;
-            }
-        };
-        if reply.get("error").and_then(Value::as_str) != Some("success") {
-            return None;
-        }
-        reply.get("data").cloned()
+        self.probe().get(property).await
     }
 
     pub fn load(&self, path_or_url: &str) {

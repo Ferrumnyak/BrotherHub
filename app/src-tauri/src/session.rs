@@ -741,34 +741,6 @@ impl Session {
         let _ = self.app.emit("player-tracks", tracks);
     }
 
-    pub async fn info(&self) -> PlaybackInfo {
-        let Some(player) = &self.player else {
-            return PlaybackInfo {
-                position: None,
-                duration: None,
-                paused: true,
-                volume: None,
-                title: None,
-                ended: false,
-            };
-        };
-        PlaybackInfo {
-            position: player.get_f64("time-pos").await,
-            duration: player.get_f64("duration").await,
-            paused: self.player_paused,
-            volume: player.get_f64("volume").await,
-            title: player
-                .get("media-title")
-                .await
-                .and_then(|v| v.as_str().map(str::to_string)),
-            ended: player
-                .get("eof-reached")
-                .await
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
-        }
-    }
-
     pub fn control(&mut self, control: Control) -> Result<(), String> {
         let Some(player) = &self.player else {
             return Ok(());
@@ -1078,7 +1050,37 @@ pub async fn set_chat_overlay(
 
 #[tauri::command]
 pub async fn player_info(session: State<'_, SharedSession>) -> Result<PlaybackInfo, String> {
-    Ok(session.lock().await.info().await)
+    // Сессию держим только чтобы взять плеер, а ответы mpv ждём уже без неё
+    // и все сразу: этот опрос идёт 2–3 раза в секунду из каждого окна.
+    let (probe, paused) = {
+        let s = session.lock().await;
+        (s.player.as_ref().map(|p| p.probe()), s.player_paused)
+    };
+    let Some(p) = probe else {
+        return Ok(PlaybackInfo {
+            position: None,
+            duration: None,
+            paused: true,
+            volume: None,
+            title: None,
+            ended: false,
+        });
+    };
+    let (position, duration, volume, title, ended) = tokio::join!(
+        p.get_f64("time-pos"),
+        p.get_f64("duration"),
+        p.get_f64("volume"),
+        p.get("media-title"),
+        p.get("eof-reached"),
+    );
+    Ok(PlaybackInfo {
+        position,
+        duration,
+        paused,
+        volume,
+        title: title.and_then(|v| v.as_str().map(str::to_string)),
+        ended: ended.and_then(|v| v.as_bool()).unwrap_or(false),
+    })
 }
 
 #[tauri::command]
