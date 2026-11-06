@@ -6,7 +6,7 @@
 ## Установка
 
 1. Скачай `BrotherHub-…-setup.exe` со страницы
-   [последнего релиза](https://github.com/Ferrumnyak/Brotherwatch/releases/latest).
+   [последнего релиза](https://github.com/Ferrumnyak/BrotherHub/releases/latest).
 2. Запусти его. Windows может показать окно «Система Windows защитила ваш
    компьютер»: установщик не подписан платной цифровой подписью. Нажми
    «Подробнее», затем «Выполнить в любом случае».

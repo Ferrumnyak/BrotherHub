@@ -125,7 +125,7 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Notes "Что но
 
 Версии до 0.3.0 обновляться по кнопке не умеют: на них один раз нужно
 поставить новую версию вручную по ссылке
-`https://github.com/Ferrumnyak/Brotherwatch/releases/latest`.
+`https://github.com/Ferrumnyak/BrotherHub/releases/latest`.
 
 ## Без установщика (portable)
 

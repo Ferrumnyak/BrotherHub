@@ -116,7 +116,7 @@ if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $folder -DestinationPath $zip
 
 # ---------- latest.json ----------
-$base = "https://github.com/Ferrumnyak/Brotherwatch/releases/download/v$version"
+$base = "https://github.com/Ferrumnyak/BrotherHub/releases/download/v$version"
 $latest = [ordered]@{
     version  = $version
     notes    = $Notes

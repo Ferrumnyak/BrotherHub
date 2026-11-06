@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$repo = "Ferrumnyak/Brotherwatch"
+$repo = "Ferrumnyak/BrotherHub"
 $mpvDir = Join-Path $root "app\src-tauri\bin\mpv"
 $mpvExe = Join-Path $mpvDir "mpv.exe"
 

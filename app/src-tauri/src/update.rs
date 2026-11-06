@@ -20,7 +20,7 @@ use tauri_plugin_updater::UpdaterExt;
 use crate::logs;
 
 const LATEST_URL: &str =
-    "https://github.com/Ferrumnyak/Brotherwatch/releases/latest/download/latest.json";
+    "https://github.com/Ferrumnyak/BrotherHub/releases/latest/download/latest.json";
 
 /// Что предложить пользователю.
 #[derive(Serialize, Clone)]

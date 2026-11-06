@@ -124,7 +124,7 @@ function mediaTitle(media: string): string {
 //   $env:VITE_DEFAULT_SERVER = "wss://example.com"; npm run bundle
 const DEFAULT_SERVER = import.meta.env.VITE_DEFAULT_SERVER || "wss://bw.sokolovds.com";
 /** Страничка приглашения (папка site/ репозитория на GitHub Pages). */
-const INVITE_PAGE = "https://ferrumnyak.github.io/Brotherwatch/";
+const INVITE_PAGE = "https://ferrumnyak.github.io/BrotherHub/";
 
 /** Сохранённый адрес сервера; устаревший или явно ошибочный заменяем на адрес по умолчанию. */
 function savedServer(): string {

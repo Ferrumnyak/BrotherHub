@@ -12,7 +12,7 @@ COPY . .
 RUN cargo build --release --locked -p brotherwatch-server
 
 FROM debian:bookworm-slim
-LABEL org.opencontainers.image.source="https://github.com/Ferrumnyak/Brotherwatch" \
+LABEL org.opencontainers.image.source="https://github.com/Ferrumnyak/BrotherHub" \
       org.opencontainers.image.description="Сервер BrotherHub: комнаты, чат, синхронизация, пропуска в голос"
 COPY --from=build /src/target/release/brotherwatch-server /usr/local/bin/brotherwatch-server
 # Не запускать от root.

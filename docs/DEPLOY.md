@@ -64,7 +64,7 @@ sudo ufw allow 7882/udp
 ## 4. Файлы и настройки
 
 ```bash
-git clone https://github.com/Ferrumnyak/Brotherwatch.git
+git clone https://github.com/Ferrumnyak/BrotherHub.git
 cd Brotherwatch/deploy
 cp .env.example .env
 openssl rand -hex 32        # это будет LIVEKIT_API_SECRET
