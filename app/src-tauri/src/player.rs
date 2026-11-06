@@ -578,7 +578,7 @@ fn find_mpv() -> String {
 
 /// Путь к yt-dlp, если он стоит в стандартном месте. Если нет — mpv
 /// сам поищет yt-dlp в PATH.
-fn find_ytdlp() -> Option<String> {
+pub fn find_ytdlp() -> Option<String> {
     if let Ok(path) = std::env::var("BROTHERWATCH_YTDLP") {
         return Some(path);
     }

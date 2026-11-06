@@ -27,10 +27,11 @@ import {
   type Track,
   type VoiceAccess,
 } from "./protocol";
-import { SITES, siteOf, videoLink, type Site } from "./browse";
+import { pageTitle, SITES, siteOf, videoLink, type Site } from "./browse";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
 import { checkForUpdate, installUpdate, useAppVersion, useUpdate } from "./update";
+import { knownTitle, rememberTitle, requestTitle, useTitles } from "./titles";
 import { EmojiGlyph, RichText } from "./RichText";
 import { RouletteWheel, SPIN_MS } from "./Roulette";
 import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
@@ -44,7 +45,14 @@ type EventIcon = "enter" | "leave" | "play" | "pause" | "seek" | "media" | "host
 
 type ChatLine =
   | { key: number; kind: "chat"; name: string; text: string; mine: boolean }
-  | { key: number; kind: "system"; text: string; icon: EventIcon };
+  | {
+      key: number;
+      kind: "system";
+      /** `{title}` в тексте заменяется названием `media`, когда оно станет известно. */
+      text: string;
+      icon: EventIcon;
+      media?: string;
+    };
 
 // Цвета кружков участников и их имён в чате — по нику, чтобы у каждого был свой.
 const SEAT_COLORS = ["#6E4A3A", "#3F5260", "#4E5A3C", "#5B3F5C", "#6A5130", "#3E4E4A", "#5E3A40", "#46466A"];
@@ -111,8 +119,17 @@ function playbackStatus(
   return "Смотрите вместе";
 }
 
-/** Ссылку показываем коротко: сайт и начало пути. */
+/** Название видео с сайта, а пока оно не пришло — коротко ссылка. */
 function mediaTitle(media: string): string {
+  const known = knownTitle(media);
+  if (known) return known;
+  if (!isUrl(media)) return media;
+  requestTitle(media);
+  return shortLink(media);
+}
+
+/** Ссылку показываем коротко: сайт и начало пути. */
+function shortLink(media: string): string {
   if (!isUrl(media)) return media;
   try {
     const u = new URL(media);
@@ -477,6 +494,8 @@ export default function App() {
   const suggestionsRef = useRef<Suggestion[]>([]);
   suggestionsRef.current = suggestions;
   const [sideTab, setSideTab] = useState<"chat" | "suggest" | "history">("chat");
+  // Пришли новые названия видео — перерисовать чат, списки и рулетку.
+  useTitles();
   // Обложка трека без картинки (музыка с SoundCloud и т.п.).
   const [cover, setCover] = useState<Cover | null>(null);
   // Что смотрели в этой комнате (хранится у каждого своё).
@@ -577,14 +596,14 @@ export default function App() {
   const isHostRef = useRef(false);
   isHostRef.current = isHost;
 
-  const addSystem = (text: string, icon: EventIcon) =>
-    setLines((l) => [...l, { key: ++keyRef.current, kind: "system", text, icon }]);
+  const addSystem = (text: string, icon: EventIcon, media?: string) =>
+    setLines((l) => [...l, { key: ++keyRef.current, kind: "system", text, icon, media }]);
 
   // Подписка на события от Rust-части приложения.
   useEffect(() => {
     const nextKey = () => ++keyRef.current;
-    const system = (text: string, icon: EventIcon) =>
-      setLines((l) => [...l, { key: nextKey(), kind: "system", text, icon }]);
+    const system = (text: string, icon: EventIcon, media?: string) =>
+      setLines((l) => [...l, { key: nextKey(), kind: "system", text, icon, media }]);
     const nameOf = (id: MemberId) =>
       membersRef.current.find((m) => m.id === id)?.name ?? "кто-то";
 
@@ -669,10 +688,9 @@ export default function App() {
           switch (msg.action) {
             case "set_media":
               system(
-                msg.playback.media
-                  ? `${by} включил «${mediaTitle(msg.playback.media)}»`
-                  : `${by} закрыл видео`,
+                msg.playback.media ? `${by} включил «{title}»` : `${by} закрыл видео`,
                 "media",
+                msg.playback.media ?? undefined,
               );
               break;
             case "play":
@@ -698,7 +716,7 @@ export default function App() {
         case "suggestions": {
           const known = new Set(suggestionsRef.current.map((x) => x.id));
           for (const x of msg.list) {
-            if (!known.has(x.id)) system(`${x.name} предлагает «${mediaTitle(x.media)}»`, "suggest");
+            if (!known.has(x.id)) system(`${x.name} предлагает «{title}»`, "suggest", x.media);
           }
           suggestionsRef.current = msg.list;
           setSuggestions(msg.list);
@@ -1123,7 +1141,7 @@ export default function App() {
     const done = setTimeout(() => {
       setSpinDone(true);
       setSpinIndex(spin.winner);
-      addSystem(`Рулетка выбрала «${mediaTitle(winner.media)}»`, "roulette");
+      addSystem("Рулетка выбрала «{title}»", "roulette", winner.media);
       if (isHostRef.current) {
         run(() => invoke("open_url", { url: winner.media }));
       }
@@ -1493,6 +1511,7 @@ export default function App() {
   useEffect(() => {
     const media = playback?.media ?? null;
     if (!joinedRoom || !media || player.loaded !== media || !info?.title) return;
+    rememberTitle(media, info.title);
     setHistory((list) => {
       if (list[0]?.media === media && list[0].title === info.title) return list;
       const next = [
@@ -1638,6 +1657,11 @@ export default function App() {
   }, [browsing]);
 
   const pageVideo = browsing === "site" ? videoLink(browserUrl) : null;
+  // Название того, что включим (SoundCloud и Яндекс сообщают его со страницы).
+  const pageVideoTitle = pageVideo ? (pageTitle(browserUrl) ?? knownTitle(pageVideo) ?? null) : null;
+  useEffect(() => {
+    if (pageVideo && pageVideoTitle) rememberTitle(pageVideo, pageVideoTitle);
+  }, [pageVideo, pageVideoTitle]);
 
   async function watchFromBrowser() {
     if (!pageVideo) return;
@@ -1999,7 +2023,9 @@ export default function App() {
                 <span className="browser-hint">
                   {browseNote ??
                     (pageVideo
-                      ? ""
+                      ? pageVideoTitle
+                        ? `Включим: «${pageVideoTitle}»`
+                        : ""
                       : siteOf(browserUrl) === "yandex" && /\/video\/preview/.test(browserUrl ?? "")
                         ? "Не нашёл, с какого сайта это видео: у Яндекса оно может быть только в его плеере"
                         : "Открой видео — и его можно включить в зале")}
@@ -2405,7 +2431,7 @@ export default function App() {
                 l.kind === "system" ? (
                   <div key={l.key} className="event">
                     <Icon name={EVENT_ICONS[l.icon]} size={12} />
-                    <span>{l.text}</span>
+                    <span>{l.media ? l.text.replace("{title}", mediaTitle(l.media)) : l.text}</span>
                   </div>
                 ) : (
                   <div key={l.key} className={l.mine ? "message mine" : "message"}>

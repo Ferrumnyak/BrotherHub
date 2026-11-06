@@ -69,6 +69,25 @@ export function siteOf(address: string | null): SiteId | null {
 }
 
 /**
+ * Что сообщил скрипт на странице (adblock.js) через `#bh-src=…&bh-title=…`:
+ * у Яндекс Видео — источник ролика, у SoundCloud — трек, который сейчас играет.
+ */
+function pageHint(u: URL): { src: string | null; title: string | null } {
+  const q = new URLSearchParams(u.hash.slice(1));
+  return { src: q.get("bh-src"), title: q.get("bh-title") };
+}
+
+/** Название того, что сейчас играет или открыто, если страница его сообщила. */
+export function pageTitle(address: string | null): string | null {
+  if (!address) return null;
+  try {
+    return pageHint(new URL(address)).title?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Ссылка на видео, если открыта страница с видео; иначе `null`.
  * Ссылку чистим от лишнего (плейлисты, метки), чтобы у всех открылось одно и то же.
  */
@@ -87,7 +106,7 @@ export function videoLink(address: string | null): string | null {
   // Наша страничная «надстройка» (adblock.js) находит, откуда оно, и кладёт
   // адрес источника в #bh-src=… — его и проверяем как обычную ссылку.
   if (hostIs(host, "yandex.ru")) {
-    const src = new URLSearchParams(u.hash.slice(1)).get("bh-src");
+    const { src } = pageHint(u);
     return src && siteOf(src) !== "yandex" ? videoLink(src) : null;
   }
 
@@ -132,6 +151,12 @@ export function videoLink(address: string | null): string | null {
     return null;
   }
   if (hostIs(host, "soundcloud.com")) {
+    // Играет трек в плеере внизу страницы — включаем его, где бы ни были.
+    const { src } = pageHint(u);
+    if (src && siteOf(src) === "soundcloud") {
+      const playing = videoLink(src);
+      if (playing) return playing;
+    }
     // Трек: soundcloud.com/<автор>/<трек>. Плейлисты не берём — включаем по одному треку.
     const parts = path.split("/").filter(Boolean);
     if (parts.length !== 2) return null;

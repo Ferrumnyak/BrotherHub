@@ -49,6 +49,11 @@
     return;
   }
 
+  if (on("soundcloud.com")) {
+    watchSoundcloudPlayer();
+    return;
+  }
+
   if (!on("youtube.com")) return;
 
   // Реклама в самом плеере YouTube: жмём «Пропустить», а непропускаемую
@@ -108,7 +113,6 @@
       return u.href;
     };
 
-    let last = "";
     const look = () => {
       if (!/^\/video\//.test(location.pathname)) return;
       let found = null;
@@ -127,12 +131,50 @@
           }
         }
       }
-      const hash = found ? "#bh-src=" + encodeURIComponent(found) : "";
-      if (hash !== last) {
-        last = hash;
-        history.replaceState(history.state, "", location.pathname + location.search + hash);
-      }
+      const title = found ? (document.title || "").replace(/\s*[—–-]\s*Яндекс.*$/, "") : "";
+      setHint(found, title);
     };
     setInterval(look, 800);
+  }
+
+  // Последняя подсказка, чтобы не трогать адрес без нужды. `var`, а не
+  // `let`: до этой строки функция выходит раньше (return выше), а обращаться
+  // к переменной будут потом, из таймеров.
+  var lastHint = "";
+
+  /** Сообщить приложению источник и название через #bh-src=…&bh-title=… */
+  function setHint(src, title) {
+    const q = new URLSearchParams();
+    if (src) q.set("bh-src", src);
+    if (src && title) q.set("bh-title", title.trim().slice(0, 200));
+    const hash = src ? "#" + q.toString() : "";
+    if (hash === (lastHint || "")) return;
+    lastHint = hash;
+    history.replaceState(history.state, "", location.pathname + location.search + hash);
+  }
+
+  // SoundCloud играет треки в плеере внизу страницы, не открывая их
+  // страницу. Берём трек, который сейчас в плеере.
+  function watchSoundcloudPlayer() {
+    setInterval(() => {
+      const link = document.querySelector(".playbackSoundBadge__titleLink");
+      const href = link && link.getAttribute("href");
+      if (!href) {
+        setHint(null, null);
+        return;
+      }
+      let src;
+      try {
+        const u = new URL(href, location.origin);
+        src = u.origin + u.pathname;
+      } catch {
+        return;
+      }
+      const title =
+        link.getAttribute("title") ||
+        (link.querySelector("span[aria-hidden]") || link).textContent ||
+        "";
+      setHint(src, title);
+    }, 700);
   }
 })();

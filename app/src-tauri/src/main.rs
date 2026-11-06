@@ -12,6 +12,7 @@ mod ptt;
 mod reactions;
 mod session;
 mod sites;
+mod titles;
 mod tools;
 mod update;
 mod video;
@@ -90,7 +91,8 @@ fn main() {
             update::update_check,
             update::update_install,
             deeplink::deep_link_take,
-            reactions::reactions_place
+            reactions::reactions_place,
+            titles::media_title
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherHub");
