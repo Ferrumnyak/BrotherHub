@@ -27,6 +27,13 @@ BrotherHub использует программы других авторов. 
 
 - Источник: https://github.com/microsoft/fluentui-emoji
 
+## Шумоподавление RNNoise
+
+Сильное шумоподавление голоса — [RNNoise](https://github.com/xiph/rnnoise)
+(Xiph.Org, лицензия BSD-3-Clause) в сборке
+[@sapphi-red/web-noise-suppressor](https://github.com/sapphi-red/web-noise-suppressor)
+(лицензия MIT).
+
 ## Корневые сертификаты Mozilla
 
 Список доверенных центров сертификации из проекта certifi
