@@ -184,7 +184,8 @@ async fn member_can_come_back_after_connection_loss() {
     assert_eq!(status["online"], false);
     assert_eq!(b.expect("host_changed").await["host"], wb["you"]);
 
-    // Аня вернулась со своим пропуском — тот же id, но пульт остался у Бори.
+    // Аня вернулась со своим пропуском — тот же id. Комнату создала она,
+    // поэтому пульт возвращается к ней.
     let mut a = Client::connect(&url).await;
     a.send(json!({
         "type": "join", "room": "r", "name": "Аня", "resume": wa["token"]
@@ -193,10 +194,11 @@ async fn member_can_come_back_after_connection_loss() {
     let back = a.expect("welcome").await;
     assert_eq!(back["resumed"], true);
     assert_eq!(back["you"], wa["you"]);
-    assert_eq!(back["host"], wb["you"]);
+    assert_eq!(back["host"], wa["you"]);
 
     let status = b.expect("member_status").await;
     assert_eq!(status["online"], true);
+    assert_eq!(b.expect("host_changed").await["host"], wa["you"]);
 }
 
 #[tokio::test]
