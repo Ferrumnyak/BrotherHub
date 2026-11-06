@@ -456,6 +456,36 @@ button.icon:hover {
   margin-bottom: 14px;
 }
 
+.server-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.server-fields > * {
+  flex-shrink: 0;
+}
+
+.server-fields button.quiet {
+  align-self: flex-start;
+  height: 34px;
+}
+
+.link-button {
+  align-self: flex-start;
+  height: auto;
+  margin-top: -6px;
+  padding: 0;
+  background: none;
+  color: var(--lamp);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
 /* Узкое окно: картинка зала сверху, форма под ней. */
 @media (max-width: 860px) {
   .login {

@@ -299,6 +299,7 @@ export default function App() {
   const [reconnecting, setReconnecting] = useState(false);
   const [showServer, setShowServer] = useState(false);
   const [showThemes, setShowThemes] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [joinedRoom, setJoinedRoom] = useState<string | null>(null);
@@ -1305,6 +1306,7 @@ export default function App() {
                 <Icon name="chevron" size={14} />
                 Сервер и пароль
               </summary>
+              <div className="server-fields">
               <label>
                 Адрес сервера
                 <input value={server} onChange={(e) => setServer(e.target.value)} required />
@@ -1312,14 +1314,22 @@ export default function App() {
               <label>
                 Пароль сервера
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Если сервер с паролем"
                   autoComplete="off"
                 />
               </label>
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? "Скрыть пароль" : "Показать пароль"}
+              </button>
               <LogsButton />
+              </div>
             </details>
 
             <details className="server-settings" open={showThemes}>
