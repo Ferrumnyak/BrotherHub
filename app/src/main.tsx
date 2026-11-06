@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App, { ControlsOverlay } from "./App";
 import PlayerSetup from "./PlayerSetup";
 import { ReactionsLayer } from "./Reactions";
+import { AppContextMenu, blockBrowserMenu } from "./ContextMenu";
 // Шрифты лежат внутри приложения — работают и без интернета.
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -14,6 +15,7 @@ import "./styles.css";
 import { initTheme } from "./theme";
 
 initTheme();
+blockBrowserMenu();
 
 // Окно панели плеера поверх видео (полный экран) открывается тем же
 // интерфейсом с пометкой __BW_VIEW = "controls".
@@ -32,9 +34,12 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     ) : view === "reactions" ? (
       <ReactionsLayer />
     ) : (
-      <PlayerSetup>
-        <App />
-      </PlayerSetup>
+      <>
+        <PlayerSetup>
+          <App />
+        </PlayerSetup>
+        <AppContextMenu />
+      </>
     )}
   </React.StrictMode>,
 );

@@ -2125,7 +2125,8 @@ export default function App() {
             <ul onScroll={() => setMemberMenu(null)}>
               {members.map((m) => {
                 const speaking = speakers.has(String(m.id));
-                const manageable = isHost && m.id !== me;
+                // По любому, кроме себя, — меню: громкость, а у кого пульт — ещё и управление.
+                const manageable = m.id !== me;
                 return (
                   <li
                     key={m.id}
@@ -2134,7 +2135,13 @@ export default function App() {
                       .join(" ")}
                     role={manageable ? "button" : undefined}
                     tabIndex={manageable ? 0 : undefined}
-                    title={manageable ? "Передать пульт или выгнать" : undefined}
+                    title={
+                      manageable
+                        ? isHost
+                          ? "Громкость, передать пульт или выгнать"
+                          : "Громкость этого человека — только у тебя"
+                        : undefined
+                    }
                     aria-haspopup={manageable ? "menu" : undefined}
                     aria-expanded={manageable ? memberMenu?.id === m.id : undefined}
                     onClick={manageable ? (e) => toggleMemberMenu(m, e.currentTarget) : undefined}
@@ -2193,7 +2200,6 @@ export default function App() {
               })}
             </ul>
             {memberMenu &&
-              isHost &&
               (() => {
                 const m = members.find((x) => x.id === memberMenu.id);
                 return (
@@ -2202,6 +2208,9 @@ export default function App() {
                       key={m.id}
                       member={m}
                       anchor={memberMenu}
+                      isHost={isHost}
+                      volume={volumes[m.name] ?? 1}
+                      onVolume={(v) => changeVolume(m.name, v)}
                       onClose={() => setMemberMenu(null)}
                       onTransfer={() => handleTransfer(m)}
                       onKick={() => handleKick(m)}
@@ -2917,19 +2926,28 @@ type MenuAnchor = { id: MemberId; top: number; bottom: number; left: number; wid
 function MemberMenu({
   member,
   anchor,
+  isHost,
+  volume,
+  onVolume,
   onClose,
   onTransfer,
   onKick,
 }: {
   member: Member;
   anchor: MenuAnchor;
+  isHost: boolean;
+  /** Громкость этого человека у меня, 0…1. */
+  volume: number;
+  onVolume: (value: number) => void;
   onClose: () => void;
   onTransfer: () => void;
   onKick: () => void;
 }) {
   const [confirm, setConfirm] = useState<"transfer" | "kick" | null>(null);
+  // Громкость до «Выключить звук» — чтобы вернуть как было.
+  const [beforeMute, setBeforeMute] = useState(volume > 0 ? volume : 1);
   // Под строкой, а если внизу не хватает места — над ней.
-  const below = window.innerHeight - anchor.bottom > 190;
+  const below = window.innerHeight - anchor.bottom > (isHost ? 260 : 150);
   const style: CSSProperties = {
     left: anchor.left,
     width: Math.max(anchor.width, 240),
@@ -2947,14 +2965,45 @@ function MemberMenu({
 
       {confirm === null ? (
         <>
-          <button role="menuitem" autoFocus onClick={() => setConfirm("transfer")}>
-            <Icon name="crown" />
-            Передать пульт
-          </button>
-          <button role="menuitem" className="danger" onClick={() => setConfirm("kick")}>
-            <Icon name="leave" />
-            Выгнать из зала
-          </button>
+          <div className="member-volume" title="Громкость у каждого своя — другие её не слышат">
+            <button
+              className="icon"
+              onClick={() => {
+                if (volume > 0) {
+                  setBeforeMute(volume);
+                  onVolume(0);
+                } else onVolume(beforeMute);
+              }}
+              title={volume > 0 ? "Выключить его звук у себя" : "Вернуть звук"}
+              aria-label={volume > 0 ? "Выключить звук" : "Вернуть звук"}
+            >
+              <Icon name={volume > 0 ? "volume" : "mute"} size={18} />
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={volume}
+              autoFocus
+              style={{ "--progress": `${volume * 100}%` } as CSSProperties}
+              onChange={(e) => onVolume(Number(e.target.value))}
+              aria-label={`Громкость ${member.name}`}
+            />
+            <span className="pct">{Math.round(volume * 100)}%</span>
+          </div>
+          {isHost && (
+            <>
+              <button role="menuitem" onClick={() => setConfirm("transfer")}>
+                <Icon name="crown" />
+                Передать пульт
+              </button>
+              <button role="menuitem" className="danger" onClick={() => setConfirm("kick")}>
+                <Icon name="leave" />
+                Выгнать из зала
+              </button>
+            </>
+          )}
         </>
       ) : (
         <div className="member-menu-confirm">
