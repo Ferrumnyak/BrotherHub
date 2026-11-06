@@ -152,7 +152,6 @@ impl Player {
             // наушники (автопауза) или чужая кнопка паузы ставили фильм на
             // паузу у всех. Пауза — только кнопками приложения.
             "--input-media-keys=no",
-            "--media-controls=no",
             // Управление — панелью приложения, свою панель mpv прячем.
             "--osc=no",
             // Шрифты экранных подсказок и обычных (не ASS) субтитров.
@@ -286,6 +285,9 @@ impl Player {
             next_request: Arc::new(AtomicU64::new(1)),
             _child: child,
         };
+        // Панель Windows «Сейчас играет» (есть в mpv 0.40+). Через IPC, а не
+        // в командной строке: старый mpv с незнакомым ключом не запустился бы.
+        player.command(json!(["set_property", "media-controls", "no"]));
         player.command(json!(["observe_property", 1, "pause"]));
         player.command(json!(["observe_property", 2, "track-list"]));
         Ok(player)
