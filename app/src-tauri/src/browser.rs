@@ -63,6 +63,12 @@ static LAST: Mutex<Option<Area>> = Mutex::new(None);
 /// созданное окно сразу убираем.
 static WANTED: AtomicBool = AtomicBool::new(false);
 
+/// Открытие по одному: второй вызов, пока окно создаётся, создал бы ещё одно.
+fn open_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 fn allowed(url: &Url) -> bool {
     url.scheme() == "https"
         && url.host_str().is_some_and(|h| {
@@ -98,6 +104,7 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
         return Err("Эту площадку здесь не открыть".into());
     }
     WANTED.store(true, Ordering::SeqCst);
+    let _turn = open_lock().lock().await;
     if let Some(view) = app.get_webview_window(LABEL) {
         view.navigate(url).map_err(|e| e.to_string())?;
         place(&app, &view, rect)?;

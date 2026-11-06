@@ -71,6 +71,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             net::connect,
             net::disconnect,
+            net::connection_token,
             net::send,
             session::open_file,
             session::open_url,

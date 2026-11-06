@@ -25,11 +25,20 @@ pub struct Area {
 
 static LAST: Mutex<Option<Area>> = Mutex::new(None);
 
+/// По одной: иначе второй вызов, пока окно создаётся, создавал бы ещё одно.
+fn place_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Поставить окно реакций над областью видео (`None` — спрятать).
 /// Окна создаём в async-команде: в синхронной Windows может зависнуть.
 #[tauri::command]
 pub async fn reactions_place(app: AppHandle, rect: Option<Area>) -> Result<(), String> {
     *LAST.lock().unwrap() = rect;
+    let _turn = place_lock().lock().await;
+    // Самое свежее место — пока ждали, оно могло поменяться.
+    let rect = *LAST.lock().unwrap();
     let Some(rect) = rect else {
         if let Some(window) = app.get_webview_window(LABEL) {
             let _ = window.hide();

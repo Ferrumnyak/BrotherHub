@@ -38,7 +38,7 @@ import {
 import { pageTitle, SITES, siteOf, videoLink, type Site } from "./browse";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
-import { checkForUpdate, installUpdate, useAppVersion, useUpdate } from "./update";
+import { checkForUpdate, installUpdate, setBeforeUpdate, useAppVersion, useUpdate } from "./update";
 import { knownTitle, rememberTitle, requestTitle, useTitles } from "./titles";
 import { EmojiGlyph, RichText } from "./RichText";
 import { RouletteWheel, SPIN_MS } from "./Roulette";
@@ -908,7 +908,34 @@ export default function App() {
     await connectTo(server, room);
   }
 
-  async function connectTo(server: string, room: string) {
+  // Обновление из зала: запомнить комнату и пропуск, после перезапуска
+  // вернуться на своё место (тот же участник — без «двойника» в списке).
+  useEffect(() => {
+    setBeforeUpdate(async () => {
+      if (!joinedRoom) return;
+      const token = await invoke<string | null>("connection_token").catch(() => null);
+      save("rejoin", JSON.stringify({ server, room: joinedRoom, token, at: Date.now() }));
+    });
+    return () => setBeforeUpdate(null);
+  }, [joinedRoom, server]);
+
+  useEffect(() => {
+    let saved: { server: string; room: string; token: string | null; at: number } | null = null;
+    try {
+      saved = JSON.parse(load("rejoin", "null"));
+    } catch {
+      saved = null;
+    }
+    save("rejoin", "null");
+    // Только сразу после обновления — через 10 минут это уже не «вернуться».
+    if (!saved || Date.now() - saved.at > 10 * 60_000 || !name.trim()) return;
+    setServer(saved.server);
+    setRoom(saved.room);
+    connectTo(saved.server, saved.room, saved.token);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function connectTo(server: string, room: string, resume: string | null = null) {
     setError(null);
     setConnecting(true);
     save("server", server);
@@ -916,7 +943,14 @@ export default function App() {
     save("room", room);
     save("password", password);
     try {
-      await invoke("connect", { server, room, name, password: password || null, avatar: myAvatar });
+      await invoke("connect", {
+        server,
+        room,
+        name,
+        password: password || null,
+        avatar: myAvatar,
+        resume,
+      });
     } catch (err) {
       setError(String(err));
     } finally {

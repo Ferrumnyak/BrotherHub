@@ -49,9 +49,16 @@ export async function checkForUpdate(manual = false) {
   }
 }
 
+/** Что сделать перед установкой (запомнить комнату, чтобы вернуться в неё). */
+let beforeUpdate: (() => Promise<void>) | null = null;
+export function setBeforeUpdate(fn: (() => Promise<void>) | null) {
+  beforeUpdate = fn;
+}
+
 export async function installUpdate() {
   set({ installing: null, error: null });
   try {
+    await beforeUpdate?.().catch(() => {});
     await invoke("update_install");
   } catch (err) {
     set({ installing: undefined, error: String(err) });

@@ -42,6 +42,15 @@ pub struct Connection {
     /// Номер текущего подключения. Нужен, чтобы старое подключение,
     /// закрываясь, не вмешивалось в новое.
     generation: Arc<AtomicU64>,
+    /// Пропуск из последнего `Welcome` — чтобы после обновления приложения
+    /// вернуться на своё место (тот же участник, тот же пульт).
+    token: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+/// Пропуск текущего подключения (перед обновлением приложения).
+#[tauri::command]
+pub fn connection_token(conn: State<'_, Connection>) -> Option<String> {
+    conn.token.lock().unwrap().clone()
 }
 
 #[tauri::command]
@@ -54,6 +63,7 @@ pub async fn connect(
     name: String,
     password: Option<String>,
     avatar: Option<String>,
+    resume: Option<String>,
 ) -> Result<(), String> {
     let my_generation = conn.generation.fetch_add(1, Ordering::SeqCst) + 1;
     // Было старое подключение — выходим из той комнаты по-честному.
@@ -76,9 +86,10 @@ pub async fn connect(
         room,
         name,
         password: password.filter(|p| !p.is_empty()),
-        resume: None,
+        resume: resume.filter(|t| !t.is_empty()),
         avatar,
     };
+    *conn.token.lock().unwrap() = None;
     tauri::async_runtime::spawn(supervise(Supervisor {
         app,
         session: session.inner().clone(),
@@ -88,6 +99,7 @@ pub async fn connect(
         join,
         rx,
         first: Some(ws),
+        shared_token: conn.token.clone(),
     }));
 
     *conn.tx.lock().await = Some(tx);
@@ -126,6 +138,7 @@ struct Supervisor {
     join: ClientMsg,
     rx: mpsc::UnboundedReceiver<ClientMsg>,
     first: Option<Ws>,
+    shared_token: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl Supervisor {
@@ -143,7 +156,11 @@ enum Ended {
 }
 
 async fn supervise(mut s: Supervisor) {
-    let mut token: Option<String> = None;
+    // Первый вход — с пропуском, если его дали (возвращение после обновления).
+    let mut token: Option<String> = match &s.join {
+        ClientMsg::Join { resume, .. } => resume.clone(),
+        _ => None,
+    };
     let mut ws = s.first.take();
 
     loop {
@@ -237,6 +254,7 @@ async fn run_connection(s: &mut Supervisor, ws: Ws, token: &mut Option<String>) 
                             Ok(msg) => {
                                 if let ServerMsg::Welcome { token: t, .. } = &msg {
                                     *token = Some(t.clone());
+                                    *s.shared_token.lock().unwrap() = Some(t.clone());
                                 }
                                 s.session.lock().await.on_server_msg(&msg).await;
                                 let _ = s.app.emit("server-message", msg);

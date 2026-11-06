@@ -29,6 +29,12 @@ fn stale(session: u64) -> bool {
 /// Где панель относительно главного окна — чтобы ехать вслед за ним.
 static LAST: Mutex<Option<Rect>> = Mutex::new(None);
 
+/// Очередь вызовов [`overlay_place`].
+fn place_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Параметры WebView2 для окон приложения — те же, что у главного окна в
 /// tauri.conf.json (`additionalBrowserArgs`): у окон с общей папкой данных они
 /// обязаны совпадать. Первые — стандартные от Tauri; последний — микрофон
@@ -58,6 +64,16 @@ pub async fn overlay_place(app: AppHandle, rect: Rect, session: u64) -> Result<(
         return Ok(());
     }
     *LAST.lock().unwrap() = Some(rect);
+    // По одной: пока первое окно панели создаётся, второй вызов не должен
+    // пытаться создать ещё одно (и падать), а первый — ставить устаревший
+    // размер. Поэтому ждём очереди и берём самое свежее место.
+    let _turn = place_lock().lock().await;
+    if stale(session) {
+        return Ok(());
+    }
+    let Some(rect) = *LAST.lock().unwrap() else {
+        return Ok(());
+    };
     // Главное окно берём из сохранённого при запуске: когда в нём открыт
     // встроенный браузер (второй webview), get_webview_window("main") его не находит.
     let main = app
