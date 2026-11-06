@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App, { ControlsOverlay } from "./App";
 import PlayerSetup from "./PlayerSetup";
+import { ReactionsLayer } from "./Reactions";
 // Шрифты лежат внутри приложения — работают и без интернета.
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -21,12 +22,15 @@ declare global {
     __BW_VIEW?: string;
   }
 }
-const isControls = window.__BW_VIEW === "controls";
+// Окно реакций поверх видео — с пометкой __BW_VIEW = "reactions".
+const view = window.__BW_VIEW;
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    {isControls ? (
+    {view === "controls" ? (
       <ControlsOverlay />
+    ) : view === "reactions" ? (
+      <ReactionsLayer />
     ) : (
       <PlayerSetup>
         <App />

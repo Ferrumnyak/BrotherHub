@@ -34,7 +34,8 @@ use axum::{
     Router,
 };
 use brotherwatch_shared::{
-    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg, Suggestion, VoiceAccess,
+    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg, SubtitleFile, Suggestion,
+    VoiceAccess,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
@@ -47,7 +48,11 @@ const MAX_CHAT_LEN: usize = 2000;
 const MAX_MEDIA_LEN: usize = 2000;
 /// Сколько предложений «что посмотреть» держит комната.
 const MAX_SUGGESTIONS: usize = 30;
-const MAX_MESSAGE_BYTES: usize = 64 * 1024;
+/// С запасом под файл субтитров (сам файл — до [`MAX_SUBTITLES_BYTES`]).
+const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+/// Субтитры к фильму обычно 50–150 КБ.
+const MAX_SUBTITLES_BYTES: usize = 768 * 1024;
+const MAX_EMOJI_LEN: usize = 16;
 /// Больше людей в одной комнате — уже не «посмотреть с друзьями».
 const MAX_ROOM_MEMBERS: usize = 16;
 const MAX_ROOMS: usize = 200;
@@ -138,6 +143,8 @@ struct Room {
     /// Шансы рулетки: кто задал → (главные ли, номер по порядку, шансы).
     rigs: HashMap<MemberId, (bool, u64, Vec<(u64, f64)>)>,
     next_rig: u64,
+    /// Субтитры к текущему видео (сбрасываются при смене видео).
+    subtitles: Option<SubtitleFile>,
 }
 
 impl Room {
@@ -153,6 +160,7 @@ impl Room {
             next_suggestion: 1,
             rigs: HashMap::new(),
             next_rig: 1,
+            subtitles: None,
         }
     }
 
@@ -428,6 +436,7 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, ip: IpAddr) {
     let mut ending = Ending::Lost;
     let mut messages = RateLimit::new(40.0, 20.0);
     let mut chat = RateLimit::new(6.0, 1.5);
+    let mut reactions = RateLimit::new(10.0, 4.0);
     let mut flood_warnings = 0u32;
 
     while let Some(Ok(msg)) = stream.next().await {
@@ -449,6 +458,10 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, ip: IpAddr) {
             }
         };
 
+        // Реакции — отдельный счётчик: частые, но лишние молча отбрасываем.
+        if matches!(cmd, ClientMsg::React { .. }) && !reactions.allow() {
+            continue;
+        }
         let is_chat = matches!(cmd, ClientMsg::Chat { .. } | ClientMsg::Suggest { .. });
         if !messages.allow() || (is_chat && !chat.allow()) {
             flood_warnings += 1;
@@ -700,6 +713,18 @@ async fn handle_command(
             });
             return false;
         }
+        ClientMsg::React { emoji } => {
+            let emoji = emoji.trim();
+            if emoji.is_empty() || emoji.chars().count() > MAX_EMOJI_LEN {
+                return false;
+            }
+            room.broadcast(&ServerMsg::Reaction {
+                from: id,
+                name,
+                emoji: emoji.to_string(),
+            });
+            return false;
+        }
         cmd => handle_host_command(state, &room_name, room, id, name, tx, cmd),
     }
 }
@@ -737,8 +762,24 @@ fn handle_host_command(
         | ClientMsg::RemoveSuggestion { .. }
         | ClientMsg::Loaded { .. }
         | ClientMsg::Rig { .. }
-        | ClientMsg::VoiceState { .. } => {
+        | ClientMsg::VoiceState { .. }
+        | ClientMsg::React { .. } => {
             unreachable!("обработано выше")
+        }
+        ClientMsg::SetSubtitles { subtitles } => {
+            if room.media.is_none() {
+                return error("сначала включи видео");
+            }
+            if let Some(file) = &subtitles {
+                if file.text.len() > MAX_SUBTITLES_BYTES {
+                    return error("файл субтитров слишком большой");
+                }
+                if file.name.trim().is_empty() || file.name.chars().count() > 200 {
+                    return error("некорректное имя файла субтитров");
+                }
+            }
+            room.subtitles = subtitles.clone();
+            room.broadcast(&ServerMsg::Subtitles { subtitles });
         }
         ClientMsg::SetMedia { media } => {
             let media = media.trim();
@@ -747,6 +788,7 @@ fn handle_host_command(
             }
             room.media = Some(media.to_string());
             room.paused = true;
+            room.subtitles = None;
             room.set_position(0.0);
             room.broadcast_playback(Some(PlaybackAction::SetMedia), Some(name));
             // Включили то, что было в предложениях, — из списка убираем.
@@ -758,6 +800,7 @@ fn handle_host_command(
         }
         ClientMsg::ClearMedia => {
             room.media = None;
+            room.subtitles = None;
             room.paused = true;
             room.set_position(0.0);
             room.broadcast_playback(Some(PlaybackAction::SetMedia), Some(name));
@@ -839,6 +882,7 @@ fn welcome(
         playback: room.playback(),
         voice,
         suggestions: room.suggestions.clone(),
+        subtitles: room.subtitles.clone(),
     }
 }
 

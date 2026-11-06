@@ -15,6 +15,7 @@ import {
   isUrl,
   type ClientMsg,
   type Control,
+  type Cover,
   type PlaybackInfo,
   type Member,
   type MemberId,
@@ -33,6 +34,7 @@ import { checkForUpdate, installUpdate, useAppVersion, useUpdate } from "./updat
 import { EmojiGlyph, RichText } from "./RichText";
 import { RouletteWheel, SPIN_MS } from "./Roulette";
 import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
+import { ReactionPicker } from "./Reactions";
 import { keyName, listMicrophones, VoiceClient, type ScreenShare, type VoiceStatus } from "./voice";
 
 type VoiceMode = "open" | "ptt";
@@ -91,6 +93,7 @@ interface OverlayState {
   tracks: Track[];
   quality: string;
   qualityEnabled: boolean;
+  canShareSubtitles: boolean;
 }
 
 function hostNameOf(members: Member[], host: MemberId | null): string | undefined {
@@ -362,6 +365,28 @@ function AppVersion() {
   );
 }
 
+/** Обложка вместо видео, когда играет музыка без картинки. */
+function CoverView({ cover, paused }: { cover: Cover; paused: boolean }) {
+  return (
+    <div className="cover-view">
+      {cover.image && (
+        <div className="cover-backdrop" style={{ backgroundImage: `url("${cover.image}")` }} />
+      )}
+      <div className={paused ? "cover-art" : "cover-art playing"}>
+        {cover.image ? (
+          <img src={cover.image} alt="" draggable={false} />
+        ) : (
+          <span className="cover-note" aria-hidden="true">♪</span>
+        )}
+      </div>
+      <div className="cover-text">
+        {cover.title && <strong>{cover.title}</strong>}
+        {cover.artist && <span>{cover.artist}</span>}
+      </div>
+    </div>
+  );
+}
+
 /** Плитки площадок для выбора видео. */
 function SitePicker({ onPick, isHost }: { onPick: (site: Site) => void; isHost: boolean }) {
   return (
@@ -451,7 +476,14 @@ export default function App() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const suggestionsRef = useRef<Suggestion[]>([]);
   suggestionsRef.current = suggestions;
-  const [sideTab, setSideTab] = useState<"chat" | "suggest">("chat");
+  const [sideTab, setSideTab] = useState<"chat" | "suggest" | "history">("chat");
+  // Обложка трека без картинки (музыка с SoundCloud и т.п.).
+  const [cover, setCover] = useState<Cover | null>(null);
+  // Что смотрели в этой комнате (хранится у каждого своё).
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  // Доиграло — включить следующее из «Что посмотреть» (решает тот, у кого пульт).
+  const [autoNext, setAutoNext] = useState(() => load("autoNext", "1") === "1");
+  const autoplayedRef = useRef<string | null>(null);
   const [spin, setSpin] = useState<{ list: Suggestion[]; winner: number; by: string } | null>(
     null,
   );
@@ -711,6 +743,7 @@ export default function App() {
     }).then(keep);
     listen("mute-toggle", () => setMicOn((on) => !on)).then(keep);
     listen<Track[]>("player-tracks", (e) => setTracks(e.payload)).then(keep);
+    listen<Cover | null>("player-cover", (e) => setCover(e.payload)).then(keep);
     listen<PlayerKey>("player-key", (e) => onKeyRef.current(e.payload)).then(keep);
     listen("reconnecting", () => setReconnecting(true)).then(keep);
     listen("disconnected", () => {
@@ -1381,6 +1414,7 @@ export default function App() {
       !sharing &&
       !picking &&
       browsing === null &&
+      cover === null &&
       (playback?.media ?? null) !== null;
     const update = () => {
       if (!show || !el) {
@@ -1410,7 +1444,70 @@ export default function App() {
       window.removeEventListener("resize", update);
       invoke("set_video_rect", { rect: null }).catch(() => {});
     };
-  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, browsing, playback?.media]);
+  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, browsing, cover, playback?.media]);
+
+  // Видео закрыли — обложка прошлого трека не нужна.
+  useEffect(() => {
+    if ((playback?.media ?? null) === null) setCover(null);
+  }, [playback?.media]);
+
+  // Окно реакций лежит над областью видео всё время, пока мы в зале
+  // (кроме «Обзора»: там поверх видео сайт).
+  useEffect(() => {
+    const el = videoRef.current;
+    if (joinedRoom === null || browsing !== null || !el) {
+      invoke("reactions_place", { rect: null }).catch(() => {});
+      return;
+    }
+    const place = () => {
+      const r = el.getBoundingClientRect();
+      const k = window.devicePixelRatio || 1;
+      invoke("reactions_place", {
+        rect: {
+          x: Math.round(r.left * k),
+          y: Math.round(r.top * k),
+          width: Math.round(r.width * k),
+          height: Math.round(r.height * k),
+        },
+      }).catch(() => {});
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [joinedRoom, browsing, chatOpen, fullscreen, mini]);
+
+  // История: при входе в комнату — её список, при открытии видео — запись.
+  useEffect(() => {
+    setHistory(joinedRoom ? loadHistory(joinedRoom) : []);
+  }, [joinedRoom]);
+  useEffect(() => {
+    const media = playback?.media ?? null;
+    if (!joinedRoom || !media || player.loaded !== media || !info?.title) return;
+    setHistory((list) => {
+      if (list[0]?.media === media && list[0].title === info.title) return list;
+      const next = [
+        { media, title: info.title ?? mediaTitle(media), at: Date.now() },
+        ...list.filter((h) => h.media !== media),
+      ].slice(0, HISTORY_SIZE);
+      saveHistory(joinedRoom, next);
+      return next;
+    });
+  }, [joinedRoom, playback?.media, player.loaded, info?.title]);
+
+  // Доиграло до конца — у того, у кого пульт, включается следующее из списка.
+  useEffect(() => {
+    const media = playback?.media ?? null;
+    if (!isHost || !autoNext || !info?.ended || !media || player.loaded !== media) return;
+    if (autoplayedRef.current === media || suggestions.length === 0 || spin !== null) return;
+    autoplayedRef.current = media;
+    const next = suggestions[0];
+    run(() => invoke("open_url", { url: next.media }));
+  }, [info?.ended, isHost, autoNext, playback?.media, player.loaded, suggestions, spin]);
 
   // В полном экране и в мини-окне панель плеера — отдельное окно поверх низа
   // области видео. Ставим его всегда в этих режимах — и над фильмом, и над
@@ -1556,15 +1653,25 @@ export default function App() {
 
   // ----- Связь с панелью поверх видео -----
 
+  // Название — как его отдал сайт (YouTube, SoundCloud…), а пока не
+  // открылось — из ссылки.
+  const nowMedia = playback?.media ?? null;
+  const nowTitle = nowMedia
+    ? info?.title && player.loaded === nowMedia
+      ? info.title
+      : mediaTitle(nowMedia)
+    : "Ничего не выбрано";
+
   const overlayState: OverlayState = {
     mini,
     canControl: isHost && player.running && player.loaded === (playback?.media ?? null),
     controlHint: isHost ? "Сначала открой видео" : `Пульт у ${hostNameOf(members, host) ?? "другого"}`,
-    title: playback?.media ? mediaTitle(playback.media) : "Ничего не выбрано",
+    title: nowTitle,
     status: playbackStatus(playback, isHost, hostNameOf(members, host)),
     tracks,
     quality,
     qualityEnabled: playback?.media != null && isUrl(playback.media),
+    canShareSubtitles: isHost && (playback?.media ?? null) !== null,
   };
   const overlayJson = JSON.stringify(overlayState);
   const overlayJsonRef = useRef(overlayJson);
@@ -1936,6 +2043,8 @@ export default function App() {
                 Остановить показ
               </button>
             </div>
+          ) : cover && media ? (
+            <CoverView cover={cover} paused={info?.paused ?? true} />
           ) : (
           <div className="video-placeholder">
             {media
@@ -1955,7 +2064,7 @@ export default function App() {
           info={info}
           canControl={isHost && player.running && player.loaded === media}
           controlHint={isHost ? "Сначала открой видео" : `Пульт у ${hostName ?? "другого"}`}
-          title={media ? mediaTitle(media) : "Ничего не выбрано"}
+          title={nowTitle}
           status={playbackStatus(playback, isHost, hostName)}
           scrub={scrub}
           onScrub={setScrub}
@@ -1967,6 +2076,8 @@ export default function App() {
           fullscreen={fullscreen}
           onFullscreen={() => applyFullscreen(!fullscreen)}
           onMini={() => applyMini(true)}
+          onReact={(emoji) => run(() => send({ type: "react", emoji }))}
+          canShareSubtitles={isHost && media !== null}
         />
         )}
         {error && !chatOpen && (
@@ -2205,8 +2316,34 @@ export default function App() {
                 Что посмотреть
                 {suggestions.length > 0 && <span className="count">{suggestions.length}</span>}
               </button>
+              <button
+                role="tab"
+                aria-selected={sideTab === "history"}
+                className={sideTab === "history" ? "active" : ""}
+                onClick={() => setSideTab("history")}
+              >
+                История
+              </button>
             </div>
-            {sideTab === "suggest" ? (
+            {sideTab === "history" ? (
+              <HistoryPanel
+                list={history}
+                isHost={isHost}
+                current={playback?.media ?? null}
+                onPlay={(h) => run(() => invoke("open_url", { url: h.media }))}
+                onSuggest={(h) =>
+                  run(async () => {
+                    await send({ type: "suggest", media: h.media });
+                    setSideTab("suggest");
+                  })
+                }
+                onClear={() => {
+                  if (!joinedRoom) return;
+                  saveHistory(joinedRoom, []);
+                  setHistory([]);
+                }}
+              />
+            ) : sideTab === "suggest" ? (
               <SuggestionsPanel
                 list={spin ? spin.list : suggestions}
                 me={me}
@@ -2221,6 +2358,11 @@ export default function App() {
                     send({ type: "spin" }),
                   )
                 }
+                autoNext={autoNext}
+                onAutoNext={(on) => {
+                  setAutoNext(on);
+                  save("autoNext", on ? "1" : "0");
+                }}
                 wheel={
                   <RouletteWheel
                     list={spin ? spin.list : suggestions}
@@ -2539,6 +2681,102 @@ function spinWeights(list: Suggestion[], percents: Map<number, number>): Array<[
 }
 
 /** Список «Что посмотреть» и рулетка по нему. */
+// ---------- История просмотров ----------
+
+interface HistoryEntry {
+  media: string;
+  title: string;
+  at: number;
+}
+
+const HISTORY_SIZE = 50;
+
+function loadHistory(room: string): HistoryEntry[] {
+  try {
+    const list = JSON.parse(localStorage.getItem(`history:${room}`) ?? "[]");
+    return Array.isArray(list) ? list.filter((h) => h && typeof h.media === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(room: string, list: HistoryEntry[]) {
+  try {
+    localStorage.setItem(`history:${room}`, JSON.stringify(list));
+  } catch {
+    // Нет места или хранилище недоступно — история просто не сохранится.
+  }
+}
+
+/** «Вчера в 21:40», «Сегодня в 18:05», «3 нояб.». */
+function whenWatched(at: number): string {
+  const d = new Date(at);
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  const diff = Math.round((day.getTime() - new Date(d).setHours(0, 0, 0, 0)) / 86_400_000);
+  if (diff === 0) return `Сегодня в ${time}`;
+  if (diff === 1) return `Вчера в ${time}`;
+  return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
+function HistoryPanel({
+  list,
+  isHost,
+  current,
+  onPlay,
+  onSuggest,
+  onClear,
+}: {
+  list: HistoryEntry[];
+  isHost: boolean;
+  current: string | null;
+  onPlay: (h: HistoryEntry) => void;
+  onSuggest: (h: HistoryEntry) => void;
+  onClear: () => void;
+}) {
+  if (list.length === 0) {
+    return (
+      <div className="suggestions">
+        <p className="suggestions-empty">
+          Здесь появится всё, что смотрели в этой комнате, — чтобы быстро вернуться.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="suggestions">
+      <ul>
+        {list.map((h) => (
+          <li key={h.media} className={h.media === current ? "lit" : ""}>
+            <span className="suggestion-text">
+              <span className="suggestion-title" title={h.media}>
+                {h.title}
+              </span>
+              <span className="suggestion-by">
+                {h.media === current ? "Смотрим сейчас" : whenWatched(h.at)}
+              </span>
+            </span>
+            {h.media !== current &&
+              (isHost ? (
+                <button className="icon" onClick={() => onPlay(h)} title="Включить снова" aria-label="Включить">
+                  <Icon name="play" />
+                </button>
+              ) : (
+                <button className="icon" onClick={() => onSuggest(h)} title="Предложить снова" aria-label="Предложить">
+                  <Icon name="film" />
+                </button>
+              ))}
+          </li>
+        ))}
+      </ul>
+      <button className="link-button history-clear" onClick={onClear}>
+        Очистить историю
+      </button>
+    </div>
+  );
+}
+
 function SuggestionsPanel({
   list,
   me,
@@ -2551,7 +2789,11 @@ function SuggestionsPanel({
   onSpin,
   wheel,
   admin,
+  autoNext,
+  onAutoNext,
 }: {
+  autoNext: boolean;
+  onAutoNext: (on: boolean) => void;
   wheel: ReactNode;
   admin: ReactNode;
   list: Suggestion[];
@@ -2567,6 +2809,12 @@ function SuggestionsPanel({
   return (
     <div className="suggestions">
       {admin}
+      {isHost && (
+        <label className="auto-next" title="Когда видео доиграет, включится первое из списка">
+          <input type="checkbox" checked={autoNext} onChange={(e) => onAutoNext(e.target.checked)} />
+          Доиграло — включать следующее из списка
+        </label>
+      )}
       {list.length > 0 && wheel}
       {list.length === 0 ? (
         <p className="suggestions-empty">
@@ -2796,6 +3044,8 @@ export function ControlsOverlay() {
         onMini={
           state.mini ? () => emit("overlay-key", "exit-fullscreen").catch(() => {}) : undefined
         }
+        onReact={(emoji) => send({ type: "react", emoji }).catch(() => {})}
+        canShareSubtitles={state.canShareSubtitles}
       />
     </div>
   );
@@ -2832,6 +3082,8 @@ function PlayerControls({
   mini = false,
   onMini,
   onClose,
+  onReact,
+  canShareSubtitles = false,
 }: {
   onHover: (over: boolean) => void;
   info: PlaybackInfo | null;
@@ -2854,6 +3106,10 @@ function PlayerControls({
   onMini?: () => void;
   /** Закрыть видео у всех (только у ведущего). */
   onClose?: () => void;
+  /** Отправить реакцию (нет в мини-окне — там тесно). */
+  onReact?: (emoji: string) => void;
+  /** Можно раздать субтитры всем (у того, кто держит пульт). */
+  canShareSubtitles?: boolean;
 }) {
   const duration = info?.duration ?? 0;
   const position = scrub ?? info?.position ?? 0;
@@ -2874,6 +3130,11 @@ function PlayerControls({
   };
 
   const [tracksOpen, setTracksOpen] = useState(false);
+  const [reactOpen, setReactOpen] = useState(false);
+  /** Ссылка на субтитры для всех (`null` — поле не открыто). */
+  const [subsLink, setSubsLink] = useState<string | null>(null);
+  const shareSubs = (args: { path?: string; url?: string }) =>
+    invoke<string>("subtitles_share", args).catch((err) => onError(String(err)));
   const audioTracks = tracks.filter((t) => t.kind === "audio");
   const subTracks = tracks.filter((t) => t.kind === "sub");
   const audioValue = String(audioTracks.find((t) => t.selected)?.id ?? "off");
@@ -2883,6 +3144,19 @@ function PlayerControls({
     send({ type: "set_audio", id: value === "off" ? null : Number(value) });
 
   const onSubtitle = async (value: string) => {
+    if (value === "share-file") {
+      const path = await pickSubtitleFile();
+      if (path) await shareSubs({ path });
+      return;
+    }
+    if (value === "share-link") {
+      setSubsLink("");
+      return;
+    }
+    if (value === "share-off") {
+      invoke("subtitles_clear").catch((err) => onError(String(err)));
+      return;
+    }
     if (value === "file") {
       const path = await pickSubtitleFile();
       if (path) send({ type: "add_subtitle", path });
@@ -2937,24 +3211,66 @@ function PlayerControls({
         >
           <Icon name={paused ? "play-solid" : "pause-solid"} size={18} />
         </button>
-        {!tracksOpen && (
+        {reactOpen && !tracksOpen && onReact && <ReactionPicker onPick={onReact} />}
+        {!tracksOpen && !reactOpen && (
           <div className="now">
             <span className="now-title">{title}</span>
             <span className="now-status">{status}</span>
           </div>
         )}
 
+        {onReact && !mini && !tracksOpen && (
+          <button
+            className={reactOpen ? "tracks-toggle icon-toggle active" : "tracks-toggle icon-toggle"}
+            onClick={() => setReactOpen((o) => !o)}
+            title={reactOpen ? "Спрятать реакции" : "Реакции — пролетят поверх видео у всех"}
+            aria-label="Реакции"
+          >
+            <Icon name={reactOpen ? "close" : "smile"} size={16} />
+          </button>
+        )}
+
         {/* «Звук и субтитры»: дорожки и качество — вместо названия, по кнопке. */}
         <button
           className={tracksOpen ? "tracks-toggle active" : "tracks-toggle"}
-          onClick={() => setTracksOpen((o) => !o)}
+          onClick={() => {
+            setTracksOpen((o) => !o);
+            setReactOpen(false);
+            setSubsLink(null);
+          }}
           title="Озвучка, субтитры и качество — у каждого свои"
         >
           <Icon name={tracksOpen ? "close" : "sliders"} size={16} />
           {tracksOpen ? "Готово" : "Звук и субтитры"}
         </button>
 
-        {tracksOpen && (
+        {tracksOpen && subsLink !== null && (
+          <form
+            className="tracks subs-link"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const url = subsLink.trim();
+              if (!url) return;
+              await shareSubs({ url });
+              setSubsLink(null);
+            }}
+          >
+            <input
+              autoFocus
+              value={subsLink}
+              onChange={(e) => setSubsLink(e.target.value)}
+              placeholder="Прямая ссылка на .srt, .vtt или .ass"
+              aria-label="Ссылка на субтитры"
+            />
+            <button type="submit" className="go" disabled={!subsLink.trim()}>
+              Для всех
+            </button>
+            <button type="button" className="ghost" onClick={() => setSubsLink(null)}>
+              Отмена
+            </button>
+          </form>
+        )}
+        {tracksOpen && subsLink === null && (
         <div className="tracks">
         <label className="track-select" title="Озвучка у каждого своя">
           <span>Озвучка</span>
@@ -2980,7 +3296,14 @@ function PlayerControls({
                 {trackLabel(t)}
               </option>
             ))}
-            <option value="file">Загрузить из файла…</option>
+            <option value="file">Себе: из файла…</option>
+            {canShareSubtitles && (
+              <>
+                <option value="share-file">Для всех: из файла…</option>
+                <option value="share-link">Для всех: по ссылке…</option>
+                <option value="share-off">Убрать у всех</option>
+              </>
+            )}
           </select>
         </label>
 

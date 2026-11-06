@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Права главного окна",
-  "windows": ["main", "controls"],
+  "windows": ["main", "controls", "reactions"],
   "permissions": [
     "core:default",
     "dialog:default",

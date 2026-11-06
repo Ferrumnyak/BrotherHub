@@ -31,6 +31,7 @@ const SITES: &[&str] = &[
     "vk.com",
     "rutube.ru",
     "twitch.tv",
+    "soundcloud.com",
     "smotrim.ru",
     "dzen.ru",
     "ok.ru",

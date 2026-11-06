@@ -13,7 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use brotherwatch_shared::{is_url, ClientMsg, MemberId, PlaybackState, ServerMsg};
+use brotherwatch_shared::{is_url, ClientMsg, MemberId, PlaybackState, ServerMsg, SubtitleFile};
+use serde_json::Value;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::{mpsc, Mutex};
@@ -47,7 +48,22 @@ pub struct PlaybackInfo {
     duration: Option<f64>,
     paused: bool,
     volume: Option<f64>,
+    /// Название, которое отдал сайт (для истории просмотров).
+    title: Option<String>,
+    /// Доиграло до конца (для «дальше — по списку»).
+    ended: bool,
 }
+
+/// Обложка для трека без картинки (SoundCloud и т.п.) — событие `player-cover`.
+#[derive(Clone, Serialize)]
+pub struct Cover {
+    image: Option<String>,
+    title: Option<String>,
+    artist: Option<String>,
+}
+
+/// Самый большой файл субтитров, который можно раздать (как на сервере).
+const MAX_SUBTITLES_BYTES: usize = 768 * 1024;
 
 /// Кнопки панели управления.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -172,6 +188,8 @@ pub struct Session {
     /// Показывать сообщения чата поверх видео (когда панель чата скрыта).
     overlay_enabled: bool,
     overlay: VecDeque<(Instant, String, String)>,
+    /// Субтитры, которые ведущий раздал к текущему видео.
+    subtitles: Option<SubtitleFile>,
 }
 
 impl Session {
@@ -196,6 +214,7 @@ impl Session {
             reloading: false,
             overlay_enabled: false,
             overlay: VecDeque::new(),
+            subtitles: None,
         }));
 
         // События от mpv.
@@ -310,11 +329,27 @@ impl Session {
                 you,
                 host,
                 playback,
+                subtitles,
                 ..
             } => {
                 self.me = Some(*you);
                 self.host = Some(*host);
+                self.subtitles = subtitles.clone();
                 self.set_room(playback.clone()).await;
+                // Видео уже было открыто (вернулись после обрыва) — субтитры сразу.
+                if self.loaded.is_some() && self.loaded == self.room_media() {
+                    self.apply_subtitles();
+                }
+            }
+            ServerMsg::Subtitles { subtitles } => {
+                self.subtitles = subtitles.clone();
+                if subtitles.is_none() {
+                    if let Some(player) = &self.player {
+                        player.command(serde_json::json!(["sub-remove"]));
+                    }
+                } else if self.loaded.is_some() && self.loaded == self.room_media() {
+                    self.apply_subtitles();
+                }
             }
             ServerMsg::HostChanged { host } => {
                 self.host = Some(*host);
@@ -324,6 +359,10 @@ impl Session {
                 }
             }
             ServerMsg::Playback { playback, .. } => {
+                // Новое видео — субтитры прошлого больше не нужны (сервер их тоже сбросил).
+                if playback.media != self.room_media() {
+                    self.subtitles = None;
+                }
                 // Глава сам источник истины: свои же сообщения, вернувшиеся
                 // от сервера, он игнорирует (они уже чуть устарели).
                 if self.is_host() && self.room_media() == playback.media {
@@ -493,6 +532,8 @@ impl Session {
             }
             PlayerEvent::FileLoaded => {
                 crate::logs::info("видео загрузилось");
+                self.apply_subtitles();
+                self.emit_cover().await;
                 // Ведущий запустит видео, когда оно откроется у всех.
                 if let Some(media) = self.loaded.clone() {
                     self.send(ClientMsg::Loaded { media });
@@ -707,6 +748,8 @@ impl Session {
                 duration: None,
                 paused: true,
                 volume: None,
+                title: None,
+                ended: false,
             };
         };
         PlaybackInfo {
@@ -714,6 +757,15 @@ impl Session {
             duration: player.get_f64("duration").await,
             paused: self.player_paused,
             volume: player.get_f64("volume").await,
+            title: player
+                .get("media-title")
+                .await
+                .and_then(|v| v.as_str().map(str::to_string)),
+            ended: player
+                .get("eof-reached")
+                .await
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
         }
     }
 
@@ -768,6 +820,7 @@ impl Session {
     /// (см. [`crate::sites`]), сначала превращаем в прямую ссылку на поток.
     async fn load_media(&self, url: &str) -> Result<(), String> {
         crate::logs::info(format!("открываю ссылку: {url}"));
+        let _ = self.app.emit("player-cover", None::<Cover>);
         let target = if crate::sites::handles(url) {
             crate::sites::resolve(url, self.quality)
                 .await
@@ -778,6 +831,70 @@ impl Session {
         if let Some(player) = &self.player {
             player.load(&target);
         }
+        Ok(())
+    }
+
+    /// Подключить раздачу ведущего к открытому видео.
+    fn apply_subtitles(&self) {
+        let (Some(player), Some(file)) = (&self.player, &self.subtitles) else {
+            return;
+        };
+        match write_subtitles(file) {
+            Ok(path) => {
+                crate::logs::info(format!("субтитры для всех: {}", file.name));
+                player.add_subtitle(&path.to_string_lossy());
+            }
+            Err(e) => crate::logs::warn(format!("не получилось подключить субтитры: {e}")),
+        }
+    }
+
+    /// Нет картинки (музыка с SoundCloud и т.п.) — показываем обложку из
+    /// того, что отдал yt-dlp. Есть картинка — обложка не нужна.
+    async fn emit_cover(&self) {
+        let Some(player) = &self.player else {
+            return;
+        };
+        let has_video = player.get("current-tracks/video").await.is_some();
+        if has_video {
+            let _ = self.app.emit("player-cover", None::<Cover>);
+            return;
+        }
+        let info = player
+            .get("user-data/mpv/ytdl/json-subprocess-result")
+            .await
+            .and_then(ytdl_info);
+        let text = |key: &str| {
+            info.as_ref()
+                .and_then(|i| i.get(key))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        let image = text("thumbnail").or_else(|| {
+            info.as_ref()
+                .and_then(|i| i.get("thumbnails"))
+                .and_then(Value::as_array)
+                .and_then(|list| list.last())
+                .and_then(|t| t.get("url"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        let title = text("track").or_else(|| text("title")).or(player
+            .get("media-title")
+            .await
+            .and_then(|v| v.as_str().map(str::to_string)));
+        let artist = text("artist").or_else(|| text("uploader")).or_else(|| text("channel"));
+        let _ = self.app.emit("player-cover", Some(Cover { image, title, artist }));
+    }
+
+    /// Раздать субтитры всем (только ведущий).
+    pub fn share_subtitles(&self, file: Option<SubtitleFile>) -> Result<(), String> {
+        if !self.is_host() {
+            return Err("Субтитры для всех добавляет тот, у кого пульт".into());
+        }
+        if self.room_media().is_none() {
+            return Err("Сначала включи видео".into());
+        }
+        self.send(ClientMsg::SetSubtitles { subtitles: file });
         Ok(())
     }
 
@@ -987,6 +1104,39 @@ pub async fn player_cursor(session: State<'_, SharedSession>, hidden: bool) -> R
     Ok(())
 }
 
+/// Субтитры для всех из файла (`path`) или по ссылке (`url`).
+#[tauri::command]
+pub async fn subtitles_share(
+    session: State<'_, SharedSession>,
+    path: Option<String>,
+    url: Option<String>,
+) -> Result<String, String> {
+    let (name, bytes) = if let Some(path) = path {
+        let name = Path::new(&path)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "subtitles.srt".into());
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|e| format!("Не получилось прочитать файл: {e}"))?;
+        (name, bytes)
+    } else if let Some(url) = url {
+        download_subtitles(url.trim()).await?
+    } else {
+        return Err("Выбери файл или вставь ссылку".into());
+    };
+    let file = subtitle_file(name, &bytes)?;
+    let name = file.name.clone();
+    session.lock().await.share_subtitles(Some(file))?;
+    Ok(name)
+}
+
+/// Убрать субтитры у всех.
+#[tauri::command]
+pub async fn subtitles_clear(session: State<'_, SharedSession>) -> Result<(), String> {
+    session.lock().await.share_subtitles(None)
+}
+
 #[tauri::command]
 pub async fn set_quality(
     session: State<'_, SharedSession>,
@@ -996,9 +1146,116 @@ pub async fn set_quality(
     Ok(())
 }
 
+// ---------- Субтитры ----------
+
+/// Данные yt-dlp, которые сохранил ytdl_hook mpv: `{"stdout": "<json>"}`.
+fn ytdl_info(v: Value) -> Option<Value> {
+    let v = match v {
+        Value::String(s) => serde_json::from_str(&s).ok()?,
+        v => v,
+    };
+    let stdout = v.get("stdout")?.as_str()?;
+    serde_json::from_str(stdout).ok()
+}
+
+async fn download_subtitles(url: &str) -> Result<(String, Vec<u8>), String> {
+    if !is_url(url) {
+        return Err("Ссылка должна начинаться с http:// или https://".into());
+    }
+    let mut response = reqwest::Client::new()
+        .get(url)
+        .timeout(Duration::from_secs(20))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Не получилось скачать субтитры: {e}"))?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("Загрузка прервалась: {e}"))?
+    {
+        bytes.extend_from_slice(&chunk);
+        if bytes.len() > MAX_SUBTITLES_BYTES * 2 {
+            return Err("Файл по ссылке слишком большой для субтитров".into());
+        }
+    }
+    let name = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.path_segments().and_then(|mut s| s.next_back().map(str::to_string)))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "subtitles.srt".into());
+    Ok((name, bytes))
+}
+
+/// Проверить файл и перевести текст в UTF-8 (русские .srt часто в Windows-1251).
+fn subtitle_file(name: String, bytes: &[u8]) -> Result<SubtitleFile, String> {
+    if bytes.starts_with(b"PK") || bytes.starts_with(b"Rar!") || bytes.starts_with(&[0x37, 0x7A]) {
+        return Err("Это архив — распакуй его и выбери файл .srt".into());
+    }
+    let text = decode_text(bytes);
+    if text.trim().is_empty() {
+        return Err("Файл субтитров пустой".into());
+    }
+    if text.trim_start().starts_with("<!DOCTYPE") || text.trim_start().starts_with("<html") {
+        return Err("По ссылке веб-страница, а не файл субтитров — нужна прямая ссылка на .srt".into());
+    }
+    if text.len() > MAX_SUBTITLES_BYTES {
+        return Err("Файл субтитров слишком большой".into());
+    }
+    let lower = name.to_ascii_lowercase();
+    let known = [".srt", ".vtt", ".ass", ".ssa"].iter().any(|e| lower.ends_with(e));
+    let name = if known {
+        name
+    } else if text.trim_start().starts_with("WEBVTT") {
+        format!("{name}.vtt")
+    } else if text.contains("[Script Info]") {
+        format!("{name}.ass")
+    } else {
+        format!("{name}.srt")
+    };
+    Ok(SubtitleFile { name, text })
+}
+
+fn decode_text(bytes: &[u8]) -> String {
+    if let Some((encoding, bom)) = encoding_rs::Encoding::for_bom(bytes) {
+        return encoding.decode_without_bom_handling(&bytes[bom..]).0.into_owned();
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => encoding_rs::WINDOWS_1251.decode(bytes).0.into_owned(),
+    }
+}
+
+/// Записать раздачу во временную папку — mpv подключает субтитры из файла.
+fn write_subtitles(file: &SubtitleFile) -> std::io::Result<std::path::PathBuf> {
+    let dir = std::env::temp_dir().join("brotherhub-subtitles");
+    std::fs::create_dir_all(&dir)?;
+    let safe: String = file
+        .name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || ".-_ ".contains(c) { c } else { '_' })
+        .collect();
+    let path = dir.join(safe);
+    std::fs::write(&path, file.text.as_bytes())?;
+    Ok(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subtitles_are_decoded_and_named() {
+        let cp1251 = [0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]; // «Привет»
+        let f = subtitle_file("film".into(), &cp1251).unwrap();
+        assert_eq!(f.text, "Привет");
+        assert_eq!(f.name, "film.srt");
+        let bom = [&[0xef, 0xbb, 0xbf][..], "WEBVTT\n".as_bytes()].concat();
+        let f = subtitle_file("x".into(), &bom).unwrap();
+        assert_eq!(f.name, "x.vtt");
+        assert!(subtitle_file("a.zip".into(), b"PK\x03\x04").is_err());
+    }
 
     #[test]
     fn small_lag_is_caught_up_by_speed_not_seek() {

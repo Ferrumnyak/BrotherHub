@@ -380,3 +380,46 @@ async fn anyone_can_rig_and_special_key_wins() {
         assert_eq!(host.expect("roulette").await["winner"], second);
     }
 }
+
+#[tokio::test]
+async fn reactions_reach_everyone() {
+    let url = start(Config::default()).await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    let (mut b, _) = Client::join(&url, "r", "Боря").await;
+    b.send(json!({"type": "react", "emoji": "🔥"})).await;
+    for c in [&mut a, &mut b] {
+        let r = c.expect("reaction").await;
+        assert_eq!(r["emoji"], "🔥");
+        assert_eq!(r["name"], "Боря");
+    }
+}
+
+#[tokio::test]
+async fn subtitles_are_shared_kept_and_reset_with_video() {
+    let url = start(Config::default()).await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    let (mut b, _) = Client::join(&url, "r", "Боря").await;
+
+    let file = json!({"name": "film.srt", "text": "1\n00:00:01,000 --> 00:00:02,000\nПривет\n"});
+    // Без видео субтитры некуда добавить, и только ведущий может их раздать.
+    a.send(json!({"type": "set_subtitles", "subtitles": file})).await;
+    assert!(a.expect("error").await["message"].as_str().unwrap().contains("видео"));
+    a.send(json!({"type": "set_media", "media": "https://example.com/v"}))
+        .await;
+    b.send(json!({"type": "set_subtitles", "subtitles": file})).await;
+    assert!(b.expect("error").await["message"].as_str().unwrap().contains("ведущий"));
+
+    a.send(json!({"type": "set_subtitles", "subtitles": file})).await;
+    assert_eq!(b.expect("subtitles").await["subtitles"]["name"], "film.srt");
+
+    // Кто зашёл позже, получает их сразу.
+    let (_c, wc) = Client::join(&url, "r", "Вася").await;
+    assert_eq!(wc["subtitles"]["name"], "film.srt");
+
+    // Новое видео — субтитры старого больше не нужны.
+    a.send(json!({"type": "set_media", "media": "https://example.com/other"}))
+        .await;
+    b.expect("playback").await;
+    let (_d, wd) = Client::join(&url, "r", "Дима").await;
+    assert!(wd["subtitles"].is_null());
+}

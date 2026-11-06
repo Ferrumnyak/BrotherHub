@@ -39,6 +39,8 @@ pub enum ClientMsg {
     Loaded { media: String },
     /// Мой микрофон и звук — чтобы остальные видели значки в списке.
     VoiceState { in_voice: bool, mic: bool, deaf: bool },
+    /// Реакция — эмодзи, пролетающий поверх видео у всех.
+    React { emoji: String },
     /// Тайно задать шансы рулетки (id предложения → вес). Пустой список —
     /// убрать свою подкрутку. Никому не пересылается.
     Rig {
@@ -70,6 +72,8 @@ pub enum ClientMsg {
     },
     /// Закрыть видео у всех.
     ClearMedia,
+    /// Субтитры к текущему видео для всех (`None` — убрать).
+    SetSubtitles { subtitles: Option<SubtitleFile> },
 }
 
 /// Сообщения от сервера к клиенту.
@@ -92,6 +96,9 @@ pub enum ServerMsg {
         /// Что предложили посмотреть.
         #[serde(default)]
         suggestions: Vec<Suggestion>,
+        /// Субтитры к текущему видео, если ведущий их добавил.
+        #[serde(default)]
+        subtitles: Option<SubtitleFile>,
     },
     MemberJoined {
         member: Member,
@@ -150,6 +157,25 @@ pub enum ServerMsg {
         mic: bool,
         deaf: bool,
     },
+    /// Кто-то отправил реакцию.
+    Reaction {
+        from: MemberId,
+        name: String,
+        emoji: String,
+    },
+    /// Ведущий добавил (`Some`) или убрал (`None`) субтитры к видео.
+    Subtitles {
+        subtitles: Option<SubtitleFile>,
+    },
+}
+
+/// Файл субтитров, который ведущий раздаёт всем (.srt, .vtt, .ass).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubtitleFile {
+    /// Имя файла — по нему видно, что это за субтитры, и из него берётся формат.
+    pub name: String,
+    /// Содержимое в UTF-8.
+    pub text: String,
 }
 
 /// Предложение, что посмотреть.
@@ -314,6 +340,27 @@ mod tests {
         .unwrap();
         assert_eq!(v["type"], "roulette");
         assert_eq!(v["winner"], 4);
+    }
+
+    #[test]
+    fn reactions_and_subtitles() {
+        let react: ClientMsg = serde_json::from_str(r#"{"type":"react","emoji":"🔥"}"#).unwrap();
+        assert!(matches!(react, ClientMsg::React { emoji } if emoji == "🔥"));
+        let subs: ClientMsg = serde_json::from_str(
+            r#"{"type":"set_subtitles","subtitles":{"name":"a.srt","text":"1"}}"#,
+        )
+        .unwrap();
+        assert!(matches!(subs, ClientMsg::SetSubtitles { subtitles: Some(f) } if f.name == "a.srt"));
+        let off: ClientMsg =
+            serde_json::from_str(r#"{"type":"set_subtitles","subtitles":null}"#).unwrap();
+        assert!(matches!(off, ClientMsg::SetSubtitles { subtitles: None }));
+        let v = serde_json::to_value(ServerMsg::Reaction {
+            from: 1,
+            name: "Ferrum".into(),
+            emoji: "😂".into(),
+        })
+        .unwrap();
+        assert_eq!(v["type"], "reaction");
     }
 
     #[test]

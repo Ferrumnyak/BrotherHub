@@ -1,6 +1,6 @@
 // Площадки для встроенного браузера и разбор адресов страниц с видео.
 
-export type SiteId = "youtube" | "vk" | "rutube" | "twitch" | "smotrim" | "dzen" | "ok" | "yandex" | "utv";
+export type SiteId = "youtube" | "vk" | "rutube" | "twitch" | "soundcloud" | "smotrim" | "dzen" | "ok" | "yandex" | "utv";
 
 export interface Site {
   id: SiteId;
@@ -17,6 +17,7 @@ export const SITES: Site[] = [
   { id: "vk", title: "VK Видео", hint: "Сериалы, шоу и фильмы", home: "https://vkvideo.ru/", mark: "VK", color: "#3b82f6" },
   { id: "rutube", title: "Rutube", hint: "Шоу, ТВ и блогеры", home: "https://rutube.ru/", mark: "R", color: "#14b8a6" },
   { id: "twitch", title: "Twitch", hint: "Стримы и записи эфиров", home: "https://www.twitch.tv/", mark: "T", color: "#9146ff" },
+  { id: "soundcloud", title: "SoundCloud", hint: "Музыка, миксы и подкасты", home: "https://soundcloud.com/discover", mark: "SC", color: "#ff5500" },
   { id: "smotrim", title: "Смотрим", hint: "Сериалы и фильмы «России»", home: "https://smotrim.ru/", mark: "С", color: "#8b5cf6" },
   { id: "dzen", title: "Дзен", hint: "Видео авторов и каналов", home: "https://dzen.ru/video", mark: "Д", color: "#64748b" },
   { id: "ok", title: "ОК Видео", hint: "Фильмы и шоу на ok.ru", home: "https://ok.ru/video", mark: "ОК", color: "#f59e0b" },
@@ -28,6 +29,17 @@ export const SITES: Site[] = [
 const TWITCH_PAGES = new Set([
   "directory", "videos", "settings", "search", "downloads", "subscriptions", "inventory",
   "wallet", "drops", "following", "login", "signup", "p", "jobs", "turbo", "prime", "store",
+]);
+
+/** Разделы SoundCloud, которые не авторы, и вкладки на странице автора. */
+const SOUNDCLOUD_PAGES = new Set([
+  "discover", "search", "you", "stream", "upload", "charts", "feed", "settings", "messages",
+  "notifications", "pages", "people", "tags", "mobile", "signin", "logout", "jobs", "pro",
+  "artists", "popular", "terms-of-use", "imprint", "creator", "playlists", "stations",
+]);
+const SOUNDCLOUD_TABS = new Set([
+  "tracks", "albums", "sets", "reposts", "likes", "followers", "following", "comments",
+  "popular-tracks", "spotlight", "toptracks",
 ]);
 
 function hostIs(host: string, domain: string) {
@@ -47,6 +59,7 @@ export function siteOf(address: string | null): SiteId | null {
   if (hostIs(host, "vkvideo.ru") || hostIs(host, "vk.com")) return "vk";
   if (hostIs(host, "rutube.ru")) return "rutube";
   if (hostIs(host, "twitch.tv")) return "twitch";
+  if (hostIs(host, "soundcloud.com")) return "soundcloud";
   if (hostIs(host, "smotrim.ru")) return "smotrim";
   if (hostIs(host, "dzen.ru")) return "dzen";
   if (hostIs(host, "ok.ru")) return "ok";
@@ -117,6 +130,14 @@ export function videoLink(address: string | null): string | null {
       return `https://www.twitch.tv/${channel[1].toLowerCase()}`;
     }
     return null;
+  }
+  if (hostIs(host, "soundcloud.com")) {
+    // Трек: soundcloud.com/<автор>/<трек>. Плейлисты не берём — включаем по одному треку.
+    const parts = path.split("/").filter(Boolean);
+    if (parts.length !== 2) return null;
+    const [user, track] = parts.map((p) => p.toLowerCase());
+    if (SOUNDCLOUD_PAGES.has(user) || SOUNDCLOUD_TABS.has(track)) return null;
+    return `https://soundcloud.com/${parts[0]}/${parts[1]}`;
   }
   if (hostIs(host, "smotrim.ru")) {
     const m = path.match(/^\/video\/(\d+)/);

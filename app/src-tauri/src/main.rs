@@ -9,6 +9,7 @@ mod net;
 mod overlay;
 mod player;
 mod ptt;
+mod reactions;
 mod session;
 mod sites;
 mod tools;
@@ -41,6 +42,7 @@ fn main() {
                     if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
                         overlay::follow(&handle);
                         browser::follow(&handle);
+                        reactions::follow(&handle);
                     }
                 });
                 if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {
@@ -66,6 +68,8 @@ fn main() {
             session::close_media,
             session::set_quality,
             session::player_cursor,
+            session::subtitles_share,
+            session::subtitles_clear,
             video::set_video_rect,
             video::watch_cursor,
             overlay::overlay_place,
@@ -85,7 +89,8 @@ fn main() {
             browser::browser_close,
             update::update_check,
             update::update_install,
-            deeplink::deep_link_take
+            deeplink::deep_link_take,
+            reactions::reactions_place
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherHub");

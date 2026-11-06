@@ -30,6 +30,12 @@ export interface VoiceAccess {
   token: string;
 }
 
+/** Файл субтитров, который ведущий раздаёт всем. */
+export interface SubtitleFile {
+  name: string;
+  text: string;
+}
+
 export interface PlaybackState {
   media: string | null;
   paused: boolean;
@@ -52,6 +58,7 @@ export type ClientMsg =
   | { type: "remove_suggestion"; id: number }
   | { type: "loaded"; media: string }
   | { type: "voice_state"; in_voice: boolean; mic: boolean; deaf: boolean }
+  | { type: "react"; emoji: string }
   | { type: "rig"; weights: Array<[number, number]>; key?: string | null }
   | { type: "set_media"; media: string }
   | { type: "play"; position: number }
@@ -61,7 +68,8 @@ export type ClientMsg =
   | { type: "transfer_host"; to: MemberId }
   | { type: "kick"; id: MemberId }
   | { type: "spin"; weights?: Array<[number, number]> }
-  | { type: "clear_media" };
+  | { type: "clear_media" }
+  | { type: "set_subtitles"; subtitles: SubtitleFile | null };
 
 export type ServerMsg =
   | {
@@ -75,6 +83,7 @@ export type ServerMsg =
       playback: PlaybackState;
       voice: VoiceAccess | null;
       suggestions?: Suggestion[];
+      subtitles?: SubtitleFile | null;
     }
   | { type: "member_joined"; member: Member }
   | { type: "member_status"; id: MemberId; online: boolean }
@@ -92,7 +101,9 @@ export type ServerMsg =
   | { type: "suggestions"; list: Suggestion[] }
   | { type: "roulette"; winner: number; by: string }
   | { type: "member_loaded"; id: MemberId; media: string }
-  | { type: "member_voice"; id: MemberId; in_voice: boolean; mic: boolean; deaf: boolean };
+  | { type: "member_voice"; id: MemberId; in_voice: boolean; mic: boolean; deaf: boolean }
+  | { type: "reaction"; from: MemberId; name: string; emoji: string }
+  | { type: "subtitles"; subtitles: SubtitleFile | null };
 
 /** Состояние плеера mpv (событие `player-status` от Rust-части). */
 export interface PlayerStatus {
@@ -114,6 +125,17 @@ export interface PlaybackInfo {
   duration: number | null;
   paused: boolean;
   volume: number | null;
+  /** Название видео или трека (как его отдал сайт). */
+  title?: string | null;
+  /** Видео доиграло до конца. */
+  ended?: boolean;
+}
+
+/** Обложка трека без картинки (SoundCloud и т.п.), событие `player-cover`. */
+export interface Cover {
+  image: string | null;
+  title: string | null;
+  artist: string | null;
 }
 
 /** Кнопки панели управления (команда `player_control`). */

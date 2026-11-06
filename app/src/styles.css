@@ -2485,6 +2485,217 @@ button.browse-open.active {
   }
 }
 
+/* ----- Обложка трека ----- */
+
+.cover-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  overflow: hidden;
+  background: var(--hall-deep);
+}
+
+.cover-backdrop {
+  position: absolute;
+  inset: -40px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(40px) brightness(0.45) saturate(1.3);
+}
+
+.cover-art {
+  position: relative;
+  width: min(42vh, 60%);
+  aspect-ratio: 1;
+  border-radius: 20px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--raised);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  transition: transform 0.4s ease;
+}
+
+.cover-art.playing {
+  transform: scale(1.03);
+}
+
+.cover-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cover-note {
+  font-size: 96px;
+  color: var(--lamp);
+}
+
+.cover-text {
+  position: relative;
+  max-width: 80%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.cover-text strong {
+  font-size: 18px;
+  color: #fff;
+}
+
+.cover-text span {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+}
+
+/* ----- Подписи и мелочи ----- */
+
+.auto-next {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 10px;
+  color: var(--text-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.history-clear {
+  align-self: center;
+  margin: 8px 0 4px;
+}
+
+.tracks-toggle.icon-toggle {
+  width: 34px;
+  padding: 0;
+  justify-content: center;
+}
+
+.subs-link input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  border-radius: var(--pill);
+  padding: 0 14px;
+}
+
+.subs-link button.go {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: var(--pill);
+  background: var(--lamp);
+  color: var(--lamp-ink);
+  font-weight: 700;
+}
+
+.subs-link button.ghost {
+  height: 34px;
+}
+
+/* ----- Реакции ----- */
+
+.reactions-layer {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.reaction {
+  position: absolute;
+  bottom: -90px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translateX(-50%);
+  animation: reaction-fly 3.2s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+
+.reaction img {
+  width: 60px;
+  height: 60px;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+}
+
+.reaction-text {
+  font-size: 48px;
+  line-height: 1;
+}
+
+.reaction-name {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@keyframes reaction-fly {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.5);
+  }
+  12% {
+    opacity: 1;
+    transform: translate(-50%, -14vh) scale(1.08);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--drift)), -78vh) scale(0.95);
+  }
+}
+
+.reaction-picker {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+button.reaction-button {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+button.reaction-button img {
+  width: 26px;
+  height: 26px;
+  transition: transform 0.12s;
+}
+
+button.reaction-button:hover {
+  background: var(--raised-2);
+}
+
+button.reaction-button:hover img {
+  transform: scale(1.18);
+}
+
+button.reaction-button:active img {
+  transform: scale(0.9);
+}
+
 /* ----- Полосы прокрутки: тонкие, в цвет темы ----- */
 
 * {
