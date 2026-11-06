@@ -199,6 +199,35 @@ pub async fn browser_back(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Спрятать браузер, не закрывая страницу: при следующем «Обзоре» всё
+/// останется как было (та же страница, прокрутка, история «назад»).
+/// Видео и музыку на странице ставим на паузу, чтобы не играли в фоне.
+#[tauri::command]
+pub async fn browser_hide(app: AppHandle) -> Result<(), String> {
+    WANTED.store(false, Ordering::SeqCst);
+    *LAST.lock().unwrap() = None;
+    if let Some(view) = app.get_webview_window(LABEL) {
+        let _ = view.eval(
+            "document.querySelectorAll('video,audio').forEach(function(m){try{m.pause()}catch(e){}})",
+        );
+        view.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Вернуть спрятанный браузер на место. `false` — его нет, надо открывать заново.
+#[tauri::command]
+pub async fn browser_show(app: AppHandle, rect: Area) -> Result<bool, String> {
+    let _turn = open_lock().lock().await;
+    let Some(view) = app.get_webview_window(LABEL) else {
+        return Ok(false);
+    };
+    WANTED.store(true, Ordering::SeqCst);
+    place(&app, &view, rect)?;
+    view.show().map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 /// Закрыть браузер: окно вместе со страницей (и её звуком) уничтожаем.
 #[tauri::command]
 pub async fn browser_close(app: AppHandle) -> Result<(), String> {

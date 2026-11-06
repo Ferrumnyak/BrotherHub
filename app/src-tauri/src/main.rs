@@ -104,6 +104,8 @@ fn main() {
             browser::browser_url,
             browser::browser_back,
             browser::browser_close,
+            browser::browser_hide,
+            browser::browser_show,
             update::update_check,
             update::update_install,
             deeplink::deep_link_take,

@@ -801,6 +801,9 @@ export default function App() {
             autoplayRef.current =
               media && isUrl(media) ? { media, since: Date.now() } : null;
           } else if (msg.action) {
+            if (autoplayRef.current) {
+              invoke("ui_log", { message: `автозапуск отменён: ${msg.action} от ${by}` }).catch(() => {});
+            }
             autoplayRef.current = null;
           }
           switch (msg.action) {
@@ -1421,6 +1424,7 @@ export default function App() {
     const start = () => {
       if (autoplayRef.current !== pending) return;
       autoplayRef.current = null;
+      invoke("ui_log", { message: "автозапуск: запускаю" }).catch(() => {});
       control({ type: "play" }).catch((err) => setError(String(err)));
     };
     const everyone = members
@@ -1875,13 +1879,31 @@ export default function App() {
   }, [playback?.media, player.loaded, info?.position, info?.duration, info?.ended, isHost, resumeOffer]);
 
   // Доиграло до конца — у того, у кого пульт, включается следующее из списка.
+  // «Доиграло» считаем, только если это видео при нас уже шло (не было в
+  // конце): сразу после переключения плеер ещё полсекунды сообщает «конец»
+  // про прошлое видео — и раньше из-за этого пропускалось следующее в очереди.
+  const playingRef = useRef<string | null>(null);
+  useEffect(() => {
+    const media = playback?.media ?? null;
+    if (media && player.loaded === media && info && !info.ended && (info.position ?? 0) > 0.5) {
+      playingRef.current = media;
+    }
+  }, [playback?.media, player.loaded, info]);
   useEffect(() => {
     const media = playback?.media ?? null;
     if (!isHost || !autoNext || !info?.ended || !media || player.loaded !== media) return;
+    if (playingRef.current !== media) return;
     if (autoplayedRef.current === media || suggestions.length === 0 || spin !== null) return;
     autoplayedRef.current = media;
     const next = suggestions[0];
-    run(() => invoke("open_url", { url: next.media }));
+    invoke("ui_log", { message: `очередь: следующее — ${next.media}` }).catch(() => {});
+    run(async () => {
+      await invoke("open_url", { url: next.media });
+      // Запустится само, когда откроется у всех (эффект автозапуска).
+      if (!autoplayRef.current || autoplayRef.current.media !== next.media) {
+        autoplayRef.current = { media: next.media, since: Date.now() };
+      }
+    });
   }, [info?.ended, isHost, autoNext, playback?.media, player.loaded, suggestions, spin]);
 
   // В полном экране и в мини-окне панель плеера — отдельное окно поверх низа
@@ -1963,6 +1985,34 @@ export default function App() {
     setBrowseNote(null);
   }
 
+  /** «Обзор» — туда же, где был в прошлый раз: спрятанная страница
+   *  возвращается как есть, а после перезапуска открывается последний адрес. */
+  async function reopenBrowser() {
+    const rect = videoArea();
+    if (!rect) return;
+    setBrowseNote(null);
+    try {
+      if (await invoke<boolean>("browser_show", { rect })) {
+        setBrowsing("site");
+        return;
+      }
+    } catch {
+      // Не вышло — откроем заново.
+    }
+    const last = load("browseUrl", "");
+    if (last && siteOf(last)) {
+      setBrowserUrl(last);
+      setBrowsing("site");
+      try {
+        await invoke("browser_open", { url: last, rect });
+        return;
+      } catch {
+        save("browseUrl", "");
+      }
+    }
+    setBrowsing("pick");
+  }
+
   // В полном экране, мини-окне и вне зала браузер не нужен.
   useEffect(() => {
     if (fullscreen || mini || joinedRoom === null) setBrowsing(null);
@@ -2020,17 +2070,27 @@ export default function App() {
     window.addEventListener("resize", update);
     const poll = setInterval(() => {
       invoke<string | null>("browser_url")
-        .then((u) => setBrowserUrl(u))
+        .then((u) => {
+          setBrowserUrl(u);
+          // Запоминаем, где остановились, — вернёмся сюда же.
+          if (u && siteOf(u)) save("browseUrl", u);
+        })
         .catch(() => {});
     }, 600);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
       clearInterval(poll);
-      invoke("browser_close").catch(() => {});
+      // Не закрываем, а прячем: в следующий раз вернёмся на ту же страницу.
+      invoke("browser_hide").catch(() => {});
       setBrowserUrl(null);
     };
   }, [browsing]);
+
+  // Вышли из зала — страницу закрываем совсем (адрес всё равно запомнен).
+  useEffect(() => {
+    if (joinedRoom === null) invoke("browser_close").catch(() => {});
+  }, [joinedRoom]);
 
   const pageVideo = browsing === "site" ? videoLink(browserUrl) : null;
   // Название того, что включим (SoundCloud и Яндекс сообщают его со страницы).
@@ -2309,7 +2369,7 @@ export default function App() {
             <button
               type="button"
               className={browsing ? "browse-open active" : "browse-open"}
-              onClick={() => (browsing ? closeBrowser() : setBrowsing("pick"))}
+              onClick={() => (browsing ? closeBrowser() : reopenBrowser())}
               title="Найти видео на YouTube, VK Видео, Rutube и «Ю»"
             >
               <Icon name="grid" size={18} />
