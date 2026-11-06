@@ -44,6 +44,11 @@
   if (document.documentElement) addStyle();
   else document.addEventListener("DOMContentLoaded", addStyle);
 
+  if (on("yandex.ru")) {
+    findYandexSource();
+    return;
+  }
+
   if (!on("youtube.com")) return;
 
   // Реклама в самом плеере YouTube: жмём «Пропустить», а непропускаемую
@@ -72,4 +77,62 @@
     const video = player.querySelector("video");
     if (video) video.dataset.bhAdMuted = player.classList.contains("ad-showing") ? "1" : "";
   }, 300);
+
+  // Яндекс Видео показывает чужие видео (VK, YouTube, Rutube, ОК, Дзен…).
+  // Ищем на странице плеер или ссылку на источник и кладём его адрес
+  // в #bh-src=… — приложение видит адрес страницы и включит источник.
+  function findYandexSource() {
+    const known = /(^|\.)(youtube\.com|youtu\.be|vk\.com|vkvideo\.ru|rutube\.ru|ok\.ru|dzen\.ru|smotrim\.ru)$/;
+
+    // Адрес встроенного плеера — в адрес страницы с видео.
+    const fromEmbed = (raw) => {
+      let u;
+      try {
+        u = new URL(raw, location.href);
+      } catch {
+        return null;
+      }
+      const h = u.hostname.replace(/^www\.|^m\./, "");
+      if (!known.test(h)) return null;
+      let m;
+      if ((m = u.pathname.match(/^\/embed\/([\w-]{6,})/)) && /youtube/.test(h))
+        return "https://www.youtube.com/watch?v=" + m[1];
+      if (/video_ext\.php/.test(u.pathname)) {
+        const oid = u.searchParams.get("oid");
+        const id = u.searchParams.get("id");
+        return oid && id ? `https://vkvideo.ru/video${oid}_${id}` : null;
+      }
+      if ((m = u.pathname.match(/^\/play\/embed\/([0-9a-f]{32})/i)))
+        return `https://rutube.ru/video/${m[1]}/`;
+      if ((m = u.pathname.match(/^\/videoembed\/(\d+)/))) return `https://ok.ru/video/${m[1]}`;
+      return u.href;
+    };
+
+    let last = "";
+    const look = () => {
+      if (!/^\/video\//.test(location.pathname)) return;
+      let found = null;
+      for (const f of document.querySelectorAll("iframe[src]")) {
+        found = fromEmbed(f.getAttribute("src"));
+        if (found) break;
+      }
+      if (!found) {
+        for (const a of document.querySelectorAll("a[href]")) {
+          const href = a.getAttribute("href");
+          if (!href || !/^https?:/.test(href)) continue;
+          const candidate = fromEmbed(href);
+          if (candidate && /video|watch|clip|shorts/.test(candidate)) {
+            found = candidate;
+            break;
+          }
+        }
+      }
+      const hash = found ? "#bh-src=" + encodeURIComponent(found) : "";
+      if (hash !== last) {
+        last = hash;
+        history.replaceState(history.state, "", location.pathname + location.search + hash);
+      }
+    };
+    setInterval(look, 800);
+  }
 })();

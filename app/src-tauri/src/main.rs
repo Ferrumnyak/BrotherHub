@@ -61,6 +61,7 @@ fn main() {
             overlay::overlay_close,
             ptt::ptt_set_key,
             ptt::ptt_capture,
+            ptt::mute_set_key,
             tools::player_tools,
             tools::player_setup,
             logs::open_logs,

@@ -25,7 +25,17 @@ use crate::overlay::MainWindow;
 const LABEL: &str = "browser";
 
 /// Площадки, которые можно открыть кнопками выбора.
-const SITES: &[&str] = &["youtube.com", "vkvideo.ru", "vk.com", "rutube.ru", "u-tv.ru"];
+const SITES: &[&str] = &[
+    "youtube.com",
+    "vkvideo.ru",
+    "vk.com",
+    "rutube.ru",
+    "smotrim.ru",
+    "dzen.ru",
+    "ok.ru",
+    "yandex.ru",
+    "u-tv.ru",
+];
 
 /// Простой «блокировщик рекламы»: прячет рекламные блоки и пропускает
 /// рекламу в плеере YouTube. Сеть не трогаем — только страницу.

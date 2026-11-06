@@ -8,8 +8,11 @@
 //! Код кнопки: для клавиатуры — virtual-key code Windows, для мыши —
 //! `0x1_0000 | номер` (3 — средняя, 4 и 5 — боковые).
 //!
+//! Так же работает и клавиша «вкл/выкл микрофон» (для режима «всегда включён»).
+//!
 //! События для интерфейса:
 //! - `ptt` — `true`/`false`: кнопка нажата/отпущена;
+//! - `mute-toggle` — нажата клавиша включения/выключения микрофона;
 //! - `ptt-captured` — код кнопки, нажатой в режиме назначения.
 
 use tauri::AppHandle;
@@ -17,6 +20,12 @@ use tauri::AppHandle;
 #[tauri::command]
 pub fn ptt_set_key(app: AppHandle, key: Option<u32>) {
     imp::set_key(&app, key);
+}
+
+/// Клавиша «вкл/выкл микрофон» (`None` — нет).
+#[tauri::command]
+pub fn mute_set_key(app: AppHandle, key: Option<u32>) {
+    imp::set_mute_key(&app, key);
 }
 
 /// Следующее нажатие станет новой кнопкой (придёт событием `ptt-captured`).
@@ -49,6 +58,15 @@ mod imp {
     static KEY: AtomicU32 = AtomicU32::new(0);
     static CAPTURE: AtomicBool = AtomicBool::new(false);
     static PRESSED: AtomicBool = AtomicBool::new(false);
+    /// Клавиша «вкл/выкл микрофон» (0 — нет).
+    static MUTE_KEY: AtomicU32 = AtomicU32::new(0);
+    static MUTE_DOWN: AtomicBool = AtomicBool::new(false);
+
+    pub fn set_mute_key(app: &AppHandle, key: Option<u32>) {
+        start(app);
+        MUTE_KEY.store(key.unwrap_or(0), Ordering::SeqCst);
+        MUTE_DOWN.store(false, Ordering::SeqCst);
+    }
 
     pub fn set_key(app: &AppHandle, key: Option<u32>) {
         start(app);
@@ -91,6 +109,11 @@ mod imp {
         if down && CAPTURE.swap(false, Ordering::SeqCst) {
             emit("ptt-captured", code);
             return;
+        }
+        let mute = MUTE_KEY.load(Ordering::SeqCst);
+        // Переключаем по нажатию; автоповтор зажатой клавиши не считается.
+        if mute != 0 && mute == code && MUTE_DOWN.swap(down, Ordering::SeqCst) != down && down {
+            emit("mute-toggle", ());
         }
         let key = KEY.load(Ordering::SeqCst);
         if key == 0 || key != code {
@@ -141,5 +164,6 @@ mod imp {
     use tauri::AppHandle;
 
     pub fn set_key(_app: &AppHandle, _key: Option<u32>) {}
+    pub fn set_mute_key(_app: &AppHandle, _key: Option<u32>) {}
     pub fn capture(_app: &AppHandle, _enabled: bool) {}
 }

@@ -403,6 +403,14 @@ export default function App() {
   });
   const [pttPressed, setPttPressed] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  // Клавиша «вкл/выкл микрофон» для режима «всегда включён».
+  const [muteKey, setMuteKey] = useState<number | null>(() => {
+    const v = Number(load("muteKey", ""));
+    return load("muteKey", "") !== "" && Number.isFinite(v) ? v : null;
+  });
+  const [capturingMute, setCapturingMute] = useState(false);
+  const capturingMuteRef = useRef(false);
+  capturingMuteRef.current = capturingMute;
   const [voiceSettings, setVoiceSettings] = useState(false);
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [micDevice, setMicDevice] = useState(() => load("micDevice", ""));
@@ -600,10 +608,17 @@ export default function App() {
     listen<string>("player-error", (e) => setError(e.payload)).then(keep);
     listen<boolean>("ptt", (e) => setPttPressed(e.payload)).then(keep);
     listen<number>("ptt-captured", (e) => {
+      if (capturingMuteRef.current) {
+        setMuteKey(e.payload);
+        save("muteKey", String(e.payload));
+        setCapturingMute(false);
+        return;
+      }
       setPttKey(e.payload);
       save("pttKey", String(e.payload));
       setCapturing(false);
     }).then(keep);
+    listen("mute-toggle", () => setMicOn((on) => !on)).then(keep);
     listen<Track[]>("player-tracks", (e) => setTracks(e.payload)).then(keep);
     listen<PlayerKey>("player-key", (e) => onKeyRef.current(e.payload)).then(keep);
     listen("reconnecting", () => setReconnecting(true)).then(keep);
@@ -1164,8 +1179,14 @@ export default function App() {
   }, [joinedRoom, voiceMode, pttKey]);
 
   useEffect(() => {
-    invoke("ptt_capture", { enabled: capturing }).catch(() => {});
-  }, [capturing]);
+    invoke("ptt_capture", { enabled: capturing || capturingMute }).catch(() => {});
+  }, [capturing, capturingMute]);
+
+  // Клавиша «вкл/выкл микрофон» — тоже глобальная, тоже только в комнате.
+  useEffect(() => {
+    const active = joinedRoom !== null && voiceMode === "open" && muteKey !== null;
+    invoke("mute_set_key", { key: active ? muteKey : null }).catch(() => {});
+  }, [joinedRoom, voiceMode, muteKey]);
 
   useEffect(() => {
     if (voiceSettings) listMicrophones().then(setMics);
@@ -1701,7 +1722,12 @@ export default function App() {
                   ))}
                 </div>
                 <span className="browser-hint">
-                  {browseNote ?? (pageVideo ? "" : "Открой видео — и его можно включить в зале")}
+                  {browseNote ??
+                    (pageVideo
+                      ? ""
+                      : siteOf(browserUrl) === "yandex" && /\/video\/preview/.test(browserUrl ?? "")
+                        ? "Не нашёл, с какого сайта это видео: у Яндекса оно может быть только в его плеере"
+                        : "Открой видео — и его можно включить в зале")}
                 </span>
                 {isHost && (
                   <button className="ghost" disabled={!pageVideo} onClick={suggestFromBrowser}>
@@ -1909,6 +1935,32 @@ export default function App() {
                   Нажми и говори
                 </label>
               </fieldset>
+
+              {voiceMode === "open" && (
+                <div className="setting">
+                  <span className="setting-label">
+                    Клавиша вкл/выкл микрофона — работает и в других окнах
+                  </span>
+                  <button className="quiet" onClick={() => setCapturingMute((c) => !c)}>
+                    {capturingMute
+                      ? "Нажми клавишу или кнопку мыши…"
+                      : muteKey !== null
+                        ? `${keyName(muteKey)}, изменить`
+                        : "Назначить клавишу"}
+                  </button>
+                  {muteKey !== null && !capturingMute && (
+                    <button
+                      className="link-button"
+                      onClick={() => {
+                        setMuteKey(null);
+                        save("muteKey", "");
+                      }}
+                    >
+                      Убрать клавишу
+                    </button>
+                  )}
+                </div>
+              )}
 
               {voiceMode === "ptt" && (
                 <div className="setting">
@@ -2189,7 +2241,10 @@ export default function App() {
                 onClick={() => setMicOn((on) => !on)}
                 disabled={voiceStatus !== "connected" || deafened}
                 aria-label={micOn ? "Выключить микрофон" : "Включить микрофон"}
-                title={micOn ? "Выключить микрофон" : "Включить микрофон"}
+                title={
+                  (micOn ? "Выключить микрофон" : "Включить микрофон") +
+                  (muteKey !== null && voiceMode === "open" ? ` (${keyName(muteKey)})` : "")
+                }
               >
                 <Icon name={micOn && !deafened ? "mic" : "mic-off"} size={18} />
               </button>
