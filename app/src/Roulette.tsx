@@ -5,7 +5,12 @@ import { useEffect, useRef, useState } from "react";
 import type { Suggestion } from "./protocol";
 
 /** Сколько крутится колесо, мс (совпадает с transition в стилях). */
-export const SPIN_MS = 5200;
+export const SPIN_MS = 6000;
+/**
+ * Полных оборотов за прокрутку. Больше — и в начале колесо поворачивается
+ * за кадр на десятки градусов: глаз видит рывки, а не вращение.
+ */
+const TURNS = 4;
 
 const COLORS = ["#6E4A3A", "#3F5260", "#4E5A3C", "#5B3F5C", "#6A5130", "#3E4E4A", "#5E3A40", "#46466A"];
 const SIZE = 220;
@@ -46,7 +51,7 @@ export function RouletteWheel({
     const target = 360 - (winner + 0.5) * seg + jitter;
     const current = rotationRef.current;
     const base = current - (((current % 360) + 360) % 360);
-    const next = base + 360 * 6 + target;
+    const next = base + 360 * TURNS + target;
     rotationRef.current = next;
     setRotation(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -58,7 +63,7 @@ export function RouletteWheel({
           так колесо идёт плавно. */}
       <div
         className={winner === null ? "wheel-disk" : "wheel-disk spinning"}
-        style={{ transform: `rotate(${rotation}deg)` }}
+        style={{ transform: `rotate(${rotation}deg) translateZ(0)` }}
       >
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE}>
         <g>
