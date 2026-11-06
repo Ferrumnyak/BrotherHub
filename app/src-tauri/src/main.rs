@@ -29,6 +29,7 @@ fn main() {
                 window.on_window_event(move |event| {
                     if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
                         overlay::follow(&handle);
+                        browser::follow(&handle);
                     }
                 });
                 if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {
