@@ -11,14 +11,17 @@ mod ptt;
 mod session;
 mod sites;
 mod tools;
+mod update;
 mod video;
 
 use tauri::Manager;
 
 fn main() {
     logs::init();
+    update::cleanup();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(net::Connection::default())
         .manage(video::VideoHost::default())
         .setup(|app| {
@@ -69,7 +72,9 @@ fn main() {
             browser::browser_place,
             browser::browser_url,
             browser::browser_back,
-            browser::browser_close
+            browser::browser_close,
+            update::update_check,
+            update::update_install
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherHub");

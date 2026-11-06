@@ -29,6 +29,7 @@ import {
 import { SITES, siteOf, videoLink, type Site } from "./browse";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
+import { checkForUpdate, installUpdate, useAppVersion, useUpdate } from "./update";
 import { EmojiGlyph, RichText } from "./RichText";
 import { RouletteWheel, SPIN_MS } from "./Roulette";
 import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
@@ -268,6 +269,72 @@ export function LogsButton() {
     >
       Открыть папку с логами
     </button>
+  );
+}
+
+/** Подпись к кнопке обновления: «Обновить» или ход установки. */
+function updateLabel(installing: number | null | undefined, version: string) {
+  if (installing === undefined) return `Обновить до ${version}`;
+  if (installing === null || installing >= 1) return "Устанавливаю…";
+  return `Скачиваю ${Math.round(installing * 100)}%`;
+}
+
+/** Кнопка в шапке зала, когда вышла новая версия. */
+function UpdatePill() {
+  const u = useUpdate();
+  if (!u.available) return null;
+  return (
+    <button
+      className="ghost update-pill"
+      disabled={u.installing !== undefined}
+      onClick={installUpdate}
+      title={u.error ?? u.available.notes ?? "Скачать и поставить новую версию — приложение перезапустится"}
+    >
+      {updateLabel(u.installing, u.available.version)}
+    </button>
+  );
+}
+
+/** Карточка на экране входа, когда вышла новая версия. */
+function UpdateCard() {
+  const u = useUpdate();
+  if (!u.available) return null;
+  return (
+    <div className="update-card">
+      <div>
+        <strong>Вышла версия {u.available.version}</strong>
+        <span>{u.error ?? u.available.notes ?? "Обновится и перезапустится само"}</span>
+      </div>
+      <button
+        type="button"
+        className="primary"
+        disabled={u.installing !== undefined}
+        onClick={installUpdate}
+      >
+        {u.installing === undefined ? "Обновить" : updateLabel(u.installing, u.available.version)}
+      </button>
+    </div>
+  );
+}
+
+/** Версия и ручная проверка обновлений — в настройках. */
+function AppVersion() {
+  const version = useAppVersion();
+  const u = useUpdate();
+  return (
+    <div className="setting">
+      <span className="setting-label">BrotherHub {version ?? ""}</span>
+      {u.available ? (
+        <button className="quiet" disabled={u.installing !== undefined} onClick={installUpdate}>
+          {updateLabel(u.installing, u.available.version)}
+        </button>
+      ) : (
+        <button className="quiet" disabled={u.checking} onClick={() => checkForUpdate(true)}>
+          {u.checking ? "Проверяю…" : u.upToDate ? "Это последняя версия" : "Проверить обновления"}
+        </button>
+      )}
+      {u.error && <span className="setting-hint error-text">{u.error}</span>}
+    </div>
   );
 }
 
@@ -1441,6 +1508,7 @@ export default function App() {
 
         <div className="login-side">
           <form className="login-form" onSubmit={handleConnect}>
+            <UpdateCard />
             <h1>Войти в зал</h1>
             <label>
               Как тебя зовут
@@ -1571,6 +1639,7 @@ export default function App() {
               <p>{roomStatus}</p>
             </div>
             <div className="header-actions">
+              <UpdatePill />
               {isHost && media !== null && (
                 <button
                   className="ghost close-media"
@@ -1913,6 +1982,7 @@ export default function App() {
                 <span className="setting-label">Тема</span>
                 <ThemePicker />
               </div>
+              <AppVersion />
               <h3 className="settings-sub">Голос</h3>
               <fieldset>
                 <legend>Микрофон</legend>

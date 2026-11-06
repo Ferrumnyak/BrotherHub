@@ -69,42 +69,68 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1
 SERVER=wss://watch.example.ru
 ```
 
-### 2. Сборка
+### 2. Ключ подписи обновлений (один раз)
+
+Приложение обновляется по кнопке «Обновить» и ставит только обновления,
+подписанные твоим ключом.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\release.ps1
+powershell -ExecutionPolicy Bypass -File scripts\updater-key.ps1
 ```
 
-Скрипт проверит, что в `player-pack.json` вписан архив плеера (и
-предупредит, если он ещё не выложен на GitHub), соберёт установщик с вшитым
-адресом сервера и положит его в папку `release\`:
-`release\BrotherHub-<версия>-setup.exe`. Папка в git не попадает — оттуда
-файл удобно переслать в Telegram или Discord.
+Скрипт создаст ключ в `%USERPROFILE%\.tauri\brotherhub.key` (спросит пароль)
+и впишет открытую часть в `app/src-tauri/tauri.conf.json` — закоммить этот
+файл. Закрытый ключ и пароль никому не отдавай и сохрани копию: без них
+установленные версии не смогут обновиться по кнопке.
 
-### 3. GitHub Releases
+### 3. Сборка
 
-1. Если версия новая — подними её в `app/src-tauri/tauri.conf.json`,
-   `app/package.json` и `Cargo.toml` (`[workspace.package]`), закоммить и
-   собери заново.
-2. Поставь метку версии и отправь её на GitHub:
+Подними версию в `app/src-tauri/tauri.conf.json`, `app/package.json` и
+`Cargo.toml` (`[workspace.package]`), закоммить, затем:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Notes "Что нового — одной строкой"
+```
+
+Скрипт спросит пароль ключа (или возьмёт его из `release.env`), соберёт всё
+с вшитым адресом сервера и положит в `release\`:
+
+| Файл | Зачем |
+|---|---|
+| `BrotherHub-<версия>-setup.exe` | установщик |
+| `BrotherHub-<версия>-portable.zip` | без установки, для первого раза |
+| `BrotherHub-<версия>-portable.exe` | им обновляется portable-версия |
+| `latest.json` | по нему приложения узнают о новой версии |
+
+Текст из `-Notes` друзья увидят рядом с кнопкой «Обновить».
+
+### 4. GitHub Releases
+
+1. Поставь метку версии и отправь всё на GitHub:
 
    ```powershell
-   git tag v0.2.0
+   git tag v0.3.0
    git push origin main --tags
    ```
 
-3. На GitHub: страница репозитория → **Releases** → **Draft a new release**.
-4. **Choose a tag** → `v0.2.0`. Название — например, «BrotherHub 0.2.0».
-5. Перетащи `release\BrotherHub-0.2.0-setup.exe` в поле
-   **Attach binaries**.
-6. Нажми **Publish release**.
+2. На GitHub: **Releases** → **Draft a new release** → **Choose a tag** →
+   `v0.3.0`. Название — например, «BrotherHub 0.3.0».
+3. Перетащи в **Attach binaries** все четыре файла из таблицы выше.
+   Имена не меняй — на них ссылается `latest.json`.
+4. Оставь **Set as the latest release** включённым и нажми **Publish release**.
 
-Друзьям достаточно ссылки
-`https://github.com/Ferrumnyak/Brotherwatch/releases/latest` — она всегда
-ведёт на последнюю версию. Там же README объясняет, как установить
-и что делать с предупреждением Windows SmartScreen.
+Через несколько секунд у друзей с версией 0.3.0 и новее появится кнопка
+«Обновить до …» (в шапке зала и на экране входа, а в настройках — «Проверить
+обновления»). Нажал — скачалось, поставилось и перезапустилось само.
+
+Версии до 0.3.0 обновляться по кнопке не умеют: на них один раз нужно
+поставить новую версию вручную по ссылке
+`https://github.com/Ferrumnyak/Brotherwatch/releases/latest`.
 
 ## Без установщика (portable)
+
+`scripts\release.ps1` уже собирает portable-версию. Отдельно, без подписи и
+`latest.json` (например, для проверки у себя):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\portable.ps1
@@ -113,7 +139,8 @@ powershell -ExecutionPolicy Bypass -File scripts\portable.ps1
 Собирает папку `release\BrotherHub\` (BrotherHub.exe и THIRD-PARTY.md) и
 архив `release\BrotherHub-<версия>-portable.zip`. Распаковал — запустил
 `BrotherHub.exe`, ничего не устанавливая; плеер скачается при первом
-запуске, как и в установленной версии. Нужна Windows 10/11.
+запуске, как и в установленной версии. Обновляется portable по той же кнопке:
+приложение скачивает новый `BrotherHub.exe` и подменяет себя. Нужна Windows 10/11.
 
 ## Что делает установщик
 

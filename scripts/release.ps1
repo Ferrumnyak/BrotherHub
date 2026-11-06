@@ -1,10 +1,18 @@
-﻿# Собирает установщик BrotherHub для друзей и кладёт его в папку release\.
+﻿# Собирает релиз BrotherHub для друзей и кладёт всё в папку release\:
+#   BrotherHub-<версия>-setup.exe     — установщик;
+#   BrotherHub-<версия>-portable.zip  — без установки (для первого раза);
+#   BrotherHub-<версия>-portable.exe  — им обновляется portable-версия;
+#   latest.json                       — по нему приложения узнают о новой версии.
+# Все четыре файла выкладываются в GitHub Releases (см. docs\BUILD-INSTALLER.md).
 #
 # Запуск из корня репозитория:
-#   powershell -ExecutionPolicy Bypass -File scripts\release.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Notes "Что нового"
 #
 # Адрес сервера берётся из release.env (в git не попадает — репозиторий
 # публичный). При первом запуске файл создаётся из release.env.example.
+# Обновления подписываются ключом из scripts\updater-key.ps1.
+
+param([string]$Notes = "")
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -45,12 +53,30 @@ try {
     Write-Warning "Архив плеера пока недоступен: $($pack.url)`nВыложи его в GitHub Releases до того, как раздавать сборку, иначе у друзей не скачается плеер."
 }
 
-# ---------- Сборка ----------
+# ---------- Ключ подписи обновлений ----------
 $config = Get-Content (Join-Path $root "app\src-tauri\tauri.conf.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $config.version
+if (-not $config.plugins.updater.pubkey) {
+    throw "Нет ключа подписи обновлений. Один раз запусти scripts\updater-key.ps1."
+}
+$key = $settings["UPDATER_KEY"]
+if (-not $key) { $key = Join-Path $env:USERPROFILE ".tauri\brotherhub.key" }
+if (-not (Test-Path $key)) {
+    throw "Не нашёл закрытый ключ подписи: $key (создаётся scripts\updater-key.ps1)."
+}
+$password = $settings["UPDATER_KEY_PASSWORD"]
+if ($null -eq $password) {
+    $secure = Read-Host "Пароль ключа подписи обновлений" -AsSecureString
+    $password = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+}
+
+# ---------- Сборка ----------
 Write-Host "Собираю BrotherHub $version для сервера $server..."
 
 $env:VITE_DEFAULT_SERVER = $server
+$env:TAURI_SIGNING_PRIVATE_KEY = $key
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $password
 Push-Location (Join-Path $root "app")
 try {
     npm run bundle
@@ -59,17 +85,60 @@ try {
 finally {
     Pop-Location
     Remove-Item Env:VITE_DEFAULT_SERVER -ErrorAction SilentlyContinue
+    Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+    Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
 }
 
-# ---------- Готовый файл ----------
+# ---------- Установщик ----------
 $setup = Join-Path $root "target\release\bundle\nsis\BrotherHub_${version}_x64-setup.exe"
 if (-not (Test-Path $setup)) { throw "Не нашёл установщик: $setup" }
+if (-not (Test-Path "$setup.sig")) { throw "Не нашёл подпись установщика: $setup.sig" }
 
 $releaseDir = Join-Path $root "release"
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-$dest = Join-Path $releaseDir "BrotherHub-$version-setup.exe"
-Copy-Item $setup $dest -Force
+$setupName = "BrotherHub-$version-setup.exe"
+Copy-Item $setup (Join-Path $releaseDir $setupName) -Force
+
+# ---------- Portable: тот же exe ----------
+$exe = Join-Path $root "target\release\brotherwatch.exe"
+if (-not (Test-Path $exe)) { throw "Не нашёл $exe" }
+$portableName = "BrotherHub-$version-portable.exe"
+$portableExe = Join-Path $releaseDir $portableName
+Copy-Item $exe $portableExe -Force
+
+$folder = Join-Path $releaseDir "BrotherHub"
+if (Test-Path $folder) { Remove-Item $folder -Recurse -Force }
+New-Item -ItemType Directory -Force -Path $folder | Out-Null
+Copy-Item $exe (Join-Path $folder "BrotherHub.exe")
+Copy-Item (Join-Path $root "docs\THIRD-PARTY.md") $folder
+$zip = Join-Path $releaseDir "BrotherHub-$version-portable.zip"
+if (Test-Path $zip) { Remove-Item $zip -Force }
+Compress-Archive -Path $folder -DestinationPath $zip
+
+# ---------- latest.json ----------
+$base = "https://github.com/Ferrumnyak/Brotherwatch/releases/download/v$version"
+$latest = [ordered]@{
+    version  = $version
+    notes    = $Notes
+    pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+    platforms = [ordered]@{
+        "windows-x86_64" = [ordered]@{
+            signature = (Get-Content "$setup.sig" -Raw).Trim()
+            url       = "$base/$setupName"
+        }
+    }
+    portable = [ordered]@{
+        url    = "$base/$portableName"
+        sha256 = (Get-FileHash $portableExe -Algorithm SHA256).Hash.ToLower()
+    }
+}
+$json = $latest | ConvertTo-Json -Depth 5
+[IO.File]::WriteAllText((Join-Path $releaseDir "latest.json"), $json, (New-Object Text.UTF8Encoding($false)))
 
 Write-Host ""
-Write-Host "Готово: $dest" -ForegroundColor Green
-Write-Host "Дальше — выложить его в GitHub Releases, см. docs\BUILD-INSTALLER.md."
+Write-Host "Готово. Выложи в GitHub Releases с тегом v${version} эти файлы из release\:" -ForegroundColor Green
+Write-Host "  $setupName"
+Write-Host "  BrotherHub-$version-portable.zip"
+Write-Host "  $portableName"
+Write-Host "  latest.json"
+Write-Host "Подробно — docs\BUILD-INSTALLER.md."
