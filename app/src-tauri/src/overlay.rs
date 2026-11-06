@@ -62,7 +62,9 @@ pub async fn overlay_place(app: AppHandle, rect: Rect, session: u64) -> Result<(
 
     let window = match app.get_webview_window(LABEL) {
         Some(window) => window,
-        None => WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
+        None => {
+            crate::logs::info(format!("панель поверх видео: открываю (сеанс {session})"));
+            WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
             .title("BrotherHub")
             .initialization_script("window.__BW_VIEW = 'controls';")
             .transparent(true)
@@ -75,9 +77,11 @@ pub async fn overlay_place(app: AppHandle, rect: Rect, session: u64) -> Result<(
             .parent(&main)
             .map_err(|e| e.to_string())?
             .build()
-            .map_err(|e| e.to_string())?,
+            .map_err(|e| e.to_string())?
+        }
     };
     if stale(session) {
+        crate::logs::info(format!("панель поверх видео: сеанс {session} уже закрыт — убираю"));
         let _ = window.destroy();
         return Ok(());
     }
@@ -115,6 +119,7 @@ pub fn overlay_close(app: AppHandle, session: u64) {
     CLOSED.fetch_max(session, Ordering::SeqCst);
     *LAST.lock().unwrap() = None;
     if let Some(window) = app.get_webview_window(LABEL) {
+        crate::logs::info(format!("панель поверх видео: закрываю (сеанс {session})"));
         let _ = window.destroy();
     }
 }

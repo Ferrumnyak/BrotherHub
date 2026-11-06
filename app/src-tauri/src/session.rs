@@ -162,6 +162,9 @@ pub struct Session {
     /// некоторых сайтов mpv сообщает о промежуточных ошибках, а видео
     /// потом всё равно открывается.
     load_failed_at: Option<Instant>,
+    /// Ссылка, которую уже открывали заново после ошибки: YouTube иногда
+    /// обрывает соединение на старте, и со второго раза всё открывается.
+    retried: Option<String>,
     /// Качество ссылок: высота кадра (`None` — авто, до 1080p).
     quality: Option<u32>,
     /// После смены качества ждём загрузки, чтобы сбросить начальную позицию.
@@ -188,6 +191,7 @@ impl Session {
             last_seek: None,
             speed: 1.0,
             load_failed_at: None,
+            retried: None,
             quality: None,
             reloading: false,
             overlay_enabled: false,
@@ -454,6 +458,16 @@ impl Session {
                     "плеер не смог открыть {} — подробности в журнале mpv",
                     self.loaded.as_deref().unwrap_or("видео")
                 ));
+                // Один раз пробуем ещё — молча, без ошибки на экране.
+                if let Some(url) = self.loaded.clone() {
+                    if is_url(&url) && self.retried.as_deref() != Some(url.as_str()) {
+                        self.retried = Some(url.clone());
+                        crate::logs::info("пробую открыть ещё раз");
+                        if self.load_media(&url).await.is_ok() {
+                            return;
+                        }
+                    }
+                }
                 self.load_failed_at = Some(Instant::now());
             }
             PlayerEvent::Key(key) => {

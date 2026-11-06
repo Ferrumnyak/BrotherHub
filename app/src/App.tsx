@@ -846,6 +846,7 @@ export default function App() {
 
   async function applyFullscreen(next: boolean) {
     if (next && miniRef.current) await applyMini(false);
+    invoke("ui_log", { message: next ? "полный экран: вход" : "полный экран: выход" }).catch(() => {});
     try {
       await getCurrentWindow().setFullscreen(next);
     } catch (err) {
@@ -1355,19 +1356,6 @@ export default function App() {
         // Углы — как у области видео в интерфейсе.
         radius: Math.round((fullscreen ? 0 : mini ? 10 : 16) * k),
       }).catch(() => {});
-      // В полном экране и в мини-окне панель плеера — отдельное окно поверх низа видео.
-      if (fullscreen || mini) {
-        const h = Math.min(mini ? MINI_OVERLAY_HEIGHT : OVERLAY_HEIGHT, r.height);
-        invoke("overlay_place", {
-          session: overlaySession.current,
-          rect: {
-            x: Math.round(r.left * k),
-            y: Math.round((r.bottom - h) * k),
-            width: Math.round(r.width * k),
-            height: Math.round(h * k),
-          },
-        }).catch((err) => setError(String(err)));
-      }
     };
     update();
     if (!show || !el) return;
@@ -1380,6 +1368,46 @@ export default function App() {
       invoke("set_video_rect", { rect: null }).catch(() => {});
     };
   }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, browsing, playback?.media]);
+
+  // В полном экране и в мини-окне панель плеера — отдельное окно поверх низа
+  // области видео. Ставим его всегда в этих режимах — и над фильмом, и над
+  // трансляцией экрана. Номер сеанса запоминаем: команды от уже закрытого
+  // режима (окно меняет размер при выходе) панель заново не откроют.
+  useEffect(() => {
+    if (!fullscreen && !mini) return;
+    const el = videoRef.current;
+    if (!el) return;
+    const session = overlaySession.current;
+    const place = () => {
+      const r = el.getBoundingClientRect();
+      const k = window.devicePixelRatio || 1;
+      const h = Math.min(mini ? MINI_OVERLAY_HEIGHT : OVERLAY_HEIGHT, r.height);
+      invoke("overlay_place", {
+        session,
+        rect: {
+          x: Math.round(r.left * k),
+          y: Math.round((r.bottom - h) * k),
+          width: Math.round(r.width * k),
+          height: Math.round(h * k),
+        },
+      }).catch((err) => setError(String(err)));
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(el);
+    window.addEventListener("resize", place);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", place);
+    };
+  }, [fullscreen, mini, chatOpen]);
+
+  // Вне полного экрана и мини-окна панели быть не должно — на всякий случай
+  // закрываем ещё раз, если что-то её оставило.
+  useEffect(() => {
+    if (fullscreen || mini) return;
+    invoke("overlay_close", { session: overlaySession.current }).catch(() => {});
+  }, [fullscreen, mini]);
 
   // ----- Встроенный браузер: сайт лежит поверх области .video -----
 

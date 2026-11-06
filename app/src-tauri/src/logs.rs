@@ -96,6 +96,12 @@ fn write(level: &str, msg: &str) {
 }
 
 /// Открыть папку с логами в Проводнике.
+/// Строчка в журнал от интерфейса (что делал пользователь перед сбоем).
+#[tauri::command]
+pub fn ui_log(message: String) {
+    info(format!("интерфейс: {}", message.chars().take(200).collect::<String>()));
+}
+
 #[tauri::command]
 pub fn open_logs() -> Result<(), String> {
     let root = logs_root().ok_or("Не нашёл папку с логами.")?;

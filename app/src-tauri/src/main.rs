@@ -68,6 +68,7 @@ fn main() {
             tools::player_tools,
             tools::player_setup,
             logs::open_logs,
+            logs::ui_log,
             browser::browser_open,
             browser::browser_place,
             browser::browser_url,

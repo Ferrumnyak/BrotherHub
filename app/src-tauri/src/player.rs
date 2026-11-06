@@ -104,6 +104,8 @@ impl Player {
             "--hwdec=auto-safe",
             // Запас для онлайн-видео, чтобы не подтормаживало.
             "--cache=yes",
+            // Оборвалось соединение (бывает с YouTube) — переподключиться, а не падать.
+            "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=5",
             "--demuxer-max-bytes=150MiB",
             "--demuxer-readahead-secs=30",
             // Встроенный mpv по умолчанию не принимает клавиатуру — включаем.
@@ -463,9 +465,14 @@ fn parse_key(v: &Value) -> Option<PlayerKey> {
 
 /// Формат для yt-dlp: лучшее видео не выше `quality` строк (по умолчанию —
 /// 1080p) плюс лучший звук; если такого нет — лучшее, что есть.
+/// AV1 — только если другого нет: многие видеокарты его не декодируют,
+/// и тогда он грузит процессор.
 pub fn ytdl_format(quality: Option<u32>) -> String {
     let h = quality.unwrap_or(1080);
-    format!("bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best")
+    format!(
+        "bestvideo[height<=?{h}][vcodec!^=av01]+bestaudio/\
+         bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best"
+    )
 }
 
 /// Первый существующий файл из списка.
@@ -618,7 +625,8 @@ mod tests {
     fn quality_format() {
         assert_eq!(
             ytdl_format(None),
-            "bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
+            "bestvideo[height<=?1080][vcodec!^=av01]+bestaudio/\
+             bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
         );
         assert!(ytdl_format(Some(480)).contains("height<=?480"));
     }
