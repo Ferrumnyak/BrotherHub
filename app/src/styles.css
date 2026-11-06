@@ -2621,9 +2621,8 @@ button.browse-open.active {
   animation: reaction-fly 3.2s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
 }
 
-.reaction img {
-  width: 60px;
-  height: 60px;
+.reaction img,
+.reaction svg {
   filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
 }
 
@@ -2678,21 +2677,31 @@ button.reaction-button {
   border-radius: 50%;
 }
 
-button.reaction-button img {
-  width: 26px;
-  height: 26px;
+button.reaction-button img,
+button.reaction-button svg {
   transition: transform 0.12s;
+}
+
+/* Пауза между реакциями — кнопки чуть гаснут. */
+.reaction-picker.cooling button.reaction-button {
+  opacity: 0.4;
+}
+
+.reaction-picker button.reaction-button:disabled {
+  cursor: default;
 }
 
 button.reaction-button:hover {
   background: var(--raised-2);
 }
 
-button.reaction-button:hover img {
+button.reaction-button:hover:not(:disabled) img,
+button.reaction-button:hover:not(:disabled) svg {
   transform: scale(1.18);
 }
 
-button.reaction-button:active img {
+button.reaction-button:active:not(:disabled) img,
+button.reaction-button:active:not(:disabled) svg {
   transform: scale(0.9);
 }
 

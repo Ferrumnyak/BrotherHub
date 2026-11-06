@@ -4,15 +4,54 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { emoji3dSrc, isEmoji3d } from "./emoji";
+import { STICKERS, StickerArt } from "./stickers";
 import type { ServerMsg } from "./protocol";
 
-/** Реакции в панели плеера. */
-export const REACTIONS = ["😂", "😍", "🔥", "👍", "😱", "😭", "👏", "💀", "🍿", "🤯"];
+/** Реакции в панели плеера: эмодзи и стикеры «+вайб» / «−вайб» (`sticker:<id>`). */
+export const REACTIONS = [
+  "sticker:plus-vibe",
+  "sticker:minus-vibe",
+  "😂",
+  "🔥",
+  "😍",
+  "👍",
+  "💩",
+  "😱",
+  "😭",
+  "💀",
+  "🍿",
+  "🤯",
+];
+
+/** Пауза между своими реакциями, мс (сервер тоже не пропустит чаще). */
+const COOLDOWN_MS = 1200;
+
+/** Картинка реакции: стикер, объёмный эмодзи или просто символ. */
+function ReactionArt({ emoji, size }: { emoji: string; size: number }) {
+  if (emoji.startsWith("sticker:")) {
+    const sticker = STICKERS.find((s) => `sticker:${s.id}` === emoji);
+    if (sticker) return <StickerArt sticker={sticker} size={size} />;
+  }
+  if (isEmoji3d(emoji)) {
+    return <img src={emoji3dSrc(emoji)} alt={emoji} width={size} height={size} draggable={false} />;
+  }
+  return (
+    <span className="reaction-text" style={{ fontSize: size * 0.8 }}>
+      {emoji}
+    </span>
+  );
+}
+
+function reactionTitle(emoji: string) {
+  return emoji.startsWith("sticker:")
+    ? (STICKERS.find((s) => `sticker:${s.id}` === emoji)?.title ?? emoji)
+    : emoji;
+}
 
 /** Сколько летит одна реакция, мс. */
 const FLIGHT_MS = 3200;
 /** Больше одновременно — уже каша на экране. */
-const MAX_FLYING = 40;
+const MAX_FLYING = 24;
 
 interface Flying {
   id: number;
@@ -60,11 +99,7 @@ export function ReactionsLayer() {
           className="reaction"
           style={{ left: `${f.x}%`, ["--drift" as string]: `${f.drift}px` }}
         >
-          {isEmoji3d(f.emoji) ? (
-            <img src={emoji3dSrc(f.emoji)} alt={f.emoji} draggable={false} />
-          ) : (
-            <span className="reaction-text">{f.emoji}</span>
-          )}
+          <ReactionArt emoji={f.emoji} size={f.emoji.startsWith("sticker:") ? 84 : 60} />
           <span className="reaction-name">{f.name}</span>
         </div>
       ))}
@@ -74,11 +109,31 @@ export function ReactionsLayer() {
 
 /** Ряд кнопок-реакций для панели плеера. */
 export function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
+  const [cooling, setCooling] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const pick = (emoji: string) => {
+    if (cooling) return;
+    onPick(emoji);
+    setCooling(true);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCooling(false), COOLDOWN_MS);
+  };
   return (
-    <div className="reaction-picker" role="group" aria-label="Реакции">
+    <div
+      className={cooling ? "reaction-picker cooling" : "reaction-picker"}
+      role="group"
+      aria-label="Реакции"
+    >
       {REACTIONS.map((emoji) => (
-        <button key={emoji} className="reaction-button" onClick={() => onPick(emoji)} title={emoji}>
-          <img src={emoji3dSrc(emoji)} alt={emoji} draggable={false} />
+        <button
+          key={emoji}
+          className="reaction-button"
+          disabled={cooling}
+          onClick={() => pick(emoji)}
+          title={reactionTitle(emoji)}
+        >
+          <ReactionArt emoji={emoji} size={emoji.startsWith("sticker:") ? 32 : 26} />
         </button>
       ))}
     </div>

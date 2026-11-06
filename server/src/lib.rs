@@ -52,7 +52,8 @@ const MAX_SUGGESTIONS: usize = 30;
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 /// Субтитры к фильму обычно 50–150 КБ.
 const MAX_SUBTITLES_BYTES: usize = 768 * 1024;
-const MAX_EMOJI_LEN: usize = 16;
+/// Эмодзи или `sticker:<id>`.
+const MAX_EMOJI_LEN: usize = 32;
 /// Больше людей в одной комнате — уже не «посмотреть с друзьями».
 const MAX_ROOM_MEMBERS: usize = 16;
 const MAX_ROOMS: usize = 200;
@@ -436,7 +437,8 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, ip: IpAddr) {
     let mut ending = Ending::Lost;
     let mut messages = RateLimit::new(40.0, 20.0);
     let mut chat = RateLimit::new(6.0, 1.5);
-    let mut reactions = RateLimit::new(10.0, 4.0);
+    // Реакции: не больше 3 подряд и дальше одна в ~1,2 с — чтобы вдвоём не завалить экран.
+    let mut reactions = RateLimit::new(3.0, 0.8);
     let mut flood_warnings = 0u32;
 
     while let Some(Ok(msg)) = stream.next().await {

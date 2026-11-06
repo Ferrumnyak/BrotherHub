@@ -139,7 +139,13 @@ impl Player {
         }
         let ytdlp = find_ytdlp();
         if let Some(ytdlp) = &ytdlp {
-            cmd.arg(format!("--script-opts=ytdl_hook-ytdl_path={ytdlp}"));
+            // Ссылку сразу отдаём yt-dlp. Иначе mpv сначала пробует открыть
+            // страницу сайта сам (SoundCloud), долго ждёт ответа и до yt-dlp
+            // дело не доходит. Прямые потоки «Ю» (sites.rs) — мимо yt-dlp.
+            cmd.arg(format!(
+                "--script-opts=ytdl_hook-ytdl_path={ytdlp},ytdl_hook-try_ytdl_first=yes,\
+                 ytdl_hook-exclude=media%.u%-tv%.ru"
+            ));
         }
         // Сертификаты Mozilla + Windows, иначе часть сайтов не открывается
         // (см. certs.rs).
