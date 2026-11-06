@@ -439,6 +439,7 @@ export default function App() {
   const fullscreenRef = useRef(false);
   fullscreenRef.current = fullscreen;
   const miniRef = useRef(false);
+  const overlaySession = useRef(0);
   miniRef.current = mini;
 
   const isHost = me !== null && me === host;
@@ -848,6 +849,8 @@ export default function App() {
       return;
     }
     const win = getCurrentWindow();
+    // Новый сеанс панели поверх видео (см. overlay.rs).
+    const session = ++overlaySession.current;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const show = (visible: boolean) => {
       setControlsHidden(!visible);
@@ -898,7 +901,7 @@ export default function App() {
       active = false;
       clearTimeout(timer);
       unlisten?.();
-      invoke("overlay_close").catch(() => {});
+      invoke("overlay_close", { session }).catch(() => {});
       invoke("player_cursor", { hidden: false }).catch(() => {});
       invoke("watch_cursor", { enabled: false }).catch(() => {});
       window.removeEventListener("mousemove", poke);
@@ -1246,6 +1249,7 @@ export default function App() {
       if (fullscreen || mini) {
         const h = Math.min(mini ? MINI_OVERLAY_HEIGHT : OVERLAY_HEIGHT, r.height);
         invoke("overlay_place", {
+          session: overlaySession.current,
           rect: {
             x: Math.round(r.left * k),
             y: Math.round((r.bottom - h) * k),

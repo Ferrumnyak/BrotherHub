@@ -6,7 +6,7 @@
 //! привязано к главному окну. Окно открывается тем же интерфейсом, но с
 //! пометкой `window.__BW_VIEW = "controls"` — тогда показывается только панель.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::Deserialize;
@@ -15,10 +15,16 @@ use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, Webv
 
 const LABEL: &str = "controls";
 
-/// Нужна ли панель сейчас. Окно создаётся не мгновенно: если за это время
-/// пришла команда закрыть (вышли из полного экрана), созданное окно сразу
-/// убираем — иначе оно оставалось бы висеть поверх главного.
-static WANTED: AtomicBool = AtomicBool::new(false);
+/// Каждый вход в полный экран или мини-окно — новый «сеанс» панели с
+/// номером. Команды приходят не по порядку: «поставить панель» от сеанса,
+/// который уже закрыли (окно меняло размер при выходе из полного экрана),
+/// могла прийти после «закрыть» и заново открыть панель поверх кнопок
+/// главного окна — тогда ничего не нажималось. Такие команды отбрасываем.
+static CLOSED: AtomicU64 = AtomicU64::new(0);
+
+fn stale(session: u64) -> bool {
+    session <= CLOSED.load(Ordering::SeqCst)
+}
 
 /// Где панель относительно главного окна — чтобы ехать вслед за ним.
 static LAST: Mutex<Option<Rect>> = Mutex::new(None);
@@ -38,8 +44,10 @@ pub struct Rect {
 /// Открыть (если ещё нет) и поставить окно панели поверх видео.
 /// Окна создаём в async-команде: в синхронной Windows может зависнуть.
 #[tauri::command]
-pub async fn overlay_place(app: AppHandle, rect: Rect) -> Result<(), String> {
-    WANTED.store(true, Ordering::SeqCst);
+pub async fn overlay_place(app: AppHandle, rect: Rect, session: u64) -> Result<(), String> {
+    if stale(session) {
+        return Ok(());
+    }
     *LAST.lock().unwrap() = Some(rect);
     // Главное окно берём из сохранённого при запуске: когда в нём открыт
     // встроенный браузер (второй webview), get_webview_window("main") его не находит.
@@ -69,7 +77,7 @@ pub async fn overlay_place(app: AppHandle, rect: Rect) -> Result<(), String> {
             .build()
             .map_err(|e| e.to_string())?,
     };
-    if !WANTED.load(Ordering::SeqCst) {
+    if stale(session) {
         let _ = window.destroy();
         return Ok(());
     }
@@ -103,8 +111,8 @@ pub fn follow(app: &AppHandle) {
 }
 
 #[tauri::command]
-pub fn overlay_close(app: AppHandle) {
-    WANTED.store(false, Ordering::SeqCst);
+pub fn overlay_close(app: AppHandle, session: u64) {
+    CLOSED.fetch_max(session, Ordering::SeqCst);
     *LAST.lock().unwrap() = None;
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.destroy();
