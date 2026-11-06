@@ -908,14 +908,30 @@ html.overlay body {
   flex-direction: column;
   justify-content: flex-end;
   /* Затемнение снизу, чтобы панель читалась на любом кадре. */
-  background: linear-gradient(to top, rgba(var(--shade-rgb), 0.92) 0%, rgba(var(--shade-rgb), 0.7) 55%, rgba(var(--shade-rgb), 0) 100%);
+  /* Окно панели в полном экране — на всё видео, поэтому затемняем
+     только нижние ~220 px, а не весь кадр. */
+  background: linear-gradient(to top, rgba(var(--shade-rgb), 0.92) 0, rgba(var(--shade-rgb), 0.7) 90px, rgba(var(--shade-rgb), 0) 220px);
   opacity: 1;
   transition: opacity 0.35s ease;
+}
+
+.overlay-panel.mini {
+  background: linear-gradient(to top, rgba(var(--shade-rgb), 0.92) 0%, rgba(var(--shade-rgb), 0.7) 55%, rgba(var(--shade-rgb), 0) 100%);
 }
 
 .overlay-panel.hidden {
   opacity: 0;
   transition-duration: 0.6s;
+}
+
+/* Спрятанные кнопки не должны нажиматься случайным щелчком. */
+.overlay-panel.hidden .controls {
+  pointer-events: none;
+}
+
+html.overlay.cursor-hidden,
+html.overlay.cursor-hidden * {
+  cursor: none !important;
 }
 
 .overlay-panel .controls {
@@ -3149,4 +3165,107 @@ button.reaction-button:active:not(:disabled) svg {
 .room.controls-hidden,
 .room.controls-hidden * {
   cursor: none !important;
+}
+
+/* ---------- Своя полоса заголовка окна ---------- */
+
+.app-shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.titlebar {
+  flex: none;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--hall-deep);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.titlebar-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 12px;
+  /* Щелчки проходят к самой полосе — за неё и тянется окно. */
+  pointer-events: none;
+  font-family: "Unbounded", "Manrope", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+}
+
+.titlebar-label img {
+  width: 18px;
+  height: 18px;
+}
+
+.titlebar-buttons {
+  display: flex;
+  height: 100%;
+}
+
+.titlebar-btn {
+  width: 46px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  cursor: default;
+  transition: background 0.15s, color 0.15s;
+}
+
+.titlebar-btn svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+
+.titlebar-btn:hover {
+  background: var(--quiet-hover);
+  color: var(--text);
+}
+
+.titlebar-btn:active {
+  background: var(--raised-2);
+}
+
+.titlebar-btn.close:hover {
+  background: var(--velvet);
+  color: #fff;
+}
+
+html.is-fullscreen .titlebar {
+  display: none;
+}
+
+html.is-mini .titlebar {
+  height: 26px;
+}
+
+html.is-mini .titlebar-label span {
+  display: none;
+}
+
+html.is-mini .titlebar-btn {
+  width: 36px;
 }

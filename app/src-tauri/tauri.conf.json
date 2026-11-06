@@ -18,6 +18,7 @@
         "minWidth": 480,
         "minHeight": 320,
         "backgroundColor": "#191416",
+        "decorations": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --auto-accept-camera-and-microphone-capture"
       }
     ],

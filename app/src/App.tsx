@@ -95,8 +95,6 @@ function people(n: number): string {
   return `${n} ${word}`;
 }
 
-/** Высота панели плеера поверх видео в полном экране, CSS-пиксели. */
-const OVERLAY_HEIGHT = 150;
 /** Высота панели поверх видео в мини-окне. */
 const MINI_OVERLAY_HEIGHT = 84;
 /** Размер мини-окна (внутренняя часть, без заголовка). */
@@ -195,6 +193,18 @@ function save(key: string, value: string) {
   } catch {
     /* не страшно, просто не запомним */
   }
+}
+
+/** Постоянный случайный номер этого устройства: по нему сервер узнаёт
+ *  того, кто создал комнату, и возвращает ему пульт. */
+function deviceId(): string {
+  let id = load("device", "");
+  if (!/^[0-9a-f]{32}$/.test(id)) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    id = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    save("device", id);
+  }
+  return id;
 }
 
 function send(msg: ClientMsg) {
@@ -485,6 +495,14 @@ export default function App() {
   const [members, setMembers] = useState<Member[]>([]);
   const [playback, setPlayback] = useState<PlaybackState | null>(null);
   const [player, setPlayer] = useState<PlayerStatus>({ running: false, loaded: null });
+  // Плеер запустился — возвращаем громкость, которая была в прошлый раз.
+  useEffect(() => {
+    if (!player.running) return;
+    const v = Number(load("playerVolume", ""));
+    if (load("playerVolume", "") !== "" && Number.isFinite(v)) {
+      control({ type: "volume", value: Math.min(Math.max(v, 0), 130) }).catch(() => {});
+    }
+  }, [player.running]);
   const [lines, setLines] = useState<ChatLine[]>([]);
   const linesRef = useRef(lines);
   linesRef.current = lines;
@@ -503,6 +521,12 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(false);
   // Мини-окно поверх всех окон: только видео и короткая панель.
   const [mini, setMini] = useState(false);
+  // Полоса заголовка (TitleBar) прячется в полном экране и сжимается в мини-окне.
+  useEffect(() => {
+    const html = document.documentElement;
+    html.classList.toggle("is-fullscreen", fullscreen);
+    html.classList.toggle("is-mini", mini);
+  }, [fullscreen, mini]);
   const miniRestore = useRef<{
     size: PhysicalSize;
     position: PhysicalPosition;
@@ -950,6 +974,7 @@ export default function App() {
         password: password || null,
         avatar: myAvatar,
         resume,
+        device: deviceId(),
       });
     } catch (err) {
       setError(String(err));
@@ -1297,7 +1322,10 @@ export default function App() {
     const show = (visible: boolean) => {
       setControlsHidden(!visible);
       emit("overlay-visible", visible).catch(() => {});
-      invoke("overlay_interactive", { interactive: visible }).catch(() => {});
+      // В полном экране панель накрывает всё видео и всегда ловит мышь:
+      // только так можно спрятать курсор (над mpv он не прячется).
+      // В мини-окне спрятанная панель пропускает клики к окну.
+      invoke("overlay_interactive", { interactive: mini ? visible : true }).catch(() => {});
       // В полном экране вместе с панелью прячем и курсор.
       if (!mini) invoke("player_cursor", { hidden: !visible }).catch(() => {});
     };
@@ -1868,7 +1896,9 @@ export default function App() {
     const place = () => {
       const r = el.getBoundingClientRect();
       const k = window.devicePixelRatio || 1;
-      const h = Math.min(mini ? MINI_OVERLAY_HEIGHT : OVERLAY_HEIGHT, r.height);
+      // Полный экран — панель на всё видео (чтобы прятать курсор),
+      // мини-окно — только полоса снизу.
+      const h = mini ? Math.min(MINI_OVERLAY_HEIGHT, r.height) : r.height;
       invoke("overlay_place", {
         session,
         rect: {
@@ -2876,6 +2906,14 @@ export default function App() {
                         save("panelKey", k);
                       }}
                       onClose={() => setAdminOpen(false)}
+                      onSpinNow={() =>
+                        send({
+                          type: "spin",
+                          now: true,
+                          weights: spinWeights(suggestions, weights),
+                          key: panelKey || null,
+                        }).catch(() => {})
+                      }
                     />
                   ) : null
                 }
@@ -3166,6 +3204,7 @@ function AdminPanel({
   onClose,
   panelKey,
   onKey,
+  onSpinNow,
 }: {
   list: Suggestion[];
   weights: Map<number, number>;
@@ -3174,6 +3213,7 @@ function AdminPanel({
   onClose: () => void;
   panelKey: string;
   onKey: (key: string) => void;
+  onSpinNow: () => void;
 }) {
   const fixed = list.filter((x) => weights.has(x.id));
   const fixedSum = fixed.reduce((sum, x) => sum + (weights.get(x.id) ?? 0), 0);
@@ -3234,6 +3274,9 @@ function AdminPanel({
         </span>
         <button className="quiet" onClick={onReset}>
           Честно
+        </button>
+        <button className="quiet" onClick={onSpinNow} disabled={list.length === 0}>
+          Крутить сейчас
         </button>
       </div>
     </div>
@@ -3853,6 +3896,12 @@ export function ControlsOverlay() {
     };
   }, []);
 
+  // Панель спряталась — прячем и курсор (в полном экране окно панели
+  // накрывает всё видео).
+  useEffect(() => {
+    document.documentElement.classList.toggle("cursor-hidden", !visible && !state?.mini);
+  }, [visible, state?.mini]);
+
   if (!state) return null;
 
   return (
@@ -3860,6 +3909,12 @@ export function ControlsOverlay() {
       className={["overlay-panel", state.mini && "mini", !visible && "hidden"]
         .filter(Boolean)
         .join(" ")}
+      onDoubleClick={(e) => {
+        // Двойной щелчок по картинке (не по кнопкам) — выйти из полного экрана.
+        if (!state.mini && !(e.target as HTMLElement).closest(".controls")) {
+          emit("overlay-key", "exit-fullscreen").catch(() => {});
+        }
+      }}
     >
       <PlayerControls
         onHover={(over) => emit("overlay-hover", over).catch(() => {})}
@@ -3964,6 +4019,7 @@ function PlayerControls({
   const onVolume = (value: number) => {
     setVolumeDrag(value);
     send({ type: "volume", value });
+    save("playerVolume", String(value));
     clearTimeout(volumeTimer.current);
     // Отдаём управление обратно плееру, когда mpv точно применил громкость.
     volumeTimer.current = setTimeout(() => setVolumeDrag(null), 800);

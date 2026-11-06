@@ -43,9 +43,12 @@ fn main() {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
                         if tray::close_to_tray() {
-                            api.prevent_close();
                             tray::hide_app(&handle);
+                        } else {
+                            // Сначала выходим из комнаты, потом закрываемся.
+                            net::quit(&handle);
                         }
                         return;
                     }

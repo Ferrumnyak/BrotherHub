@@ -4,6 +4,7 @@ import App, { ControlsOverlay } from "./App";
 import PlayerSetup from "./PlayerSetup";
 import { ReactionsLayer } from "./Reactions";
 import { AppContextMenu, blockBrowserMenu } from "./ContextMenu";
+import { TitleBar } from "./TitleBar";
 // Шрифты лежат внутри приложения — работают и без интернета.
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -44,12 +45,15 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     ) : view === "reactions" ? (
       <ReactionsLayer />
     ) : (
-      <>
-        <PlayerSetup>
-          <App />
-        </PlayerSetup>
+      <div className="app-shell">
+        <TitleBar />
+        <div className="app-body">
+          <PlayerSetup>
+            <App />
+          </PlayerSetup>
+        </div>
         <AppContextMenu />
-      </>
+      </div>
     )}
   </React.StrictMode>,
 );

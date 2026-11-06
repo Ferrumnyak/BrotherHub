@@ -12,7 +12,7 @@
 
 use std::{
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -20,7 +20,7 @@ use std::{
 
 use brotherwatch_shared::{ClientMsg, ServerMsg};
 use futures_util::{SinkExt, StreamExt};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::{net::TcpStream, sync::mpsc, sync::Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -64,6 +64,7 @@ pub async fn connect(
     password: Option<String>,
     avatar: Option<String>,
     resume: Option<String>,
+    device: Option<String>,
 ) -> Result<(), String> {
     let my_generation = conn.generation.fetch_add(1, Ordering::SeqCst) + 1;
     // Было старое подключение — выходим из той комнаты по-честному.
@@ -88,6 +89,7 @@ pub async fn connect(
         password: password.filter(|p| !p.is_empty()),
         resume: resume.filter(|t| !t.is_empty()),
         avatar,
+        device: device.filter(|d| !d.is_empty()),
     };
     *conn.token.lock().unwrap() = None;
     tauri::async_runtime::spawn(supervise(Supervisor {
@@ -118,6 +120,26 @@ pub async fn disconnect(
     }
     session.lock().await.disconnected();
     Ok(())
+}
+
+/// Закрыть приложение, сначала честно выйдя из комнаты: сервер сразу
+/// освобождает место, а не ждёт 30 секунд возвращения.
+pub fn quit(app: &AppHandle) {
+    static QUITTING: AtomicBool = AtomicBool::new(false);
+    if QUITTING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let conn = app.state::<Connection>();
+        conn.generation.fetch_add(1, Ordering::SeqCst);
+        if let Some(tx) = conn.tx.lock().await.take() {
+            let _ = tx.send(ClientMsg::Leave);
+            // Даём сообщению уйти на сервер.
+            tokio::time::sleep(Duration::from_millis(400)).await;
+        }
+        app.exit(0);
+    });
 }
 
 #[tauri::command]

@@ -81,7 +81,7 @@ export type ClientMsg =
   | { type: "sync"; position: number; paused: boolean }
   | { type: "transfer_host"; to: MemberId }
   | { type: "kick"; id: MemberId }
-  | { type: "spin"; weights?: Array<[number, number]> }
+  | { type: "spin"; weights?: Array<[number, number]>; now?: boolean; key?: string | null }
   | { type: "clear_media" }
   | { type: "set_subtitles"; subtitles: SubtitleFile | null };
 
