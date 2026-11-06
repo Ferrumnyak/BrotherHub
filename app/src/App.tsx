@@ -26,6 +26,7 @@ import {
   type Track,
   type VoiceAccess,
 } from "./protocol";
+import { SITES, siteOf, videoLink, type Site } from "./browse";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
 import { EmojiGlyph, RichText } from "./RichText";
@@ -270,6 +271,30 @@ export function LogsButton() {
   );
 }
 
+/** Плитки площадок для выбора видео. */
+function SitePicker({ onPick, isHost }: { onPick: (site: Site) => void; isHost: boolean }) {
+  return (
+    <div className="site-picker">
+      <p className="site-picker-lead">
+        {isHost
+          ? "Выбери площадку, найди видео и включи его для всех"
+          : "Выбери площадку и найди, что предложить"}
+      </p>
+      <div className="site-tiles">
+        {SITES.map((site) => (
+          <button key={site.id} className="site-tile" onClick={() => onPick(site)}>
+            <span className="site-mark big" style={{ background: site.color }}>
+              {site.mark}
+            </span>
+            <span className="site-name">{site.title}</span>
+            <span className="site-hint">{site.hint}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Левая половина экрана входа: экран, свет лампы и ряд кресел. */
 export function LoginArt() {
   return (
@@ -326,6 +351,10 @@ export default function App() {
   const [sharing, setSharing] = useState(false);
   /** Открыто окно выбора, что показывать. */
   const [picking, setPicking] = useState(false);
+  // Выбор видео на площадках: плитки площадок или открытый сайт.
+  const [browsing, setBrowsing] = useState<"pick" | "site" | null>(null);
+  const [browserUrl, setBrowserUrl] = useState<string | null>(null);
+  const [browseNote, setBrowseNote] = useState<string | null>(null);
   const screenRef = useRef<HTMLVideoElement>(null);
   // Что посмотреть: общий список, рулетка и вкладка справа.
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
@@ -1186,6 +1215,7 @@ export default function App() {
       !screenShare &&
       !sharing &&
       !picking &&
+      browsing === null &&
       (playback?.media ?? null) !== null;
     const update = () => {
       if (!show || !el) {
@@ -1227,7 +1257,89 @@ export default function App() {
       window.removeEventListener("resize", update);
       invoke("set_video_rect", { rect: null }).catch(() => {});
     };
-  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, playback?.media]);
+  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, browsing, playback?.media]);
+
+  // ----- Встроенный браузер: сайт лежит поверх области .video -----
+
+  function videoArea() {
+    const el = videoRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    const k = window.devicePixelRatio || 1;
+    return {
+      x: Math.round(r.left * k),
+      y: Math.round(r.top * k),
+      width: Math.round(r.width * k),
+      height: Math.round(r.height * k),
+    };
+  }
+
+  async function openSite(site: Site) {
+    const rect = videoArea();
+    if (!rect) return;
+    setBrowseNote(null);
+    setBrowserUrl(site.home);
+    setBrowsing("site");
+    try {
+      await invoke("browser_open", { url: site.home, rect });
+    } catch (err) {
+      setError(String(err));
+      setBrowsing("pick");
+    }
+  }
+
+  function closeBrowser() {
+    setBrowsing(null);
+    setBrowseNote(null);
+  }
+
+  // В полном экране, мини-окне и вне зала браузер не нужен.
+  useEffect(() => {
+    if (fullscreen || mini || joinedRoom === null) setBrowsing(null);
+  }, [fullscreen, mini, joinedRoom]);
+
+  useEffect(() => {
+    if (browsing !== "site") return;
+    const el = videoRef.current;
+    const update = () => {
+      const rect = videoArea();
+      if (rect) invoke("browser_place", { rect }).catch(() => {});
+    };
+    const observer = new ResizeObserver(update);
+    if (el) observer.observe(el);
+    window.addEventListener("resize", update);
+    const poll = setInterval(() => {
+      invoke<string | null>("browser_url")
+        .then((u) => setBrowserUrl(u))
+        .catch(() => {});
+    }, 600);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+      clearInterval(poll);
+      invoke("browser_close").catch(() => {});
+      setBrowserUrl(null);
+    };
+  }, [browsing]);
+
+  const pageVideo = browsing === "site" ? videoLink(browserUrl) : null;
+
+  async function watchFromBrowser() {
+    if (!pageVideo) return;
+    if (!isHost) {
+      await suggestFromBrowser();
+      return;
+    }
+    closeBrowser();
+    await run(() => invoke("open_url", { url: pageVideo }));
+  }
+
+  async function suggestFromBrowser() {
+    if (!pageVideo) return;
+    await run(() => send({ type: "suggest", media: pageVideo }));
+    setBrowseNote("Добавлено в «Что посмотреть»");
+    setTimeout(() => setBrowseNote(null), 2500);
+  }
 
   // ----- Связь с панелью поверх видео -----
 
@@ -1466,6 +1578,15 @@ export default function App() {
         )}
         {!fullscreen && !mini && (
           <form className="source-bar" onSubmit={handleOpenUrl}>
+            <button
+              type="button"
+              className={browsing ? "browse-open active" : "browse-open"}
+              onClick={() => (browsing ? closeBrowser() : setBrowsing("pick"))}
+              title="Найти видео на YouTube, VK Видео, Rutube и «Ю»"
+            >
+              <Icon name="grid" size={18} />
+              Обзор
+            </button>
             <label className="source-input">
               <Icon name="link" size={18} />
               <input
@@ -1519,8 +1640,66 @@ export default function App() {
           </div>
         )}
 
+        {!fullscreen && !mini && browsing !== null && (
+          <div className="browser-bar">
+            {browsing === "site" ? (
+              <>
+                <button
+                  className="ghost icon-only"
+                  onClick={() => invoke("browser_back").catch(() => {})}
+                  title="Назад"
+                  aria-label="Назад"
+                >
+                  <Icon name="back" size={18} />
+                </button>
+                <div className="site-chips" role="tablist" aria-label="Площадки">
+                  {SITES.map((site) => (
+                    <button
+                      key={site.id}
+                      role="tab"
+                      aria-selected={siteOf(browserUrl) === site.id}
+                      className={siteOf(browserUrl) === site.id ? "site-chip active" : "site-chip"}
+                      onClick={() => openSite(site)}
+                    >
+                      <span className="site-mark" style={{ background: site.color }}>
+                        {site.mark}
+                      </span>
+                      {site.title}
+                    </button>
+                  ))}
+                </div>
+                <span className="browser-hint">
+                  {browseNote ?? (pageVideo ? "" : "Открой видео — и его можно включить в зале")}
+                </span>
+                {isHost && (
+                  <button className="ghost" disabled={!pageVideo} onClick={suggestFromBrowser}>
+                    В список
+                  </button>
+                )}
+                <button className="go" disabled={!pageVideo} onClick={watchFromBrowser}>
+                  {isHost ? "Смотреть в зале" : "Предложить"}
+                </button>
+              </>
+            ) : (
+              <span className="browser-title">Где ищем, что посмотреть?</span>
+            )}
+            <button
+              className="ghost icon-only"
+              onClick={closeBrowser}
+              title="Закрыть обзор"
+              aria-label="Закрыть обзор"
+            >
+              <Icon name="close" size={18} />
+            </button>
+          </div>
+        )}
+
         <div className="video" ref={videoRef}>
-          {screenShare && !sharing ? (
+          {browsing === "site" ? (
+            <div className="video-placeholder">Открываю сайт…</div>
+          ) : browsing === "pick" ? (
+            <SitePicker onPick={openSite} isHost={isHost} />
+          ) : screenShare && !sharing ? (
             <>
               <video ref={screenRef} className="screen-share" autoPlay playsInline muted />
               <span className="screen-badge">
@@ -1543,8 +1722,8 @@ export default function App() {
                 ? "Загружаю видео…"
                 : `Сейчас смотрят «${mediaTitle(media)}»`
               : isHost
-                ? "Вставь ссылку сверху — видео начнётся у всех одновременно"
-                : `Ждём, пока ${hostName ?? "ведущий"} выберет, что смотрим`}
+                ? "Нажми «Обзор» или вставь ссылку сверху — видео начнётся у всех одновременно"
+                : `Ждём, пока ${hostName ?? "ведущий"} выберет, что смотрим. А пока можно предложить своё через «Обзор»`}
           </div>
           )}
         </div>
@@ -2663,6 +2842,8 @@ type IconName =
   | "cast"
   | "smile"
   | "dice"
+  | "grid"
+  | "back"
   | "sticker";
 
 const ICON_PATHS: Record<IconName, ReactElement> = {
@@ -2884,6 +3065,20 @@ const ICON_PATHS: Record<IconName, ReactElement> = {
     <>
       <line x1="5" y1="12" x2="19" y2="12" />
       <polyline points="13 6 19 12 13 18" />
+    </>
+  ),
+  grid: (
+    <>
+      <rect x="4" y="4" width="7" height="7" rx="2" />
+      <rect x="13" y="4" width="7" height="7" rx="2" />
+      <rect x="4" y="13" width="7" height="7" rx="2" />
+      <rect x="13" y="13" width="7" height="7" rx="2" />
+    </>
+  ),
+  back: (
+    <>
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="11 6 5 12 11 18" />
     </>
   ),
 };

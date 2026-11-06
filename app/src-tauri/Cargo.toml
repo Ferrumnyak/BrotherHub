@@ -14,7 +14,8 @@ serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-util", "process", "fs"] }
 futures-util.workspace = true
-tauri = { version = "2", features = [] }
+# unstable — дочерний webview в главном окне (встроенный браузер, browser.rs).
+tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-dialog = "2"
 # native-tls — шифрование (wss://) через встроенный в Windows SChannel.
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }

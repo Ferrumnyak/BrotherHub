@@ -1,6 +1,7 @@
 // В релизной сборке не открывать лишнее консольное окно на Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod browser;
 mod certs;
 mod logs;
 mod net;
@@ -53,7 +54,12 @@ fn main() {
             ptt::ptt_capture,
             tools::player_tools,
             tools::player_setup,
-            logs::open_logs
+            logs::open_logs,
+            browser::browser_open,
+            browser::browser_place,
+            browser::browser_url,
+            browser::browser_back,
+            browser::browser_close
         ])
         .run(tauri::generate_context!())
         .expect("не удалось запустить BrotherHub");
