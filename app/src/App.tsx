@@ -785,13 +785,18 @@ export default function App() {
         const restore = miniRestore.current;
         miniRestore.current = null;
         await win.setAlwaysOnTop(false);
+        // Мини-окно развернули на весь экран — сначала вернуть обычное
+        // состояние: размер у развёрнутого окна Windows меняет неправильно,
+        // и интерфейс переставал реагировать на клики.
+        const grown = await win.isMaximized();
+        if (grown) await win.unmaximize();
         setMini(false);
         setChatOpen(restore?.chat ?? true);
         if (restore) {
           await win.setSize(restore.size);
           await win.setPosition(restore.position);
-          if (restore.maximized) await win.maximize();
         }
+        if (grown || restore?.maximized) await win.maximize();
       }
     } catch (err) {
       setError(String(err));
@@ -848,6 +853,8 @@ export default function App() {
       setControlsHidden(!visible);
       emit("overlay-visible", visible).catch(() => {});
       invoke("overlay_interactive", { interactive: visible }).catch(() => {});
+      // В полном экране вместе с панелью прячем и курсор.
+      if (!mini) invoke("player_cursor", { hidden: !visible }).catch(() => {});
     };
     const poke = () => {
       show(true);
@@ -892,6 +899,7 @@ export default function App() {
       clearTimeout(timer);
       unlisten?.();
       invoke("overlay_close").catch(() => {});
+      invoke("player_cursor", { hidden: false }).catch(() => {});
       invoke("watch_cursor", { enabled: false }).catch(() => {});
       window.removeEventListener("mousemove", poke);
       window.removeEventListener("keydown", poke);
@@ -1300,6 +1308,23 @@ export default function App() {
   useEffect(() => {
     if (fullscreen || mini || joinedRoom === null) setBrowsing(null);
   }, [fullscreen, mini, joinedRoom]);
+
+  // Мини-окно развернули на весь экран — значит, мини-режим больше не нужен.
+  useEffect(() => {
+    if (!mini) return;
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    win
+      .onResized(async () => {
+        if (miniRef.current && (await win.isMaximized())) applyMini(false);
+      })
+      .then((u) => (active ? (unlisten = u) : u()));
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [mini]);
 
   useEffect(() => {
     if (browsing !== "site") return;

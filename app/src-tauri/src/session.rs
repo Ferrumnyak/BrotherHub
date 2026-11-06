@@ -963,6 +963,16 @@ pub async fn player_control(
     session.lock().await.control(control)
 }
 
+/// Курсор над видео: прячем, пока в полном экране скрыта панель.
+#[tauri::command]
+pub async fn player_cursor(session: State<'_, SharedSession>, hidden: bool) -> Result<(), String> {
+    if let Some(player) = session.lock().await.player.as_ref() {
+        let mode = if hidden { "always" } else { "1000" };
+        player.command(serde_json::json!(["set_property", "cursor-autohide", mode]));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_quality(
     session: State<'_, SharedSession>,

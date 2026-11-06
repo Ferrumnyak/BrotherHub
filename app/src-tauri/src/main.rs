@@ -25,6 +25,12 @@ fn main() {
             // Окно для встроенного видео (setup выполняется в главном потоке).
             if let Some(window) = app.get_webview_window("main") {
                 app.manage(overlay::MainWindow(window.clone()));
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)) {
+                        overlay::follow(&handle);
+                    }
+                });
                 if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {
                     logs::warn(format!("видео будет в отдельном окне: {e}"));
                 }
@@ -46,6 +52,7 @@ fn main() {
             session::player_control,
             session::close_media,
             session::set_quality,
+            session::player_cursor,
             video::set_video_rect,
             video::watch_cursor,
             overlay::overlay_place,

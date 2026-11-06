@@ -2489,4 +2489,37 @@ button.browse-open.active {
   * {
     transition: none !important;
   }
+
+  /* Плавное появление и скрытие панели — не движение, его оставляем. */
+  .overlay-panel {
+    transition: opacity 0.3s ease !important;
+  }
+
+  .overlay-panel.hidden {
+    transition: opacity 0.8s ease !important;
+  }
+}
+
+/* Панель в полном экране и мини-окне: появляется быстро, тает медленно. */
+.overlay-panel {
+  transition: opacity 0.3s ease;
+}
+
+.overlay-panel.hidden {
+  transition: opacity 0.8s ease;
+}
+
+.overlay-panel .controls {
+  transition: transform 0.3s ease;
+}
+
+.overlay-panel.hidden .controls {
+  transform: translateY(8px);
+  transition: transform 0.8s ease;
+}
+
+/* В полном экране без движения мыши курсор не нужен. */
+.room.controls-hidden,
+.room.controls-hidden * {
+  cursor: none !important;
 }
