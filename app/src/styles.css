@@ -2535,6 +2535,19 @@ button.browse-open.active {
   color: var(--velvet);
 }
 
+.login-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  color: var(--dim);
+  font-size: 12.5px;
+}
+
+.login-version .link-button {
+  margin-top: 0;
+}
+
 .setting-hint {
   font-size: 12px;
   line-height: 1.4;

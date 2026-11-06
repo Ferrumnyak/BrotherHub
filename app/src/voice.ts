@@ -207,8 +207,20 @@ export class VoiceClient {
     }
 
     const [video] = stream.getVideoTracks();
-    const [audio] = stream.getAudioTracks();
-    this.myShare = stream.getTracks();
+    let audio: MediaStreamTrack | undefined = stream.getAudioTracks()[0];
+    // Весь экран — это звук всей системы: туда попадают голоса друзей из
+    // голосового чата и звук фильма из плеера, и друзья слышат сами себя.
+    // Вычесть звук BrotherHub WebView2 пока не умеет, поэтому со всего
+    // экрана звук не берём — только когда показывают отдельное окно.
+    const surface = (video?.getSettings() as { displaySurface?: string } | undefined)?.displaySurface;
+    if (audio && surface === "monitor") {
+      audio.stop();
+      audio = undefined;
+      this.cb.onError(
+        "Показ всего экрана — без звука, иначе друзья слышат сами себя. Нужен звук — покажи отдельное окно.",
+      );
+    }
+    this.myShare = stream.getTracks().filter((t) => t.readyState !== "ended");
     // «Прекратить показ» на панели Windows или закрытое окно — заканчиваем.
     video?.addEventListener("ended", () => this.stopScreenShare());
     if (video) video.contentHint = "motion";

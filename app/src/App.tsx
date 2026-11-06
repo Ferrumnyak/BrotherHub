@@ -317,6 +317,28 @@ function UpdateCard() {
   );
 }
 
+/** Версия и «Проверить обновления» внизу экрана входа. */
+function LoginVersion() {
+  const version = useAppVersion();
+  const u = useUpdate();
+  return (
+    <div className="login-version">
+      <span>BrotherHub {version ?? ""}</span>
+      {!u.available && (
+        <button
+          type="button"
+          className="link-button"
+          disabled={u.checking}
+          onClick={() => checkForUpdate(true)}
+        >
+          {u.checking ? "Проверяю…" : u.upToDate ? "Это последняя версия" : "Проверить обновления"}
+        </button>
+      )}
+      {u.error && <span className="error-text">{u.error}</span>}
+    </div>
+  );
+}
+
 /** Версия и ручная проверка обновлений — в настройках. */
 function AppVersion() {
   const version = useAppVersion();
@@ -1564,6 +1586,7 @@ export default function App() {
               <LogsButton />
               </div>
             </details>
+            <LoginVersion />
 
             <details className="server-settings" open={showThemes}>
               <summary
