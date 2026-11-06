@@ -19,13 +19,21 @@ const LABEL: &str = "browser";
 const SITES: &[&str] = &["youtube.com", "vkvideo.ru", "vk.com", "rutube.ru", "u-tv.ru"];
 
 /// Где показать браузер — в физических пикселях окна.
+/// `zoom` — масштаб страниц: в узкой области сайты уменьшаем, чтобы они
+/// помещались по ширине без прокрутки вбок.
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Area {
     x: i32,
     y: i32,
     width: u32,
     height: u32,
+    #[serde(default)]
+    zoom: Option<f64>,
 }
+
+/// Простой «блокировщик рекламы»: прячет рекламные блоки и пропускает
+/// рекламу в плеере YouTube. Сеть не трогаем — только страницу.
+const ADBLOCK: &str = include_str!("adblock.js");
 
 fn allowed(url: &Url) -> bool {
     url.scheme() == "https"
@@ -50,7 +58,9 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
     }
     let window = app.get_window("main").ok_or("Главное окно не найдено")?;
     let handle = app.clone();
-    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(url)).on_new_window(
+    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(url))
+        .initialization_script(ADBLOCK)
+        .on_new_window(
         move |url, _features| {
             // Ссылки «в новом окне» открываем здесь же.
             let handle = handle.clone();
@@ -62,7 +72,7 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
             NewWindowResponse::Deny
         },
     );
-    window
+    let view = window
         .add_child(
             builder,
             PhysicalPosition::new(rect.x, rect.y),
@@ -72,10 +82,16 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
             logs::warn(format!("браузер не открылся: {e}"));
             format!("Не получилось открыть сайт: {e}")
         })?;
+    if let Some(zoom) = rect.zoom {
+        let _ = view.set_zoom(zoom);
+    }
     Ok(())
 }
 
 fn place(view: &tauri::Webview, rect: Area) -> Result<(), String> {
+    if let Some(zoom) = rect.zoom {
+        let _ = view.set_zoom(zoom);
+    }
     view.set_position(PhysicalPosition::new(rect.x, rect.y))
         .map_err(|e| e.to_string())?;
     view.set_size(PhysicalSize::new(rect.width.max(1), rect.height.max(1)))

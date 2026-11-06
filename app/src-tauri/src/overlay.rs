@@ -9,6 +9,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Deserialize;
+use tauri::WebviewWindow;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
 const LABEL: &str = "controls";
@@ -17,6 +18,9 @@ const LABEL: &str = "controls";
 /// пришла команда закрыть (вышли из полного экрана), созданное окно сразу
 /// убираем — иначе оно оставалось бы висеть поверх главного.
 static WANTED: AtomicBool = AtomicBool::new(false);
+
+/// Главное окно приложения (сохраняется в `main.rs` при запуске).
+pub struct MainWindow(pub WebviewWindow);
 
 /// Прямоугольник в физических пикселях относительно окна приложения.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -32,7 +36,13 @@ pub struct Rect {
 #[tauri::command]
 pub async fn overlay_place(app: AppHandle, rect: Rect) -> Result<(), String> {
     WANTED.store(true, Ordering::SeqCst);
-    let main = app.get_webview_window("main").ok_or("нет главного окна")?;
+    // Главное окно берём из сохранённого при запуске: когда в нём открыт
+    // встроенный браузер (второй webview), get_webview_window("main") его не находит.
+    let main = app
+        .try_state::<MainWindow>()
+        .ok_or("нет главного окна")?
+        .0
+        .clone();
     let origin = main.inner_position().map_err(|e| e.to_string())?;
     let position = PhysicalPosition::new(origin.x + rect.x, origin.y + rect.y);
     let size = PhysicalSize::new(rect.width.max(1), rect.height.max(1));

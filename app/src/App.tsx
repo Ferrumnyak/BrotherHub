@@ -1271,6 +1271,9 @@ export default function App() {
       y: Math.round(r.top * k),
       width: Math.round(r.width * k),
       height: Math.round(r.height * k),
+      // Сайты рассчитаны на широкое окно: в узкой области уменьшаем страницу,
+      // чтобы она помещалась по ширине (как будто окно шириной ~1280).
+      zoom: Math.round(Math.min(1, Math.max(0.6, r.width / 1280)) * 100) / 100,
     };
   }
 

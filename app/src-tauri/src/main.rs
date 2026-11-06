@@ -24,6 +24,7 @@ fn main() {
         .setup(|app| {
             // Окно для встроенного видео (setup выполняется в главном потоке).
             if let Some(window) = app.get_webview_window("main") {
+                app.manage(overlay::MainWindow(window.clone()));
                 if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {
                     logs::warn(format!("видео будет в отдельном окне: {e}"));
                 }
