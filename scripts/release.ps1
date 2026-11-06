@@ -64,12 +64,45 @@ if (-not $key) { $key = Join-Path $env:USERPROFILE ".tauri\brotherhub.key" }
 if (-not (Test-Path $key)) {
     throw "Не нашёл закрытый ключ подписи: $key (создаётся scripts\updater-key.ps1)."
 }
-$password = $settings["UPDATER_KEY_PASSWORD"]
-if ($null -eq $password) {
-    $secure = Read-Host "Пароль ключа подписи обновлений" -AsSecureString
-    $password = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+# Пароль проверяем сразу, подписав пробный файл, — а не через пять минут
+# сборки. Неверный — спрашиваем ещё раз.
+function Test-KeyPassword([string]$pass) {
+    $probe = Join-Path $env:TEMP "brotherhub-key-check.txt"
+    Set-Content -Path $probe -Value "check" -Encoding ASCII
+    $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $pass
+    Push-Location (Join-Path $root "app")
+    try {
+        npm run --silent tauri signer sign -- -f "$key" "$probe" *> $null
+        return ($LASTEXITCODE -eq 0)
+    }
+    finally {
+        Pop-Location
+        Remove-Item $probe, "$probe.sig" -ErrorAction SilentlyContinue
+        Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
+    }
 }
+
+$password = $settings["UPDATER_KEY_PASSWORD"]
+if ($null -ne $password -and -not (Test-KeyPassword $password)) {
+    Write-Warning "Пароль из release.env не подходит к ключу."
+    $password = $null
+}
+$tries = 0
+while ($null -eq $password) {
+    $secure = Read-Host "Пароль ключа подписи обновлений (проверь раскладку и Caps Lock)" -AsSecureString
+    $typed = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+        [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+    if (Test-KeyPassword $typed) {
+        $password = $typed
+    } else {
+        $tries += 1
+        if ($tries -ge 3) {
+            throw "Пароль не подходит к ключу $key. Если он забыт — см. docs\BUILD-INSTALLER.md («Потерял пароль ключа»)."
+        }
+        Write-Warning "Пароль не подходит, попробуй ещё раз."
+    }
+}
+Write-Host "Пароль ключа подходит." -ForegroundColor Green
 
 # ---------- Сборка ----------
 Write-Host "Собираю BrotherHub $version для сервера $server..."

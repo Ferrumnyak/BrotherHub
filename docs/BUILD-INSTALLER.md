@@ -83,6 +83,12 @@ powershell -ExecutionPolicy Bypass -File scripts\updater-key.ps1
 файл. Закрытый ключ и пароль никому не отдавай и сохрани копию: без них
 установленные версии не смогут обновиться по кнопке.
 
+**Потерял пароль ключа.** Восстановить его нельзя. Удали
+`%USERPROFILE%\.tauri\brotherhub.key` и `brotherhub.key.pub`, снова запусти
+`scripts\updater-key.ps1`, закоммить новый `tauri.conf.json` и выпусти версию.
+Уже установленные версии со старым ключом обновление по кнопке не примут —
+им один раз нужно поставить новую версию вручную.
+
 ### 3. Сборка
 
 Подними версию в `app/src-tauri/tauri.conf.json`, `app/package.json` и
