@@ -48,7 +48,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZDNUEzREY4NzlFRDdGNjEKUldSaGYrMTUrRDFhL0hCUVg2SSsrY3NBZFFYaVRVZ0ZPVDR0SVU1MjNxWmliVW9mU0UyYWZsNVYK",
       "endpoints": [
         "https://github.com/Ferrumnyak/Brotherwatch/releases/latest/download/latest.json"
       ],
