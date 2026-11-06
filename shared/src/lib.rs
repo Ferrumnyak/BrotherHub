@@ -41,7 +41,11 @@ pub enum ClientMsg {
     VoiceState { in_voice: bool, mic: bool, deaf: bool },
     /// Тайно задать шансы рулетки (id предложения → вес). Пустой список —
     /// убрать свою подкрутку. Никому не пересылается.
-    Rig { weights: Vec<(u64, f64)> },
+    Rig {
+        weights: Vec<(u64, f64)>,
+        #[serde(default)]
+        key: Option<String>,
+    },
 
     // --- Только для главы лобби ---
     /// Выбрать, что смотрим (название файла или ссылка).

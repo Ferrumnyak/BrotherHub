@@ -47,8 +47,6 @@ const MAX_CHAT_LEN: usize = 2000;
 const MAX_MEDIA_LEN: usize = 2000;
 /// Сколько предложений «что посмотреть» держит комната.
 const MAX_SUGGESTIONS: usize = 30;
-/// Чья подкрутка рулетки главнее всех остальных.
-const RIG_PRIORITY_NAME: &str = "Ferrumnyak";
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// Больше людей в одной комнате — уже не «посмотреть с друзьями».
 const MAX_ROOM_MEMBERS: usize = 16;
@@ -70,6 +68,8 @@ pub struct Config {
     pub livekit: Option<voice::LiveKit>,
     /// Сколько держать место за участником, у которого пропала связь.
     pub grace: Duration,
+    /// Особый ключ (`None` — не задан).
+    pub special_key: Option<String>,
 }
 
 impl Default for Config {
@@ -78,6 +78,7 @@ impl Default for Config {
             password: None,
             livekit: None,
             grace: Duration::from_secs(30),
+            special_key: None,
         }
     }
 }
@@ -134,8 +135,8 @@ struct Room {
     updated_at: Instant,
     suggestions: Vec<Suggestion>,
     next_suggestion: u64,
-    /// Тайные шансы рулетки: кто задал → (номер по порядку, имя, шансы).
-    rigs: HashMap<MemberId, (u64, String, Vec<(u64, f64)>)>,
+    /// Шансы рулетки: кто задал → (главные ли, номер по порядку, шансы).
+    rigs: HashMap<MemberId, (bool, u64, Vec<(u64, f64)>)>,
     next_rig: u64,
 }
 
@@ -155,15 +156,11 @@ impl Room {
         }
     }
 
-    /// Какую подкрутку взять: сначала главного, иначе самую свежую.
+    /// Какие шансы взять: сначала главные, иначе самые свежие.
     fn active_rig(&self) -> Option<&Vec<(u64, f64)>> {
-        let priority = self
-            .rigs
+        self.rigs
             .values()
-            .filter(|(_, name, _)| name.trim().eq_ignore_ascii_case(RIG_PRIORITY_NAME))
-            .max_by_key(|(n, _, _)| *n);
-        priority
-            .or_else(|| self.rigs.values().max_by_key(|(n, _, _)| *n))
+            .max_by_key(|(main, n, _)| (*main, *n))
             .map(|(_, _, w)| w)
     }
 
@@ -670,14 +667,19 @@ async fn handle_command(
             }
             return false;
         }
-        ClientMsg::Rig { weights } => {
+        ClientMsg::Rig { weights, key } => {
             if weights.is_empty() {
                 room.rigs.remove(&id);
             } else {
+                let main = state
+                    .config
+                    .special_key
+                    .as_deref()
+                    .is_some_and(|k| key.as_deref() == Some(k));
                 let n = room.next_rig;
                 room.next_rig += 1;
                 let weights = weights.into_iter().take(MAX_SUGGESTIONS).collect();
-                room.rigs.insert(id, (n, name, weights));
+                room.rigs.insert(id, (main, n, weights));
             }
             return false;
         }

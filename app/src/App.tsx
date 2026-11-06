@@ -306,6 +306,7 @@ export default function App() {
   // Секретный пульт админа и «подкрученные» шансы (id предложения → вес).
   const [adminOpen, setAdminOpen] = useState(false);
   const [weights, setWeights] = useState<Map<number, number>>(new Map());
+  const [panelKey, setPanelKey] = useState(() => load("panelKey", ""));
   // Автозапуск: у кого уже открылось видео, и чего ждём.
   const [loadedBy, setLoadedBy] = useState<Map<MemberId, string>>(new Map());
   const autoplayRef = useRef<{ media: string; since: number } | null>(null);
@@ -911,10 +912,10 @@ export default function App() {
     if (w.length === 0 && !rigSent.current) return;
     const t = setTimeout(() => {
       rigSent.current = w.length > 0;
-      send({ type: "rig", weights: w }).catch(() => {});
+      send({ type: "rig", weights: w, key: panelKey || null }).catch(() => {});
     }, 300);
     return () => clearTimeout(t);
-  }, [joinedRoom, suggestions, weights]);
+  }, [joinedRoom, suggestions, weights, panelKey]);
 
   // Секретный пульт админа: Shift + \ + 1 одновременно. Позволяет
   // «подкрутить» шансы рулетки — их учитывает только тот, у кого пульт.
@@ -1720,6 +1721,11 @@ export default function App() {
                         })
                       }
                       onReset={() => setWeights(new Map())}
+                      panelKey={panelKey}
+                      onKey={(k) => {
+                        setPanelKey(k);
+                        save("panelKey", k);
+                      }}
                       onClose={() => setAdminOpen(false)}
                     />
                   ) : null
@@ -1913,12 +1919,16 @@ function AdminPanel({
   onChange,
   onReset,
   onClose,
+  panelKey,
+  onKey,
 }: {
   list: Suggestion[];
   weights: Map<number, number>;
   onChange: (id: number, percent: number | null) => void;
   onReset: () => void;
   onClose: () => void;
+  panelKey: string;
+  onKey: (key: string) => void;
 }) {
   const fixed = list.filter((x) => weights.has(x.id));
   const fixedSum = fixed.reduce((sum, x) => sum + (weights.get(x.id) ?? 0), 0);
@@ -1964,6 +1974,15 @@ function AdminPanel({
           </span>
         </>
       )}
+      <input
+        type="password"
+        className="admin-key"
+        placeholder="Слово"
+        value={panelKey}
+        onChange={(e) => onKey(e.target.value.trim())}
+        autoComplete="off"
+        aria-label="Слово"
+      />
       <div className="admin-foot">
         <span className="suggestion-by">
           Колесо и тот, кто крутит, об этом не узнают.

@@ -1397,6 +1397,11 @@ img.emoji3d {
   color: var(--text-2);
 }
 
+.admin-key {
+  height: 32px;
+  font-size: 13px;
+}
+
 .admin-total {
   font-size: 12px;
   color: var(--muted);

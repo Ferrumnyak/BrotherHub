@@ -331,11 +331,15 @@ async fn roulette_respects_weights() {
 }
 
 #[tokio::test]
-async fn anyone_can_rig_and_ferrumnyak_wins() {
-    let url = start(Config::default()).await;
+async fn anyone_can_rig_and_special_key_wins() {
+    let url = start(Config {
+        special_key: Some("тест".into()),
+        ..Config::default()
+    })
+    .await;
     let (mut host, _) = Client::join(&url, "r", "Аня").await;
     let (mut boris, _) = Client::join(&url, "r", "Боря").await;
-    let (mut ferrum, _) = Client::join(&url, "r", "Ferrumnyak").await;
+    let (mut ferrum, _) = Client::join(&url, "r", "Вова").await;
     host.send(json!({"type": "suggest", "media": "https://example.com/1"}))
         .await;
     host.send(json!({"type": "suggest", "media": "https://example.com/2"}))
@@ -349,9 +353,9 @@ async fn anyone_can_rig_and_ferrumnyak_wins() {
     let first = list["list"][0]["id"].as_u64().unwrap();
     let second = list["list"][1]["id"].as_u64().unwrap();
 
-    // Ferrumnyak подкрутил первым, Боря — позже: всё равно выигрывает Ferrumnyak.
+    // С особым ключом подкрутили первыми, Боря — позже: всё равно главнее ключ.
     ferrum
-        .send(json!({"type": "rig", "weights": [[first, 1.0], [second, 0.0]]}))
+        .send(json!({"type": "rig", "weights": [[first, 1.0], [second, 0.0]], "key": "тест"}))
         .await;
     boris
         .send(json!({"type": "rig", "weights": [[first, 0.0], [second, 1.0]]}))
@@ -367,7 +371,7 @@ async fn anyone_can_rig_and_ferrumnyak_wins() {
         assert_eq!(host.expect("roulette").await["winner"], first);
     }
 
-    // Ferrumnyak снял подкрутку — работает Борина.
+    // Сняли подкрутку с ключом — работает Борина.
     ferrum.send(json!({"type": "rig", "weights": []})).await;
     ferrum.send(json!({"type": "chat", "text": "ок"})).await;
     host.expect("chat").await;

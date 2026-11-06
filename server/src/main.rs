@@ -20,6 +20,9 @@ async fn main() {
             .ok()
             .filter(|p| !p.is_empty()),
         livekit: LiveKit::from_env(dev),
+        special_key: std::env::var("BROTHERWATCH_SPECIAL_KEY")
+            .ok()
+            .filter(|k| !k.is_empty()),
         ..Config::default()
     };
 

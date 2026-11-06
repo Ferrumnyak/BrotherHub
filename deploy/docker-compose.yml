@@ -14,6 +14,7 @@ services:
     environment:
       BROTHERWATCH_ADDR: 0.0.0.0:8080
       BROTHERWATCH_PASSWORD: ${BROTHERWATCH_PASSWORD:?впиши пароль в .env}
+      BROTHERWATCH_SPECIAL_KEY: ${BROTHERWATCH_SPECIAL_KEY:-}
       # Адрес голоса для приложений — через Caddy, с шифрованием.
       LIVEKIT_URL: wss://${VOICE_DOMAIN:?впиши VOICE_DOMAIN в .env}
       # Сервер обращается к LiveKit напрямую, внутри Docker.
