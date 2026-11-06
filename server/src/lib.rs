@@ -47,6 +47,8 @@ const MAX_CHAT_LEN: usize = 2000;
 const MAX_MEDIA_LEN: usize = 2000;
 /// Сколько предложений «что посмотреть» держит комната.
 const MAX_SUGGESTIONS: usize = 30;
+/// Чья подкрутка рулетки главнее всех остальных.
+const RIG_PRIORITY_NAME: &str = "Ferrumnyak";
 const MAX_MESSAGE_BYTES: usize = 64 * 1024;
 /// Больше людей в одной комнате — уже не «посмотреть с друзьями».
 const MAX_ROOM_MEMBERS: usize = 16;
@@ -132,6 +134,9 @@ struct Room {
     updated_at: Instant,
     suggestions: Vec<Suggestion>,
     next_suggestion: u64,
+    /// Тайные шансы рулетки: кто задал → (номер по порядку, имя, шансы).
+    rigs: HashMap<MemberId, (u64, String, Vec<(u64, f64)>)>,
+    next_rig: u64,
 }
 
 impl Room {
@@ -145,7 +150,21 @@ impl Room {
             updated_at: Instant::now(),
             suggestions: Vec::new(),
             next_suggestion: 1,
+            rigs: HashMap::new(),
+            next_rig: 1,
         }
+    }
+
+    /// Какую подкрутку взять: сначала главного, иначе самую свежую.
+    fn active_rig(&self) -> Option<&Vec<(u64, f64)>> {
+        let priority = self
+            .rigs
+            .values()
+            .filter(|(_, name, _)| name.trim().eq_ignore_ascii_case(RIG_PRIORITY_NAME))
+            .max_by_key(|(n, _, _)| *n);
+        priority
+            .or_else(|| self.rigs.values().max_by_key(|(n, _, _)| *n))
+            .map(|(_, _, w)| w)
     }
 
     fn broadcast_suggestions(&self) {
@@ -222,6 +241,7 @@ impl Room {
     /// в первую очередь к тем, кто сейчас на связи.
     fn remove_peer(&mut self, id: MemberId, kicked: bool) -> Option<Peer> {
         let peer = self.peers.remove(&id)?;
+        self.rigs.remove(&id);
         self.broadcast(&ServerMsg::MemberLeft { id, kicked });
         if self.host == id {
             let next = self
@@ -650,6 +670,17 @@ async fn handle_command(
             }
             return false;
         }
+        ClientMsg::Rig { weights } => {
+            if weights.is_empty() {
+                room.rigs.remove(&id);
+            } else {
+                let n = room.next_rig;
+                room.next_rig += 1;
+                let weights = weights.into_iter().take(MAX_SUGGESTIONS).collect();
+                room.rigs.insert(id, (n, name, weights));
+            }
+            return false;
+        }
         ClientMsg::VoiceState { in_voice, mic, deaf } => {
             if let Some(peer) = room.peers.get_mut(&id) {
                 if (peer.in_voice, peer.mic, peer.deaf) == (in_voice, mic, deaf) {
@@ -703,6 +734,7 @@ fn handle_host_command(
         | ClientMsg::Suggest { .. }
         | ClientMsg::RemoveSuggestion { .. }
         | ClientMsg::Loaded { .. }
+        | ClientMsg::Rig { .. }
         | ClientMsg::VoiceState { .. } => {
             unreachable!("обработано выше")
         }
@@ -732,6 +764,8 @@ fn handle_host_command(
             if room.suggestions.is_empty() {
                 return error("в списке предложений пусто");
             }
+            // Тайная подкрутка (если есть) главнее шансов от самого крутящего.
+            let weights = room.active_rig().cloned().unwrap_or(weights);
             let winner = pick_weighted(&room.suggestions, &weights);
             room.broadcast(&ServerMsg::Roulette { winner, by: name });
         }

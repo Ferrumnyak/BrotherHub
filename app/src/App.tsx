@@ -899,6 +899,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spin]);
 
+  // Шансы уходят на сервер, как только меняются они или список.
+  // Крутит колесо тот, у кого пульт, но сервер возьмёт эти шансы.
+  const rigSent = useRef(false);
+  useEffect(() => {
+    if (!joinedRoom) {
+      rigSent.current = false;
+      return;
+    }
+    const w = spinWeights(suggestions, weights);
+    if (w.length === 0 && !rigSent.current) return;
+    const t = setTimeout(() => {
+      rigSent.current = w.length > 0;
+      send({ type: "rig", weights: w }).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [joinedRoom, suggestions, weights]);
+
   // Секретный пульт админа: Shift + \ + 1 одновременно. Позволяет
   // «подкрутить» шансы рулетки — их учитывает только тот, у кого пульт.
   useEffect(() => {
@@ -1679,7 +1696,7 @@ export default function App() {
                 onRemove={(x) => run(() => send({ type: "remove_suggestion", id: x.id }))}
                 onSpin={() =>
                   run(() =>
-                    send({ type: "spin", weights: spinWeights(suggestions, weights) }),
+                    send({ type: "spin" }),
                   )
                 }
                 wheel={
@@ -1704,7 +1721,6 @@ export default function App() {
                       }
                       onReset={() => setWeights(new Map())}
                       onClose={() => setAdminOpen(false)}
-                      isHost={isHost}
                     />
                   ) : null
                 }
@@ -1897,14 +1913,12 @@ function AdminPanel({
   onChange,
   onReset,
   onClose,
-  isHost,
 }: {
   list: Suggestion[];
   weights: Map<number, number>;
   onChange: (id: number, percent: number | null) => void;
   onReset: () => void;
   onClose: () => void;
-  isHost: boolean;
 }) {
   const fixed = list.filter((x) => weights.has(x.id));
   const fixedSum = fixed.reduce((sum, x) => sum + (weights.get(x.id) ?? 0), 0);
@@ -1952,7 +1966,7 @@ function AdminPanel({
       )}
       <div className="admin-foot">
         <span className="suggestion-by">
-          {isHost ? "Колесо об этом не узнает." : "Сработает, только когда пульт у тебя."}
+          Колесо и тот, кто крутит, об этом не узнают.
         </span>
         <button className="quiet" onClick={onReset}>
           Честно

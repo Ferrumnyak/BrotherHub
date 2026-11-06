@@ -52,6 +52,7 @@ export type ClientMsg =
   | { type: "remove_suggestion"; id: number }
   | { type: "loaded"; media: string }
   | { type: "voice_state"; in_voice: boolean; mic: boolean; deaf: boolean }
+  | { type: "rig"; weights: Array<[number, number]> }
   | { type: "set_media"; media: string }
   | { type: "play"; position: number }
   | { type: "pause"; position: number }

@@ -329,3 +329,50 @@ async fn roulette_respects_weights() {
         assert_eq!(a.expect("roulette").await["winner"], second);
     }
 }
+
+#[tokio::test]
+async fn anyone_can_rig_and_ferrumnyak_wins() {
+    let url = start(Config::default()).await;
+    let (mut host, _) = Client::join(&url, "r", "Аня").await;
+    let (mut boris, _) = Client::join(&url, "r", "Боря").await;
+    let (mut ferrum, _) = Client::join(&url, "r", "Ferrumnyak").await;
+    host.send(json!({"type": "suggest", "media": "https://example.com/1"}))
+        .await;
+    host.send(json!({"type": "suggest", "media": "https://example.com/2"}))
+        .await;
+    let list = loop {
+        let msg = host.expect("suggestions").await;
+        if msg["list"].as_array().unwrap().len() == 2 {
+            break msg;
+        }
+    };
+    let first = list["list"][0]["id"].as_u64().unwrap();
+    let second = list["list"][1]["id"].as_u64().unwrap();
+
+    // Ferrumnyak подкрутил первым, Боря — позже: всё равно выигрывает Ferrumnyak.
+    ferrum
+        .send(json!({"type": "rig", "weights": [[first, 1.0], [second, 0.0]]}))
+        .await;
+    boris
+        .send(json!({"type": "rig", "weights": [[first, 0.0], [second, 1.0]]}))
+        .await;
+    // Подкрутка тайная: сервер ничего не отвечает. Чат после неё — чтобы
+    // точно знать, что сервер её уже получил.
+    boris.send(json!({"type": "chat", "text": "ок"})).await;
+    ferrum.send(json!({"type": "chat", "text": "ок"})).await;
+    host.expect("chat").await;
+    host.expect("chat").await;
+    for _ in 0..5 {
+        host.send(json!({"type": "spin"})).await;
+        assert_eq!(host.expect("roulette").await["winner"], first);
+    }
+
+    // Ferrumnyak снял подкрутку — работает Борина.
+    ferrum.send(json!({"type": "rig", "weights": []})).await;
+    ferrum.send(json!({"type": "chat", "text": "ок"})).await;
+    host.expect("chat").await;
+    for _ in 0..5 {
+        host.send(json!({"type": "spin"})).await;
+        assert_eq!(host.expect("roulette").await["winner"], second);
+    }
+}
