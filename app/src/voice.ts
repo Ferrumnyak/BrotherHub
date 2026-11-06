@@ -17,6 +17,7 @@ import {
   type RemoteTrack,
   type RemoteVideoTrack,
 } from "livekit-client";
+import { PROCESSOR_NAME, RnnoiseProcessor, type NoiseMode } from "./noise";
 
 /** Чужая трансляция экрана. */
 export type ScreenShare = { identity: string; track: RemoteVideoTrack };
@@ -62,7 +63,37 @@ export class VoiceClient {
   /** Мои дорожки трансляции, пока показываю экран. */
   private myShare: MediaStreamTrack[] = [];
 
+  /** Шумоподавление: обычное (браузера) или сильное (RNNoise). */
+  private noise: NoiseMode = "strong";
+  /** Аудиоконтекст для RNNoise: 48 кГц — частота, на которой она обучена. */
+  private noiseCtx: AudioContext | null = null;
+
   constructor(private cb: VoiceCallbacks) {}
+
+  /** Сменить шумоподавление (сразу, если микрофон уже включён). */
+  async setNoise(mode: NoiseMode) {
+    this.noise = mode;
+    await this.applyNoise();
+  }
+
+  private async applyNoise() {
+    const pub = this.room?.localParticipant.getTrackPublication(Track.Source.Microphone);
+    const track = pub?.track as LocalAudioTrack | undefined;
+    if (!track) return;
+    const active = track.getProcessor()?.name === PROCESSOR_NAME;
+    try {
+      if (this.noise === "strong" && !active) {
+        this.noiseCtx ??= new AudioContext({ sampleRate: 48000 });
+        await track.setAudioContext(this.noiseCtx);
+        await track.setProcessor(new RnnoiseProcessor());
+      } else if (this.noise !== "strong" && active) {
+        await track.stopProcessor();
+      }
+    } catch (err) {
+      // Не завелось — говорим с обычным шумоподавлением, но сообщаем.
+      this.cb.onError(`Сильное шумоподавление не включилось: ${err}`);
+    }
+  }
 
   get connected(): boolean {
     return this.room !== null;
@@ -122,6 +153,7 @@ export class VoiceClient {
     room.on(RoomEvent.LocalTrackPublished, (pub: LocalTrackPublication) => {
       if (pub.source === Track.Source.Microphone && pub.track) {
         this.addMeter(room.localParticipant.identity, pub.track as LocalAudioTrack);
+        this.applyNoise();
       }
     });
     room.on(RoomEvent.LocalTrackUnpublished, (pub: LocalTrackPublication) => {

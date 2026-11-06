@@ -13,6 +13,7 @@
   "dependencies": {
     "@fontsource/manrope": "^5.0.0",
     "@fontsource/unbounded": "^5.0.0",
+    "@sapphi-red/web-noise-suppressor": "^0.3.5",
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.0.0",
     "livekit-client": "^2.0.0",

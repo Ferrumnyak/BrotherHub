@@ -106,8 +106,16 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
     }
     let main = main_window(&app)?;
     let handle = app.clone();
+    // Своя папка данных: у сайтов отдельные входы и куки, и им не достаётся
+    // автоматический доступ к микрофону, который есть у окон приложения.
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("browser");
     let view = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::External(url))
         .title("BrotherHub — обзор")
+        .data_directory(data)
         .initialization_script(ADBLOCK)
         .on_new_window(move |url, _features| {
             // Ссылки «в новом окне» открываем здесь же.

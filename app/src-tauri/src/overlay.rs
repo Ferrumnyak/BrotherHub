@@ -29,6 +29,15 @@ fn stale(session: u64) -> bool {
 /// Где панель относительно главного окна — чтобы ехать вслед за ним.
 static LAST: Mutex<Option<Rect>> = Mutex::new(None);
 
+/// Параметры WebView2 для окон приложения — те же, что у главного окна в
+/// tauri.conf.json (`additionalBrowserArgs`): у окон с общей папкой данных они
+/// обязаны совпадать. Первые — стандартные от Tauri; последний — микрофон
+/// без браузерного окна «разрешить доступ к микрофону?» (показ экрана он не
+/// трогает: окно выбора экрана остаётся). Сайтам из «Обзора» он не достаётся:
+/// у браузера своя папка данных (browser.rs).
+pub const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+     --auto-accept-camera-and-microphone-capture";
+
 /// Главное окно приложения (сохраняется в `main.rs` при запуске).
 pub struct MainWindow(pub WebviewWindow);
 
@@ -67,6 +76,7 @@ pub async fn overlay_place(app: AppHandle, rect: Rect, session: u64) -> Result<(
             WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
             .title("BrotherHub")
             .initialization_script("window.__BW_VIEW = 'controls';")
+            .additional_browser_args(BROWSER_ARGS)
             .transparent(true)
             .decorations(false)
             .shadow(false)

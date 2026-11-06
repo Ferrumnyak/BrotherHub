@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
-use crate::overlay::MainWindow;
+use crate::overlay::{MainWindow, BROWSER_ARGS};
 
 const LABEL: &str = "reactions";
 
@@ -47,6 +47,7 @@ pub async fn reactions_place(app: AppHandle, rect: Option<Area>) -> Result<(), S
             let window = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
                 .title("BrotherHub")
                 .initialization_script("window.__BW_VIEW = 'reactions';")
+                .additional_browser_args(BROWSER_ARGS)
                 .transparent(true)
                 .decorations(false)
                 .shadow(false)

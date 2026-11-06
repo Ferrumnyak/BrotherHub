@@ -36,6 +36,7 @@ import { EmojiGlyph, RichText } from "./RichText";
 import { RouletteWheel, SPIN_MS } from "./Roulette";
 import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
 import { ReactionPicker } from "./Reactions";
+import { setSoundsEnabled, sound, soundsEnabled } from "./sounds";
 import { keyName, listMicrophones, VoiceClient, type ScreenShare, type VoiceStatus } from "./voice";
 
 type VoiceMode = "open" | "ptt";
@@ -503,6 +504,8 @@ export default function App() {
   // Доиграло — включить следующее из «Что посмотреть» (решает тот, у кого пульт).
   const [autoNext, setAutoNext] = useState(() => load("autoNext", "1") === "1");
   const autoplayedRef = useRef<string | null>(null);
+  // Рулетку запустили: когда закрутится и кто запустил.
+  const [roulettePending, setRoulettePending] = useState<{ at: number; by: string } | null>(null);
   const [spin, setSpin] = useState<{ list: Suggestion[]; winner: number; by: string } | null>(
     null,
   );
@@ -538,6 +541,12 @@ export default function App() {
     load("voiceMode", "open") === "ptt" ? "ptt" : "open",
   );
   const [micOn, setMicOn] = useState(true);
+  const [sounds, setSounds] = useState(soundsEnabled);
+  const [noise, setNoise] = useState<"standard" | "strong">(() =>
+    load("noise", "strong") === "standard" ? "standard" : "strong",
+  );
+  // Щелчок при включении и выключении микрофона (не при входе в голос).
+  const micSoundRef = useRef<boolean | null>(null);
   const [deafened, setDeafened] = useState(false);
   const [pttKey, setPttKey] = useState<number | null>(() => {
     const v = Number(load("pttKey", ""));
@@ -617,6 +626,9 @@ export default function App() {
           setMembers(msg.members);
           setPlayback(msg.playback);
           setSuggestions(msg.suggestions ?? []);
+          setRoulettePending(
+            msg.roulette ? { at: Date.now() + msg.roulette.seconds * 1000, by: msg.roulette.by } : null,
+          );
           setReconnecting(false);
           if (msg.resumed) {
             // Вернулись на своё место: чат и голос оставляем как были.
@@ -636,8 +648,10 @@ export default function App() {
         case "member_joined":
           setMembers((m) => [...m, msg.member]);
           system(`${msg.member.name} зашёл в зал`, "enter");
+          sound.join();
           break;
         case "member_left":
+          sound.leave();
           system(
             msg.kicked ? `${nameOf(msg.id)} делал -вайб, поэтому вышел` : `${nameOf(msg.id)} вышел`,
             "leave",
@@ -722,7 +736,17 @@ export default function App() {
           setSuggestions(msg.list);
           break;
         }
+        case "roulette_countdown":
+          setRoulettePending({ at: Date.now() + msg.seconds * 1000, by: msg.by });
+          system(`${msg.by} запустил рулетку — закрутится через минуту, накидывайте, что посмотреть`, "roulette");
+          setSideTab("suggest");
+          break;
+        case "roulette_cancelled":
+          setRoulettePending(null);
+          system(msg.by ? `${msg.by} отменил рулетку` : "Рулетка отменилась: список опустел", "roulette");
+          break;
         case "roulette": {
+          setRoulettePending(null);
           const list = suggestionsRef.current;
           const winner = list.findIndex((x) => x.id === msg.winner);
           if (winner < 0) break;
@@ -1359,6 +1383,24 @@ export default function App() {
       unlisten?.();
     };
   }, []);
+
+  // Шумоподавление — при каждом подключении к голосу и при смене в настройках.
+  useEffect(() => {
+    if (voiceStatus === "connected") voice.setNoise(noise);
+  }, [noise, voiceStatus, voice]);
+
+  useEffect(() => {
+    const connected = voiceStatus === "connected" && voiceMode === "open";
+    if (!connected) {
+      micSoundRef.current = null;
+      return;
+    }
+    if (micSoundRef.current !== null && micSoundRef.current !== micOn) {
+      if (micOn) sound.micOn();
+      else sound.micOff();
+    }
+    micSoundRef.current = micOn;
+  }, [micOn, voiceStatus, voiceMode]);
 
   // Глобальная кнопка «нажми и говори» работает, только пока мы в комнате.
   useEffect(() => {
@@ -2228,6 +2270,18 @@ export default function App() {
                 <ThemePicker />
               </div>
               <AppVersion />
+              <label className="setting-check">
+                <input
+                  type="checkbox"
+                  checked={sounds}
+                  onChange={(e) => {
+                    setSounds(e.target.checked);
+                    setSoundsEnabled(e.target.checked);
+                    if (e.target.checked) sound.join();
+                  }}
+                />
+                Звуки: микрофон, вход и выход людей
+              </label>
               <h3 className="settings-sub">Голос</h3>
               <fieldset>
                 <legend>Микрофон</legend>
@@ -2289,6 +2343,21 @@ export default function App() {
                   </button>
                 </div>
               )}
+
+              <label className="setting">
+                <span className="setting-label">Шумоподавление</span>
+                <select
+                  value={noise}
+                  onChange={(e) => {
+                    const mode = e.target.value === "standard" ? "standard" : "strong";
+                    setNoise(mode);
+                    save("noise", mode);
+                  }}
+                >
+                  <option value="strong">Сильное — глушит клавиатуру и фон</option>
+                  <option value="standard">Обычное</option>
+                </select>
+              </label>
 
               <label className="setting">
                 <span className="setting-label">Устройство</span>
@@ -2398,6 +2467,12 @@ export default function App() {
                     send({ type: "spin" }),
                   )
                 }
+                pending={roulettePending}
+                canCancel={
+                  roulettePending !== null &&
+                  (isHost || roulettePending.by === members.find((m) => m.id === me)?.name)
+                }
+                onCancel={() => run(() => send({ type: "cancel_roulette" }))}
                 autoNext={autoNext}
                 onAutoNext={(on) => {
                   setAutoNext(on);
@@ -2831,7 +2906,13 @@ function SuggestionsPanel({
   admin,
   autoNext,
   onAutoNext,
+  pending,
+  canCancel,
+  onCancel,
 }: {
+  pending: { at: number; by: string } | null;
+  canCancel: boolean;
+  onCancel: () => void;
   autoNext: boolean;
   onAutoNext: (on: boolean) => void;
   wheel: ReactNode;
@@ -2859,7 +2940,7 @@ function SuggestionsPanel({
       {list.length === 0 ? (
         <p className="suggestions-empty">
           Пока пусто. Вставь ссылку в поле сверху и нажми «{isHost ? "В список" : "Предложить"}» —
-          а тот, у кого пульт, включит или крутанёт рулетку.
+          а тот, у кого пульт, включит. Рулетку может запустить любой.
         </p>
       ) : (
         <ul>
@@ -2905,13 +2986,59 @@ function SuggestionsPanel({
           ))}
         </ul>
       )}
-      {isHost && list.length > 0 && (
-        <button className="primary roulette" onClick={onSpin} disabled={spinning}>
-          <Icon name="dice" size={18} />
-          {spinning ? "Крутится…" : "Крутить рулетку"}
-        </button>
+      {pending && !spinning ? (
+        <RouletteTimer pending={pending} canCancel={canCancel} onCancel={onCancel} />
+      ) : (
+        list.length > 0 && (
+          <button
+            className="primary roulette"
+            onClick={onSpin}
+            disabled={spinning}
+            title="Закрутится через минуту — все успеют добавить своё"
+          >
+            <Icon name="dice" size={18} />
+            {spinning ? "Крутится…" : "Запустить рулетку"}
+          </button>
+        )
       )}
-      {!isHost && spinning && <p className="suggestions-empty">Рулетка крутится…</p>}
+    </div>
+  );
+}
+
+/** Отсчёт до кручения рулетки. */
+function RouletteTimer({
+  pending,
+  canCancel,
+  onCancel,
+}: {
+  pending: { at: number; by: string };
+  canCancel: boolean;
+  onCancel: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  const left = Math.max(0, Math.ceil((pending.at - now) / 1000));
+  const progress = Math.min(1, Math.max(0, 1 - (pending.at - now) / 60_000));
+  return (
+    <div className="roulette-timer">
+      <div className="roulette-timer-row">
+        <Icon name="dice" size={18} />
+        <span>
+          Рулетка через <strong>{formatTime(left)}</strong>
+          <span className="roulette-timer-by"> · запустил(а) {pending.by}</span>
+        </span>
+        {canCancel && (
+          <button className="link-button" onClick={onCancel}>
+            Отменить
+          </button>
+        )}
+      </div>
+      <div className="roulette-timer-bar">
+        <span style={{ width: `${progress * 100}%` }} />
+      </div>
     </div>
   );
 }

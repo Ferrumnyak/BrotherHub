@@ -59,6 +59,7 @@ export type ClientMsg =
   | { type: "loaded"; media: string }
   | { type: "voice_state"; in_voice: boolean; mic: boolean; deaf: boolean }
   | { type: "react"; emoji: string }
+  | { type: "cancel_roulette" }
   | { type: "rig"; weights: Array<[number, number]>; key?: string | null }
   | { type: "set_media"; media: string }
   | { type: "play"; position: number }
@@ -84,6 +85,7 @@ export type ServerMsg =
       voice: VoiceAccess | null;
       suggestions?: Suggestion[];
       subtitles?: SubtitleFile | null;
+      roulette?: { seconds: number; by: string } | null;
     }
   | { type: "member_joined"; member: Member }
   | { type: "member_status"; id: MemberId; online: boolean }
@@ -103,7 +105,9 @@ export type ServerMsg =
   | { type: "member_loaded"; id: MemberId; media: string }
   | { type: "member_voice"; id: MemberId; in_voice: boolean; mic: boolean; deaf: boolean }
   | { type: "reaction"; from: MemberId; name: string; emoji: string }
-  | { type: "subtitles"; subtitles: SubtitleFile | null };
+  | { type: "subtitles"; subtitles: SubtitleFile | null }
+  | { type: "roulette_countdown"; seconds: number; by: string }
+  | { type: "roulette_cancelled"; by: string | null };
 
 /** Состояние плеера mpv (событие `player-status` от Rust-части). */
 export interface PlayerStatus {

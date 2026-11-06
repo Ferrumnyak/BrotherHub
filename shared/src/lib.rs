@@ -41,6 +41,14 @@ pub enum ClientMsg {
     VoiceState { in_voice: bool, mic: bool, deaf: bool },
     /// Реакция — эмодзи, пролетающий поверх видео у всех.
     React { emoji: String },
+    /// Запустить рулетку по списку предложений (может любой): через минуту
+    /// сервер сам её крутит. `weights` — шансы (id → вес, по умолчанию у всех 1).
+    Spin {
+        #[serde(default)]
+        weights: Vec<(u64, f64)>,
+    },
+    /// Отменить рулетку до того, как она закрутилась (ведущий или кто запустил).
+    CancelRoulette,
     /// Тайно задать шансы рулетки (id предложения → вес). Пустой список —
     /// убрать свою подкрутку. Никому не пересылается.
     Rig {
@@ -64,12 +72,6 @@ pub enum ClientMsg {
     TransferHost { to: MemberId },
     /// Исключить участника из комнаты.
     Kick { id: MemberId },
-    /// Крутить рулетку по списку предложений. `weights` — шансы
-    /// предложений (id → вес, по умолчанию у всех 1).
-    Spin {
-        #[serde(default)]
-        weights: Vec<(u64, f64)>,
-    },
     /// Закрыть видео у всех.
     ClearMedia,
     /// Субтитры к текущему видео для всех (`None` — убрать).
@@ -99,6 +101,9 @@ pub enum ServerMsg {
         /// Субтитры к текущему видео, если ведущий их добавил.
         #[serde(default)]
         subtitles: Option<SubtitleFile>,
+        /// Рулетка уже запущена: сколько секунд до кручения и кто запустил.
+        #[serde(default)]
+        roulette: Option<RouletteCountdown>,
     },
     MemberJoined {
         member: Member,
@@ -167,6 +172,22 @@ pub enum ServerMsg {
     Subtitles {
         subtitles: Option<SubtitleFile>,
     },
+    /// Рулетку запустили — закрутится через `seconds` секунд.
+    RouletteCountdown {
+        seconds: f64,
+        by: String,
+    },
+    /// Рулетку отменили (`by` — кто; `None` — некому крутить: список опустел).
+    RouletteCancelled {
+        by: Option<String>,
+    },
+}
+
+/// Отсчёт до кручения рулетки.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RouletteCountdown {
+    pub seconds: f64,
+    pub by: String,
 }
 
 /// Файл субтитров, который ведущий раздаёт всем (.srt, .vtt, .ass).

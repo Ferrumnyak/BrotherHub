@@ -13,7 +13,11 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-async fn start(config: Config) -> String {
+async fn start(mut config: Config) -> String {
+    // Рулетка в тестах крутится сразу, а не через минуту.
+    if config.roulette_delay > Duration::from_millis(500) {
+        config.roulette_delay = Duration::from_millis(50);
+    }
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { serve(listener, config).await.unwrap() });
@@ -254,13 +258,13 @@ async fn suggestions_roulette_and_clear() {
         .unwrap()
         .contains("уже"));
 
-    // Рулетку крутит только ведущий, выпадает то, что есть в списке.
+    // Рулетку может запустить любой: сначала отсчёт, потом выпадает то, что в списке.
     b.send(json!({"type": "spin"})).await;
-    assert!(b.expect("error").await["message"]
-        .as_str()
-        .unwrap()
-        .contains("ведущий"));
+    let countdown = a.expect("roulette_countdown").await;
+    assert_eq!(countdown["by"], "Боря");
+    // Пока идёт отсчёт, второй раз не запустить.
     a.send(json!({"type": "spin"})).await;
+    assert!(a.expect("error").await["message"].as_str().unwrap().contains("уже"));
     let roulette = b.expect("roulette").await;
     assert_eq!(roulette["winner"], list["list"][0]["id"]);
 
@@ -422,4 +426,42 @@ async fn subtitles_are_shared_kept_and_reset_with_video() {
     b.expect("playback").await;
     let (_d, wd) = Client::join(&url, "r", "Дима").await;
     assert!(wd["subtitles"].is_null());
+}
+
+#[tokio::test]
+async fn roulette_waits_and_can_be_cancelled() {
+    let url = start(Config {
+        roulette_delay: Duration::from_millis(400),
+        ..Config::default()
+    })
+    .await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    let (mut b, _) = Client::join(&url, "r", "Боря").await;
+
+    // Пустой список — крутить нечего.
+    b.send(json!({"type": "spin"})).await;
+    assert!(b.expect("error").await["message"].as_str().unwrap().contains("пусто"));
+
+    b.send(json!({"type": "suggest", "media": "https://example.com/1"}))
+        .await;
+    a.expect("suggestions").await;
+    b.send(json!({"type": "spin"})).await;
+    a.expect("roulette_countdown").await;
+
+    // Кто зашёл во время отсчёта, видит его.
+    let (_c, wc) = Client::join(&url, "r", "Вася").await;
+    assert_eq!(wc["roulette"]["by"], "Боря");
+
+    // Ведущий отменяет — рулетка не крутится.
+    a.send(json!({"type": "cancel_roulette"})).await;
+    assert_eq!(b.expect("roulette_cancelled").await["by"], "Аня");
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    b.send(json!({"type": "chat", "text": "ну"})).await;
+    loop {
+        let msg = b.next().await;
+        assert_ne!(msg["type"], "roulette", "отменённая рулетка не должна крутиться");
+        if msg["type"] == "chat" {
+            break;
+        }
+    }
 }

@@ -34,8 +34,8 @@ use axum::{
     Router,
 };
 use brotherwatch_shared::{
-    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, ServerMsg, SubtitleFile, Suggestion,
-    VoiceAccess,
+    ClientMsg, Member, MemberId, PlaybackAction, PlaybackState, RouletteCountdown, ServerMsg, SubtitleFile,
+    Suggestion, VoiceAccess,
 };
 use futures_util::{SinkExt, StreamExt};
 use tokio::{
@@ -76,6 +76,9 @@ pub struct Config {
     pub grace: Duration,
     /// Особый ключ (`None` — не задан).
     pub special_key: Option<String>,
+    /// Сколько ждать от запуска рулетки до кручения — чтобы все успели
+    /// накидать, что посмотреть.
+    pub roulette_delay: Duration,
 }
 
 impl Default for Config {
@@ -85,6 +88,7 @@ impl Default for Config {
             livekit: None,
             grace: Duration::from_secs(30),
             special_key: None,
+            roulette_delay: Duration::from_secs(60),
         }
     }
 }
@@ -146,6 +150,19 @@ struct Room {
     next_rig: u64,
     /// Субтитры к текущему видео (сбрасываются при смене видео).
     subtitles: Option<SubtitleFile>,
+    /// Запущенная рулетка, которая ещё не закрутилась.
+    roulette: Option<PendingRoulette>,
+}
+
+struct PendingRoulette {
+    /// Номер запуска — таймер старого запуска не крутит новый.
+    id: u64,
+    ends_at: Instant,
+    /// Кто запустил.
+    by_id: MemberId,
+    by: String,
+    /// Шансы от того, кто запустил (тайная подкрутка всё равно главнее).
+    weights: Vec<(u64, f64)>,
 }
 
 impl Room {
@@ -162,6 +179,7 @@ impl Room {
             rigs: HashMap::new(),
             next_rig: 1,
             subtitles: None,
+            roulette: None,
         }
     }
 
@@ -356,6 +374,31 @@ impl RateLimit {
 
 fn random_u64() -> u64 {
     RandomState::new().build_hasher().finish()
+}
+
+/// Время вышло — крутим рулетку, если её не отменили и не запустили заново.
+async fn spin_roulette(state: &Arc<AppState>, room_name: &str, spin_id: u64) {
+    let mut rooms = state.rooms.lock().await;
+    let Some(room) = rooms.get_mut(room_name) else {
+        return;
+    };
+    if room.roulette.as_ref().map(|r| r.id) != Some(spin_id) {
+        return;
+    }
+    let Some(pending) = room.roulette.take() else {
+        return;
+    };
+    if room.suggestions.is_empty() {
+        room.broadcast(&ServerMsg::RouletteCancelled { by: None });
+        return;
+    }
+    // Тайная подкрутка (если есть) главнее шансов от того, кто запустил.
+    let weights = room.active_rig().cloned().unwrap_or(pending.weights);
+    let winner = pick_weighted(&room.suggestions, &weights);
+    room.broadcast(&ServerMsg::Roulette {
+        winner,
+        by: pending.by,
+    });
 }
 
 /// Случайное предложение с учётом шансов (у кого вес не указан — 1).
@@ -715,6 +758,45 @@ async fn handle_command(
             });
             return false;
         }
+        ClientMsg::Spin { weights } => {
+            if room.suggestions.is_empty() {
+                return error("в списке пусто — сначала предложите, что посмотреть");
+            }
+            if room.roulette.is_some() {
+                return error("рулетка уже запущена");
+            }
+            let delay = state.config.roulette_delay;
+            let spin_id = state.new_id();
+            room.roulette = Some(PendingRoulette {
+                id: spin_id,
+                ends_at: Instant::now() + delay,
+                by_id: id,
+                by: name.clone(),
+                weights: weights.into_iter().take(MAX_SUGGESTIONS).collect(),
+            });
+            room.broadcast(&ServerMsg::RouletteCountdown {
+                seconds: delay.as_secs_f64(),
+                by: name,
+            });
+            let state = state.clone();
+            let room_name = room_name.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
+                spin_roulette(&state, &room_name, spin_id).await;
+            });
+            return false;
+        }
+        ClientMsg::CancelRoulette => {
+            let Some(pending) = &room.roulette else {
+                return false;
+            };
+            if pending.by_id != id && room.host != id {
+                return error("отменить может тот, кто запустил, или у кого пульт");
+            }
+            room.roulette = None;
+            room.broadcast(&ServerMsg::RouletteCancelled { by: Some(name) });
+            return false;
+        }
         ClientMsg::React { emoji } => {
             let emoji = emoji.trim();
             if emoji.is_empty() || emoji.chars().count() > MAX_EMOJI_LEN {
@@ -765,7 +847,9 @@ fn handle_host_command(
         | ClientMsg::Loaded { .. }
         | ClientMsg::Rig { .. }
         | ClientMsg::VoiceState { .. }
-        | ClientMsg::React { .. } => {
+        | ClientMsg::React { .. }
+        | ClientMsg::Spin { .. }
+        | ClientMsg::CancelRoulette => {
             unreachable!("обработано выше")
         }
         ClientMsg::SetSubtitles { subtitles } => {
@@ -806,15 +890,6 @@ fn handle_host_command(
             room.paused = true;
             room.set_position(0.0);
             room.broadcast_playback(Some(PlaybackAction::SetMedia), Some(name));
-        }
-        ClientMsg::Spin { weights } => {
-            if room.suggestions.is_empty() {
-                return error("в списке предложений пусто");
-            }
-            // Тайная подкрутка (если есть) главнее шансов от самого крутящего.
-            let weights = room.active_rig().cloned().unwrap_or(weights);
-            let winner = pick_weighted(&room.suggestions, &weights);
-            room.broadcast(&ServerMsg::Roulette { winner, by: name });
         }
         ClientMsg::Play { position } => {
             room.paused = false;
@@ -885,6 +960,10 @@ fn welcome(
         voice,
         suggestions: room.suggestions.clone(),
         subtitles: room.subtitles.clone(),
+        roulette: room.roulette.as_ref().map(|r| RouletteCountdown {
+            seconds: r.ends_at.saturating_duration_since(Instant::now()).as_secs_f64(),
+            by: r.by.clone(),
+        }),
     }
 }
 
