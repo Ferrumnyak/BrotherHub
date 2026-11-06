@@ -2,21 +2,35 @@
    Тёмный бархатный зал, тёплый свет лампы над экраном. */
 
 :root {
-  --hall: #191416;        /* фон зала */
-  --hall-deep: #140f11;   /* самый тёмный — левая часть экрана входа */
-  --surface: #211a1d;     /* боковая панель */
-  --raised: #241b1f;      /* поля ввода, полосы */
-  --raised-2: #2a2024;    /* кнопки дока */
-  --line: #2e2428;        /* разделители */
-  --line-strong: #3a2e33; /* рамки полей, дорожки ползунков */
-  --lamp: #f2c879;        /* свет лампы: главные действия, кто говорит */
+  /* Тема «Попкорн» — по умолчанию. Остальные — ниже, [data-theme]. */
+  --hall: #0f0d10;        /* фон зала */
+  --hall-deep: #0b090c;   /* самый тёмный — левая часть экрана входа */
+  --surface: #161316;     /* боковая панель, карточки */
+  --raised: #1a1619;      /* поля ввода, полосы */
+  --raised-2: #2a2428;    /* кнопки дока */
+  --line: #241f23;        /* разделители */
+  --line-strong: #352d32; /* рамки полей, дорожки ползунков */
+  --popover: #221d21;     /* меню и всплывающие панели */
+  --popover-hover: #2d262b;
+  --quiet: #2a2428;       /* тихие кнопки */
+  --quiet-hover: #352d32;
+  --bubble: #241f23;      /* чужие сообщения в чате */
+  --lamp: #f2c879;        /* акцент: главные действия, кто говорит */
   --lamp-soft: #f7dca6;
-  --lamp-ink: #2a1d12;    /* текст на лампе */
-  --velvet: #c25a63;      /* бархат: выключено, исключить, ошибки */
+  --lamp-ink: #2a1d12;    /* текст на акценте */
+  --lamp-tint: #2b2418;   /* фон подсказок с акцентом */
+  --velvet: #c25a63;      /* выключено, выгнать, ошибки */
+  --velvet-hover: #d06a73;
+  --warn: #3a2427;        /* плашка «связь пропала» */
+  --warn-text: #f0c2c6;
   --live: #9fd0a8;        /* голос подключён */
-  --text: #efe6dc;
+  --text: #f3ece6;
   --text-2: #cdbfb4;
-  --muted: #a3958c;
+  --muted: #8f857e;
+  --dim: #7b706a;         /* подписи на видео-заглушке */
+  --seat: #3a272c;        /* пустые кресла на экране входа */
+  --shade-rgb: 15, 13, 16;
+  --accent-rgb: 242, 200, 121;
 
   --radius: 12px;
   --radius-sm: 8px;
@@ -30,6 +44,137 @@
   text-rendering: optimizeLegibility;
   color-scheme: dark;
 }
+
+/* Темы: переключаются в настройках (html[data-theme]). */
+
+/* Неон-кино */
+html[data-theme="neon"] {
+  --hall: #0e0b1a;        /* фон зала */
+  --hall-deep: #0a0814;   /* самый тёмный — левая часть экрана входа */
+  --surface: #141029;     /* боковая панель, карточки */
+  --raised: #181330;      /* поля ввода, полосы */
+  --raised-2: #251d45;    /* кнопки дока */
+  --line: #211a3d;        /* разделители */
+  --line-strong: #30285a; /* рамки полей, дорожки ползунков */
+  --popover: #1d1738;     /* меню и всплывающие панели */
+  --popover-hover: #282050;
+  --quiet: #251d45;       /* тихие кнопки */
+  --quiet-hover: #30285a;
+  --bubble: #211a3d;      /* чужие сообщения в чате */
+  --lamp: #ff5fa2;        /* акцент: главные действия, кто говорит */
+  --lamp-soft: #ff8cc0;
+  --lamp-ink: #2b0718;    /* текст на акценте */
+  --lamp-tint: #2a1530;   /* фон подсказок с акцентом */
+  --velvet: #ff6b6b;      /* выключено, выгнать, ошибки */
+  --velvet-hover: #ff8585;
+  --warn: #3a1a2a;        /* плашка «связь пропала» */
+  --warn-text: #ffc2d6;
+  --live: #5ee6c8;        /* голос подключён */
+  --text: #efeaff;
+  --text-2: #c9c1ea;
+  --muted: #8d84b3;
+  --dim: #6e6694;         /* подписи на видео-заглушке */
+  --seat: #2b2250;        /* пустые кресла на экране входа */
+  --shade-rgb: 14, 11, 26;
+  --accent-rgb: 255, 95, 162;
+}
+
+/* Закат */
+html[data-theme="sunset"] {
+  --hall: #140c14;        /* фон зала */
+  --hall-deep: #0f080f;   /* самый тёмный — левая часть экрана входа */
+  --surface: #1c1119;     /* боковая панель, карточки */
+  --raised: #21141f;      /* поля ввода, полосы */
+  --raised-2: #331e2f;    /* кнопки дока */
+  --line: #2b1928;        /* разделители */
+  --line-strong: #3d2638; /* рамки полей, дорожки ползунков */
+  --popover: #2a1826;     /* меню и всплывающие панели */
+  --popover-hover: #362031;
+  --quiet: #331e2f;       /* тихие кнопки */
+  --quiet-hover: #3d2638;
+  --bubble: #2b1928;      /* чужие сообщения в чате */
+  --lamp: #ff8a4c;        /* акцент: главные действия, кто говорит */
+  --lamp-soft: #ffab7d;
+  --lamp-ink: #2e1203;    /* текст на акценте */
+  --lamp-tint: #2e1a14;   /* фон подсказок с акцентом */
+  --velvet: #ff5f7a;      /* выключено, выгнать, ошибки */
+  --velvet-hover: #ff7a90;
+  --warn: #3a1a22;        /* плашка «связь пропала» */
+  --warn-text: #ffc6cf;
+  --live: #9fd0a8;        /* голос подключён */
+  --text: #fbeee8;
+  --text-2: #e0c9c6;
+  --muted: #a48a93;
+  --dim: #86707a;         /* подписи на видео-заглушке */
+  --seat: #3d2235;        /* пустые кресла на экране входа */
+  --shade-rgb: 20, 12, 20;
+  --accent-rgb: 255, 138, 76;
+}
+
+/* Мята */
+html[data-theme="mint"] {
+  --hall: #0c1112;        /* фон зала */
+  --hall-deep: #090d0e;   /* самый тёмный — левая часть экрана входа */
+  --surface: #121a1b;     /* боковая панель, карточки */
+  --raised: #141c1d;      /* поля ввода, полосы */
+  --raised-2: #1f2b2c;    /* кнопки дока */
+  --line: #1a2425;        /* разделители */
+  --line-strong: #283637; /* рамки полей, дорожки ползунков */
+  --popover: #182122;     /* меню и всплывающие панели */
+  --popover-hover: #22302f;
+  --quiet: #1f2b2c;       /* тихие кнопки */
+  --quiet-hover: #283637;
+  --bubble: #1a2425;      /* чужие сообщения в чате */
+  --lamp: #5eead4;        /* акцент: главные действия, кто говорит */
+  --lamp-soft: #8ff3e3;
+  --lamp-ink: #062a25;    /* текст на акценте */
+  --lamp-tint: #13282a;   /* фон подсказок с акцентом */
+  --velvet: #ff7a6b;      /* выключено, выгнать, ошибки */
+  --velvet-hover: #ff9184;
+  --warn: #331e1e;        /* плашка «связь пропала» */
+  --warn-text: #ffc9c2;
+  --live: #9fe08a;        /* голос подключён */
+  --text: #e9f3f1;
+  --text-2: #c2d4d1;
+  --muted: #7f9592;
+  --dim: #66807c;         /* подписи на видео-заглушке */
+  --seat: #223234;        /* пустые кресла на экране входа */
+  --shade-rgb: 12, 17, 18;
+  --accent-rgb: 94, 234, 212;
+}
+
+/* Ночной город */
+html[data-theme="city"] {
+  --hall: #0a0f1c;        /* фон зала */
+  --hall-deep: #070b15;   /* самый тёмный — левая часть экрана входа */
+  --surface: #101727;     /* боковая панель, карточки */
+  --raised: #121a2c;      /* поля ввода, полосы */
+  --raised-2: #1c2742;    /* кнопки дока */
+  --line: #18223a;        /* разделители */
+  --line-strong: #26324f; /* рамки полей, дорожки ползунков */
+  --popover: #172036;     /* меню и всплывающие панели */
+  --popover-hover: #1f2b47;
+  --quiet: #1c2742;       /* тихие кнопки */
+  --quiet-hover: #26324f;
+  --bubble: #18223a;      /* чужие сообщения в чате */
+  --lamp: #c4f04d;        /* акцент: главные действия, кто говорит */
+  --lamp-soft: #d7f784;
+  --lamp-ink: #1d2a00;    /* текст на акценте */
+  --lamp-tint: #1a2414;   /* фон подсказок с акцентом */
+  --velvet: #ff6b8a;      /* выключено, выгнать, ошибки */
+  --velvet-hover: #ff859f;
+  --warn: #341a28;        /* плашка «связь пропала» */
+  --warn-text: #ffc6d6;
+  --live: #6fb1ff;        /* голос подключён */
+  --text: #e8eeff;
+  --text-2: #c3cbe6;
+  --muted: #7f8bab;
+  --dim: #66708f;         /* подписи на видео-заглушке */
+  --seat: #1f2a47;        /* пустые кресла на экране входа */
+  --shade-rgb: 10, 15, 28;
+  --accent-rgb: 196, 240, 77;
+}
+
 
 * {
   box-sizing: border-box;
@@ -82,7 +227,7 @@ input:not([type="range"]):not([type="radio"]):focus {
 }
 
 input::placeholder {
-  color: #7d6f68;
+  color: var(--dim);
 }
 
 button {
@@ -142,12 +287,12 @@ button.ghost:hover {
 button.quiet {
   height: 32px;
   border-radius: var(--radius-sm);
-  background: #33282d;
+  background: var(--quiet);
   font-size: 13px;
 }
 
 button.quiet:hover:not(:disabled) {
-  background: #3d3036;
+  background: var(--quiet-hover);
 }
 
 button.icon {
@@ -196,7 +341,7 @@ button.icon:hover {
   height: 440px;
   margin-left: -280px;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(242, 200, 121, 0.26), rgba(242, 200, 121, 0));
+  background: radial-gradient(closest-side, rgba(var(--accent-rgb), 0.26), rgba(var(--accent-rgb), 0));
 }
 
 .login-art .screen {
@@ -223,7 +368,7 @@ button.icon:hover {
 .login-art .seats span {
   height: 26px;
   border-radius: 9px 9px 4px 4px;
-  background: #3a272c;
+  background: var(--seat);
 }
 
 .login-brand {
@@ -477,13 +622,13 @@ button.icon:hover {
   margin: 0 24px 14px;
   padding: 10px 10px 10px 16px;
   border-radius: var(--radius);
-  background: #33281c;
+  background: var(--lamp-tint);
   color: var(--lamp-soft);
 }
 
 .notice.reconnecting {
-  background: #3a2427;
-  color: #f0c2c6;
+  background: var(--warn);
+  color: var(--warn-text);
 }
 
 .fullscreen .notice.reconnecting {
@@ -515,7 +660,7 @@ button.icon:hover {
 .video-placeholder {
   max-width: 44ch;
   padding: 24px;
-  color: #7d6f68;
+  color: var(--dim);
   text-align: center;
   font-size: 15px;
 }
@@ -586,7 +731,7 @@ input[type="range"]:hover::-webkit-slider-thumb,
 input[type="range"]:focus-visible::-webkit-slider-thumb,
 input[type="range"]:active::-webkit-slider-thumb {
   opacity: 1;
-  box-shadow: 0 0 0 4px rgba(242, 200, 121, 0.18);
+  box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.18);
 }
 
 input[type="range"]:disabled {
@@ -733,7 +878,7 @@ html.overlay body {
   flex-direction: column;
   justify-content: flex-end;
   /* Затемнение снизу, чтобы панель читалась на любом кадре. */
-  background: linear-gradient(to top, rgba(14, 10, 12, 0.92) 0%, rgba(14, 10, 12, 0.7) 55%, rgba(14, 10, 12, 0) 100%);
+  background: linear-gradient(to top, rgba(var(--shade-rgb), 0.92) 0%, rgba(var(--shade-rgb), 0.7) 55%, rgba(var(--shade-rgb), 0) 100%);
   opacity: 1;
   transition: opacity 0.35s ease;
 }
@@ -882,7 +1027,7 @@ html.overlay body {
 
 /* Говорит — тонкое кольцо лампы по краю кружка, внутри его границ. */
 .seat.speaking {
-  box-shadow: inset 0 0 0 2px var(--lamp), inset 0 0 0 3.5px rgba(25, 20, 22, 0.55);
+  box-shadow: inset 0 0 0 2px var(--lamp), inset 0 0 0 3.5px rgba(var(--shade-rgb), 0.55);
 }
 
 .seat.small {
@@ -917,7 +1062,7 @@ html.overlay body {
   padding: 6px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: #2a2024;
+  background: var(--popover);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
   animation: menu-in 0.12s ease-out;
 }
@@ -955,7 +1100,7 @@ html.overlay body {
 
 .member-menu > button:hover,
 .member-menu > button:focus-visible {
-  background: #352a2f;
+  background: var(--popover-hover);
 }
 
 .member-menu > button svg {
@@ -1007,7 +1152,7 @@ button.danger-solid {
 }
 
 button.danger-solid:hover {
-  background: #d06a73;
+  background: var(--velvet-hover);
 }
 
 /* Чат */
@@ -1101,7 +1246,7 @@ button.danger-solid:hover {
   padding: 8px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
-  background: #2a2024;
+  background: var(--popover);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
   animation: menu-in 0.12s ease-out;
 }
@@ -1141,7 +1286,7 @@ button.danger-solid:hover {
 }
 
 .emoji-picker button:hover {
-  background: #352a2f;
+  background: var(--popover-hover);
 }
 
 /* Объёмные смайлики: в тексте — по высоте строки, в панели — крупнее. */
@@ -1282,7 +1427,7 @@ img.emoji3d {
 /* Рулетка: подсветка бежит по строкам… */
 .suggestions li.lit {
   border-color: var(--lamp);
-  background: #33281c;
+  background: var(--lamp-tint);
 }
 
 /* …и останавливается на выпавшем. */
@@ -1291,7 +1436,7 @@ img.emoji3d {
 }
 
 @keyframes winner {
-  50% { box-shadow: 0 0 0 3px rgba(242, 200, 121, 0.35); }
+  50% { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35); }
 }
 
 .suggestion-text {
@@ -1351,7 +1496,7 @@ img.emoji3d {
 }
 
 .wheel-label {
-  fill: #efe6dc;
+  fill: var(--text);
   font-size: 10px;
   font-weight: 600;
 }
@@ -1364,7 +1509,7 @@ img.emoji3d {
   padding: 10px 12px;
   border: 1px dashed var(--lamp);
   border-radius: var(--radius-sm);
-  background: #2a2024;
+  background: var(--popover);
 }
 
 .admin-head,
@@ -1420,7 +1565,7 @@ button.roulette {
   align-items: center;
   gap: 6px;
   padding: 10px 14px 14px;
-  background: #1b1517;
+  background: var(--hall-deep);
 }
 
 .voice-state {
@@ -1468,7 +1613,7 @@ button.roulette {
 }
 
 button.dock:hover:not(:disabled) {
-  background: #352a2f;
+  background: var(--popover-hover);
 }
 
 .dock.off {
@@ -1476,7 +1621,7 @@ button.dock:hover:not(:disabled) {
 }
 
 .dock.active {
-  background: #3d3036;
+  background: var(--quiet-hover);
 }
 
 .dock.idle {
@@ -1691,7 +1836,7 @@ button.dock:hover:not(:disabled) {
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(20, 15, 17, 0.75);
+  background: rgba(var(--shade-rgb), 0.75);
   color: var(--text-2);
   font-size: 12px;
   font-weight: 600;
@@ -1703,6 +1848,379 @@ button.dock:hover:not(:disabled) {
 
 .header-actions button.sharing {
   color: var(--lamp);
+}
+
+/* ==========================================================================
+   Новый вид: пилюли, мягкие карточки, пузыри чата, круглые кнопки.
+   Блок идёт после основных стилей и уточняет их.
+   ========================================================================== */
+
+:root {
+  --radius: 14px;
+  --radius-sm: 10px;
+  --pill: 999px;
+}
+
+body {
+  background: var(--hall);
+}
+
+/* Кнопки — пилюлями */
+button.primary {
+  border-radius: var(--pill);
+}
+
+button.ghost {
+  border-radius: var(--pill);
+  padding: 0 14px;
+}
+
+button.quiet {
+  border-radius: var(--pill);
+  padding: 0 14px;
+}
+
+input[type="text"],
+input[type="password"],
+input:not([type]) {
+  border-radius: var(--radius-sm);
+  border-color: var(--line);
+}
+
+/* Шапка зала */
+.stage-header {
+  padding: 16px 20px 12px;
+}
+
+.room-title h1 {
+  font-size: 20px;
+}
+
+.header-actions {
+  gap: 6px;
+  align-items: center;
+}
+
+.header-actions button.ghost {
+  height: 36px;
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.header-actions button.ghost:hover:not(:disabled) {
+  background: var(--raised-2);
+}
+
+.header-actions button.icon-only {
+  width: 36px;
+  padding: 0;
+}
+
+.header-actions button.done {
+  color: var(--live);
+}
+
+/* Строка ссылки — одна пилюля с кнопкой справа */
+.source-bar {
+  padding: 0 20px 12px;
+}
+
+.source-input {
+  height: 48px;
+  padding: 0 5px 0 16px;
+  border-radius: var(--pill);
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.source-input button.ghost {
+  height: 38px;
+  background: transparent;
+  font-size: 13px;
+}
+
+.source-input button.go {
+  height: 38px;
+  padding: 0 20px;
+  border-radius: var(--pill);
+  background: var(--lamp);
+  color: var(--lamp-ink);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.source-input button.go:hover:not(:disabled) {
+  background: var(--lamp-soft);
+}
+
+.source-input button.go:disabled {
+  opacity: 0.35;
+}
+
+/* Видео */
+.video {
+  margin: 0 20px;
+  border-radius: 16px;
+}
+
+/* Панель плеера */
+.controls {
+  padding: 12px 20px 14px;
+}
+
+button.play {
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--hall);
+}
+
+button.play:hover:not(:disabled) {
+  background: var(--lamp);
+  color: var(--lamp-ink);
+}
+
+.control-row {
+  gap: 12px;
+}
+
+.tracks-toggle {
+  flex: none;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--pill);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tracks-toggle:hover,
+.tracks-toggle.active {
+  background: var(--raised-2);
+}
+
+.tracks {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* Боковая панель: карточка со скруглением, с отступом от края */
+.room {
+  grid-template-columns: 1fr 320px;
+}
+
+.side {
+  margin: 12px 12px 12px 0;
+  border: none;
+  border-radius: 18px;
+  overflow: hidden;
+}
+
+.hall {
+  border-bottom: none;
+  padding: 16px 16px 8px;
+}
+
+.side-tabs {
+  border-bottom: none;
+  padding: 6px 12px;
+  gap: 6px;
+}
+
+.side-tabs button {
+  height: 30px;
+  padding: 0 14px;
+  border-radius: var(--pill);
+  border-bottom: none;
+}
+
+.side-tabs button.active {
+  background: var(--raised-2);
+  color: var(--text);
+}
+
+/* Чат: пузыри */
+.lines {
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.message {
+  align-self: flex-start;
+  max-width: 88%;
+  padding: 7px 11px 8px;
+  border-radius: 16px 16px 16px 6px;
+  background: var(--bubble);
+}
+
+.message.mine {
+  align-self: flex-end;
+  border-radius: 16px 16px 6px 16px;
+  background: var(--lamp);
+  color: var(--lamp-ink);
+}
+
+.message.mine .author {
+  display: none;
+}
+
+/* Стикер и крупные смайлики — без пузыря */
+.message:has(> .sticker),
+.message:has(> .rich.jumbo) {
+  background: transparent;
+  padding: 2px 0;
+}
+
+.message.mine:has(> .sticker),
+.message.mine:has(> .rich.jumbo) {
+  color: var(--text);
+}
+
+.author {
+  font-size: 12px;
+}
+
+.event {
+  align-self: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 11.5px;
+  padding: 2px 8px;
+}
+
+/* Поле сообщения — пилюля с кнопками */
+.composer {
+  padding: 6px 12px 10px;
+}
+
+.composer-row {
+  gap: 2px;
+  padding: 3px 4px 3px 14px;
+  border-radius: var(--pill);
+  background: var(--hall);
+  border: 1px solid var(--line);
+}
+
+.composer-row:focus-within {
+  border-color: var(--lamp);
+}
+
+.composer input {
+  height: 38px;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.composer input:focus {
+  border: none;
+}
+
+.composer button.icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+}
+
+.composer button.send {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--lamp);
+  color: var(--lamp-ink);
+}
+
+.composer button.send:disabled {
+  opacity: 0.3;
+}
+
+/* Голосовой док — круглые кнопки */
+.voice-dock {
+  background: transparent;
+  border-top: 1px solid var(--line);
+  padding: 10px 14px 12px;
+}
+
+.dock {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+}
+
+.dock.off {
+  background: var(--warn);
+}
+
+/* Настройки */
+.settings-sub {
+  margin: 4px 0 -6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.theme-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.theme-chip {
+  height: 32px;
+  padding: 0 12px 0 8px;
+  gap: 8px;
+  border-radius: var(--pill);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.theme-chip.active {
+  border-color: var(--lamp);
+  color: var(--text);
+}
+
+.theme-swatch {
+  display: inline-flex;
+}
+
+.theme-swatch i {
+  width: 14px;
+  height: 14px;
+  margin-left: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--raised);
+}
+
+.theme-swatch i:first-child {
+  margin-left: 0;
+}
+
+/* Меню и панели — того же радиуса */
+.member-menu,
+.emoji-picker {
+  border-radius: 16px;
+}
+
+/* Экран входа */
+.login-form button.primary {
+  height: 50px;
+}
+
+.login-logo {
+  width: 72px;
+  height: 72px;
+  margin-bottom: 6px;
+  border-radius: 20px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -27,6 +27,7 @@ import {
   type VoiceAccess,
 } from "./protocol";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
+import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
 import { EmojiGlyph, RichText } from "./RichText";
 import { RouletteWheel, SPIN_MS } from "./Roulette";
 import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
@@ -222,6 +223,36 @@ async function pickVideoFile(): Promise<string | null> {
   return typeof path === "string" ? path : null;
 }
 
+/** Выбор темы оформления. */
+export function ThemePicker() {
+  const [theme, setThemeState] = useState<ThemeId>(savedTheme);
+  return (
+    <div className="theme-picker" role="radiogroup" aria-label="Тема">
+      {THEMES.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="radio"
+          aria-checked={theme === t.id}
+          className={theme === t.id ? "theme-chip active" : "theme-chip"}
+          onClick={() => {
+            setTheme(t.id);
+            setThemeState(t.id);
+          }}
+          title={t.title}
+        >
+          <span className="theme-swatch">
+            {t.swatch.map((c) => (
+              <i key={c} style={{ background: c }} />
+            ))}
+          </span>
+          {t.title}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Открыть папку с логами. В ней папка «1» — этот запуск, «2» — предыдущий
  * и так далее: её и нужно прислать, если что-то сломалось.
@@ -251,6 +282,7 @@ export function LoginArt() {
         ))}
       </div>
       <div className="login-brand">
+        <img className="login-logo" src="/logo.svg" alt="" />
         <span className="wordmark">BrotherHub</span>
         <p>Кинозал для своих: один фильм, одна пауза, общий голосовой чат.</p>
       </div>
@@ -621,6 +653,22 @@ export default function App() {
     }
     await run(() => invoke("open_url", { url: link }));
     setUrl("");
+  }
+
+  // «Позвать»: приглашение для друга в буфер обмена (без пароля).
+  const [invited, setInvited] = useState(false);
+  async function copyInvite() {
+    const text =
+      `Заходи смотреть в BrotherHub! Комната: ${joinedRoom}.` +
+      (server !== DEFAULT_SERVER ? ` Сервер: ${server}.` : "") +
+      " Скачать: https://github.com/Ferrumnyak/Brotherwatch/releases/latest";
+    try {
+      await navigator.clipboard.writeText(text);
+      setInvited(true);
+      setTimeout(() => setInvited(false), 2000);
+    } catch {
+      setError("Не удалось скопировать приглашение");
+    }
   }
 
   async function handleSuggest() {
@@ -1152,7 +1200,7 @@ export default function App() {
           height: Math.round(r.height * k),
         },
         // Углы — как у области видео в интерфейсе.
-        radius: Math.round((fullscreen ? 0 : mini ? 10 : 14) * k),
+        radius: Math.round((fullscreen ? 0 : mini ? 10 : 16) * k),
       }).catch(() => {});
       // В полном экране и в мини-окне панель плеера — отдельное окно поверх низа видео.
       if (fullscreen || mini) {
@@ -1270,6 +1318,10 @@ export default function App() {
                   autoComplete="off"
                 />
               </label>
+              <div className="setting">
+                <span className="setting-label">Тема</span>
+                <ThemePicker />
+              </div>
               <LogsButton />
             </details>
           </form>
@@ -1357,14 +1409,31 @@ export default function App() {
                 }
               >
                 <Icon name="cast" size={17} />
-                {sharing ? "Остановить показ" : "Показать экран"}
+                {sharing ? "Остановить показ" : "Экран"}
               </button>
-              <button className="ghost" onClick={() => setChatOpen((o) => !o)} title="Tab">
-                <Icon name="panel" size={17} />
-                {chatOpen ? "Скрыть чат" : "Показать чат"}
+              <button
+                className={invited ? "ghost done" : "ghost"}
+                onClick={copyInvite}
+                title="Скопировать приглашение для друга"
+              >
+                <Icon name="enter" size={17} />
+                {invited ? "Скопировано" : "Позвать"}
               </button>
-              <button className="ghost" onClick={handleLeave}>
-                Выйти из зала
+              <button
+                className="ghost icon-only"
+                onClick={() => setChatOpen((o) => !o)}
+                title={chatOpen ? "Скрыть чат (Tab)" : "Показать чат (Tab)"}
+                aria-label={chatOpen ? "Скрыть чат" : "Показать чат"}
+              >
+                <Icon name="panel" size={18} />
+              </button>
+              <button
+                className="ghost icon-only"
+                onClick={handleLeave}
+                title="Выйти из зала"
+                aria-label="Выйти из зала"
+              >
+                <Icon name="leave" size={18} />
               </button>
             </div>
           </header>
@@ -1400,8 +1469,8 @@ export default function App() {
                   В список
                 </button>
               )}
-              <button type="submit" className="quiet" disabled={!url.trim()}>
-                {isHost ? "Открыть" : "Предложить"}
+              <button type="submit" className="go" disabled={!url.trim()}>
+                {isHost ? "Смотреть" : "Предложить"}
               </button>
             </label>
           </form>
@@ -1582,7 +1651,12 @@ export default function App() {
 
           {voiceSettings ? (
             <div className="voice-settings">
-              <h2>Голос</h2>
+              <h2>Настройки</h2>
+              <div className="setting">
+                <span className="setting-label">Тема</span>
+                <ThemePicker />
+              </div>
+              <h3 className="settings-sub">Голос</h3>
               <fieldset>
                 <legend>Микрофон</legend>
                 <label className="radio">
@@ -1740,7 +1814,7 @@ export default function App() {
                     <span>{l.text}</span>
                   </div>
                 ) : (
-                  <div key={l.key} className="message">
+                  <div key={l.key} className={l.mine ? "message mine" : "message"}>
                     <span className="author" style={{ color: NAME_COLORS[colorIndex(l.name)] }}>
                       {l.name}
                     </span>
@@ -1855,6 +1929,15 @@ export default function App() {
                   title="Стикеры"
                 >
                   <Icon name="sticker" size={18} />
+                </button>
+                <button
+                  type="submit"
+                  className="send"
+                  disabled={!draft.trim() || reconnecting}
+                  aria-label="Отправить"
+                  title="Отправить: Enter"
+                >
+                  <Icon name="send" size={16} />
                 </button>
               </div>
             </form>
@@ -2340,6 +2423,7 @@ function PlayerControls({
     volumeTimer.current = setTimeout(() => setVolumeDrag(null), 800);
   };
 
+  const [tracksOpen, setTracksOpen] = useState(false);
   const audioTracks = tracks.filter((t) => t.kind === "audio");
   const subTracks = tracks.filter((t) => t.kind === "sub");
   const audioValue = String(audioTracks.find((t) => t.selected)?.id ?? "off");
@@ -2403,11 +2487,25 @@ function PlayerControls({
         >
           <Icon name={paused ? "play-solid" : "pause-solid"} size={18} />
         </button>
-        <div className="now">
-          <span className="now-title">{title}</span>
-          <span className="now-status">{status}</span>
-        </div>
+        {!tracksOpen && (
+          <div className="now">
+            <span className="now-title">{title}</span>
+            <span className="now-status">{status}</span>
+          </div>
+        )}
 
+        {/* «Звук и субтитры»: дорожки и качество — вместо названия, по кнопке. */}
+        <button
+          className={tracksOpen ? "tracks-toggle active" : "tracks-toggle"}
+          onClick={() => setTracksOpen((o) => !o)}
+          title="Озвучка, субтитры и качество — у каждого свои"
+        >
+          <Icon name={tracksOpen ? "close" : "sliders"} size={16} />
+          {tracksOpen ? "Готово" : "Звук и субтитры"}
+        </button>
+
+        {tracksOpen && (
+        <div className="tracks">
         <label className="track-select" title="Озвучка у каждого своя">
           <span>Озвучка</span>
           <select
@@ -2457,6 +2555,9 @@ function PlayerControls({
             ))}
           </select>
         </label>
+
+        </div>
+        )}
 
         <label className="volume" title="Громкость фильма у каждого своя">
           <Icon name={volume > 0 ? "volume" : "mute"} size={18} />

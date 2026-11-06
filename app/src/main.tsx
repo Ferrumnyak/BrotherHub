@@ -10,6 +10,9 @@ import "@fontsource/manrope/700.css";
 import "@fontsource/unbounded/500.css";
 import "@fontsource/unbounded/700.css";
 import "./styles.css";
+import { initTheme } from "./theme";
+
+initTheme();
 
 // Окно панели плеера поверх видео (полный экран) открывается тем же
 // интерфейсом с пометкой __BW_VIEW = "controls".
