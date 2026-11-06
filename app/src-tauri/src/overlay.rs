@@ -6,10 +6,17 @@
 //! привязано к главному окну. Окно открывается тем же интерфейсом, но с
 //! пометкой `window.__BW_VIEW = "controls"` — тогда показывается только панель.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
 const LABEL: &str = "controls";
+
+/// Нужна ли панель сейчас. Окно создаётся не мгновенно: если за это время
+/// пришла команда закрыть (вышли из полного экрана), созданное окно сразу
+/// убираем — иначе оно оставалось бы висеть поверх главного.
+static WANTED: AtomicBool = AtomicBool::new(false);
 
 /// Прямоугольник в физических пикселях относительно окна приложения.
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -24,6 +31,7 @@ pub struct Rect {
 /// Окна создаём в async-команде: в синхронной Windows может зависнуть.
 #[tauri::command]
 pub async fn overlay_place(app: AppHandle, rect: Rect) -> Result<(), String> {
+    WANTED.store(true, Ordering::SeqCst);
     let main = app.get_webview_window("main").ok_or("нет главного окна")?;
     let origin = main.inner_position().map_err(|e| e.to_string())?;
     let position = PhysicalPosition::new(origin.x + rect.x, origin.y + rect.y);
@@ -46,6 +54,10 @@ pub async fn overlay_place(app: AppHandle, rect: Rect) -> Result<(), String> {
             .build()
             .map_err(|e| e.to_string())?,
     };
+    if !WANTED.load(Ordering::SeqCst) {
+        let _ = window.destroy();
+        return Ok(());
+    }
     window.set_size(size).map_err(|e| e.to_string())?;
     window.set_position(position).map_err(|e| e.to_string())?;
     window.show().map_err(|e| e.to_string())?;
@@ -62,6 +74,7 @@ pub fn overlay_interactive(app: AppHandle, interactive: bool) {
 
 #[tauri::command]
 pub fn overlay_close(app: AppHandle) {
+    WANTED.store(false, Ordering::SeqCst);
     if let Some(window) = app.get_webview_window(LABEL) {
         let _ = window.destroy();
     }

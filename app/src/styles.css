@@ -1910,6 +1910,14 @@ button.quiet {
   padding: 0 14px;
 }
 
+/* Круглые кнопки-значки не должны получать отступы пилюли — иначе
+   значок сжимается в ноль и пропадает. */
+button.ghost.icon,
+button.quiet.icon {
+  padding: 0;
+  border-radius: 50%;
+}
+
 input[type="text"],
 input[type="password"],
 input:not([type]) {

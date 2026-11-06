@@ -113,11 +113,16 @@ pub async fn browser_back(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Закрыть браузер: страница выгружается, её звук тоже пропадает.
+/// Закрыть браузер: страницу выгружаем (пропадает и её звук) и прячем.
+/// Сам webview не уничтожаем — закрытие дочернего webview на Windows
+/// может сбить ввод главному окну; при следующем «Обзоре» он пригодится.
 #[tauri::command]
 pub async fn browser_close(app: AppHandle) -> Result<(), String> {
     if let Some(view) = app.get_webview(LABEL) {
-        view.close().map_err(|e| e.to_string())?;
+        view.hide().map_err(|e| e.to_string())?;
+        if let Ok(blank) = "about:blank".parse::<Url>() {
+            let _ = view.navigate(blank);
+        }
     }
     Ok(())
 }
