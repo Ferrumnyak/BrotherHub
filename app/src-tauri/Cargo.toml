@@ -1,6 +1,6 @@
 [package]
 name = "brotherwatch"
-description = "BrotherWatch — совместный просмотр фильмов и сериалов с друзьями"
+description = "BrotherHub — совместный просмотр фильмов и сериалов с друзьями"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

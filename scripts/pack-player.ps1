@@ -1,4 +1,4 @@
-﻿# Готовит архив плеера mpv, который BrotherWatch скачивает при первом запуске.
+﻿# Готовит архив плеера mpv, который BrotherHub скачивает при первом запуске.
 #
 # Запуск из корня репозитория:
 #   powershell -ExecutionPolicy Bypass -File scripts\pack-player.ps1
@@ -82,7 +82,7 @@ Write-Host "  1. https://github.com/$repo/releases/new"
 Write-Host "  2. Тег: $tag (создать новый), название: Плеер mpv $stamp"
 Write-Host "  3. Прикрепи файл $name"
 Write-Host "  4. Поставь галочку «Set as a pre-release», сними «Set as the latest release»"
-Write-Host "     — чтобы на странице «последний релиз» оставался сам BrotherWatch."
+Write-Host "     — чтобы на странице «последний релиз» оставался сам BrotherHub."
 Write-Host "  5. Publish release"
 Write-Host ""
 Write-Host "Проверить, что архив доступен: $url"

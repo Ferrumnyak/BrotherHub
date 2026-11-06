@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "BrotherWatch",
+  "productName": "BrotherHub",
   "version": "0.2.1",
   "identifier": "com.ferrumnyak.brotherwatch",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "BrotherWatch",
+        "title": "BrotherHub",
         "width": 1180,
         "height": 760,
         "minWidth": 480,
@@ -35,7 +35,7 @@
     ],
     "publisher": "Ferrumnyak",
     "shortDescription": "Совместный просмотр фильмов и сериалов с друзьями",
-    "longDescription": "BrotherWatch — синхронный просмотр видео с друзьями, голосовая связь и текстовый чат.",
+    "longDescription": "BrotherHub — синхронный просмотр видео с друзьями, голосовая связь и текстовый чат.",
     "windows": {
       "nsis": {
         "installMode": "currentUser",

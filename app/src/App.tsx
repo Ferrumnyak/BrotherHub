@@ -251,7 +251,7 @@ export function LoginArt() {
         ))}
       </div>
       <div className="login-brand">
-        <span className="wordmark">BrotherWatch</span>
+        <span className="wordmark">BrotherHub</span>
         <p>Кинозал для своих: один фильм, одна пауза, общий голосовой чат.</p>
       </div>
     </div>

@@ -56,5 +56,5 @@ fn main() {
             logs::open_logs
         ])
         .run(tauri::generate_context!())
-        .expect("не удалось запустить BrotherWatch");
+        .expect("не удалось запустить BrotherHub");
 }

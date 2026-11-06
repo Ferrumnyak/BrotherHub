@@ -1,11 +1,11 @@
 //! Установка плеера при первом запуске.
 //!
 //! mpv и yt-dlp не входят в установщик (вместе это ~60 МБ — больше, чем всё
-//! остальное приложение). Если их нет ни рядом с BrotherWatch.exe, ни в
+//! остальное приложение). Если их нет ни рядом с BrotherHub.exe, ни в
 //! системе, приложение при первом запуске скачивает их в свою папку данных
 //! `%LOCALAPPDATA%\com.ferrumnyak.brotherwatch\` (см. [`tools_dir`]):
 //!
-//! - mpv — архив из релизов BrotherWatch на GitHub. Адрес и SHA-256 архива
+//! - mpv — архив из релизов BrotherHub на GitHub. Адрес и SHA-256 архива
 //!   записаны в `player-pack.json` (его заполняет `scripts/pack-player.ps1`),
 //!   поэтому версия mpv закреплена и меняется только вместе с приложением;
 //! - yt-dlp — последняя версия с официальной страницы релизов, с проверкой
@@ -96,7 +96,7 @@ pub async fn player_setup(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Не удалось создать папку {}: {e}", dir.display()))?;
 
     let client = reqwest::Client::builder()
-        .user_agent(concat!("BrotherWatch/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("BrotherHub/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
         .build()
         .map_err(|e| format!("Не удалось подготовить загрузку: {e}"))?;

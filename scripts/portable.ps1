@@ -1,4 +1,4 @@
-﻿# Собирает BrotherWatch без установщика: папка с BrotherWatch.exe,
+﻿# Собирает BrotherHub без установщика: папка с BrotherHub.exe,
 # упакованная в zip. Распаковал — запустил, ничего не устанавливая.
 # mpv и yt-dlp приложение скачает само при первом запуске (в
 # %LOCALAPPDATA%\com.ferrumnyak.brotherwatch\).
@@ -41,10 +41,10 @@ try {
 $config = Get-Content (Join-Path $root "app\src-tauri\tauri.conf.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $config.version
 if ($server) {
-    Write-Host "Собираю BrotherWatch $version для сервера $server..."
+    Write-Host "Собираю BrotherHub $version для сервера $server..."
     $env:VITE_DEFAULT_SERVER = $server
 } else {
-    Write-Host "Собираю BrotherWatch $version (адрес сервера — по умолчанию)..."
+    Write-Host "Собираю BrotherHub $version (адрес сервера — по умолчанию)..."
 }
 Push-Location (Join-Path $root "app")
 try {
@@ -61,15 +61,15 @@ $exe = Join-Path $root "target\release\brotherwatch.exe"
 if (-not (Test-Path $exe)) { throw "Не нашёл $exe" }
 
 $releaseDir = Join-Path $root "release"
-$out = Join-Path $releaseDir "BrotherWatch"
+$out = Join-Path $releaseDir "BrotherHub"
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-Copy-Item $exe (Join-Path $out "BrotherWatch.exe")
+Copy-Item $exe (Join-Path $out "BrotherHub.exe")
 Copy-Item (Join-Path $root "docs\THIRD-PARTY.md") $out
 
 # ---------- Zip ----------
-$zip = Join-Path $releaseDir "BrotherWatch-$version-portable.zip"
+$zip = Join-Path $releaseDir "BrotherHub-$version-portable.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $out -DestinationPath $zip
 
@@ -77,5 +77,5 @@ Write-Host ""
 Write-Host "Готово:" -ForegroundColor Green
 Write-Host "  папка  $out"
 Write-Host "  архив  $zip"
-Write-Host "Запуск — BrotherWatch.exe в папке. Нужна Windows 10/11 (WebView2 там уже есть)."
+Write-Host "Запуск — BrotherHub.exe в папке. Нужна Windows 10/11 (WebView2 там уже есть)."
 Write-Host "При первом запуске приложение скачает плеер (~60 МБ)."

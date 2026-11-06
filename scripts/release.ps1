@@ -1,4 +1,4 @@
-﻿# Собирает установщик BrotherWatch для друзей и кладёт его в папку release\.
+﻿# Собирает установщик BrotherHub для друзей и кладёт его в папку release\.
 #
 # Запуск из корня репозитория:
 #   powershell -ExecutionPolicy Bypass -File scripts\release.ps1
@@ -48,7 +48,7 @@ try {
 # ---------- Сборка ----------
 $config = Get-Content (Join-Path $root "app\src-tauri\tauri.conf.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $version = $config.version
-Write-Host "Собираю BrotherWatch $version для сервера $server..."
+Write-Host "Собираю BrotherHub $version для сервера $server..."
 
 $env:VITE_DEFAULT_SERVER = $server
 Push-Location (Join-Path $root "app")
@@ -62,12 +62,12 @@ finally {
 }
 
 # ---------- Готовый файл ----------
-$setup = Join-Path $root "target\release\bundle\nsis\BrotherWatch_${version}_x64-setup.exe"
+$setup = Join-Path $root "target\release\bundle\nsis\BrotherHub_${version}_x64-setup.exe"
 if (-not (Test-Path $setup)) { throw "Не нашёл установщик: $setup" }
 
 $releaseDir = Join-Path $root "release"
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-$dest = Join-Path $releaseDir "BrotherWatch-$version-setup.exe"
+$dest = Join-Path $releaseDir "BrotherHub-$version-setup.exe"
 Copy-Item $setup $dest -Force
 
 Write-Host ""

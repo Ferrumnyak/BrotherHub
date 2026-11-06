@@ -1,6 +1,6 @@
 [package]
 name = "brotherwatch-shared"
-description = "Протокол обмена сообщениями между клиентом и сервером BrotherWatch"
+description = "Протокол обмена сообщениями между клиентом и сервером BrotherHub"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

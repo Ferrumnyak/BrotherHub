@@ -97,7 +97,7 @@ impl Player {
             "--force-window=yes",
             "--keep-open=yes",
             "--pause=yes",
-            "--title=BrotherWatch",
+            "--title=BrotherHub",
             "--no-terminal",
             // Декодировать видео на видеокарте, если она умеет (4K и HEVC
             // без нагрузки на процессор); иначе — процессором, как раньше.
@@ -374,7 +374,7 @@ impl Drop for Player {
 /// Привязать процесс mpv к жизни приложения.
 ///
 /// На Windows процесс кладётся в Job Object с флагом
-/// `KILL_ON_JOB_CLOSE`: когда BrotherWatch завершается (крестик, Alt+F4,
+/// `KILL_ON_JOB_CLOSE`: когда BrotherHub завершается (крестик, Alt+F4,
 /// диспетчер задач, падение), Windows закрывает задание и убивает mpv
 /// вместе с запущенным им yt-dlp.
 #[cfg(windows)]
@@ -480,7 +480,7 @@ fn first_existing(candidates: Vec<PathBuf>) -> Option<String> {
 #[cfg(windows)]
 fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
     let mut list = Vec::new();
-    // Рядом с BrotherWatch.exe (так было в установщике до версии 0.2).
+    // Рядом с BrotherHub.exe (так было в установщике до версии 0.2).
     if let Some(dir) = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(PathBuf::from))

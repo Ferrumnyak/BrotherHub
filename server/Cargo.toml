@@ -1,6 +1,6 @@
 [package]
 name = "brotherwatch-server"
-description = "Сервер BrotherWatch: комнаты, текстовый чат, синхронизация воспроизведения"
+description = "Сервер BrotherHub: комнаты, текстовый чат, синхронизация воспроизведения"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

@@ -32,7 +32,7 @@ pub async fn overlay_place(app: AppHandle, rect: Rect) -> Result<(), String> {
     let window = match app.get_webview_window(LABEL) {
         Some(window) => window,
         None => WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
-            .title("BrotherWatch")
+            .title("BrotherHub")
             .initialization_script("window.__BW_VIEW = 'controls';")
             .transparent(true)
             .decorations(false)

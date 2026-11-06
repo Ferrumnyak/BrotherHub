@@ -55,7 +55,7 @@ pub fn init() {
     }));
 
     info(format!(
-        "BrotherWatch {} ({} {})",
+        "BrotherHub {} ({} {})",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH

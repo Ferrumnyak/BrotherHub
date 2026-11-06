@@ -71,7 +71,7 @@ export default function PlayerSetup({ children }: { children: ReactNode }) {
           <h1>Готовлю плеер</h1>
           <p className="muted">
             Первый запуск: скачиваю плеер mpv и yt-dlp, около 60 МБ. Это нужно один раз — дальше
-            BrotherWatch будет открываться сразу.
+            BrotherHub будет открываться сразу.
           </p>
 
           {state === "installing" && (

@@ -1,4 +1,4 @@
-//! Связь с сервером BrotherWatch по WebSocket.
+//! Связь с сервером BrotherHub по WebSocket.
 //!
 //! Интерфейс (React) вызывает команды `connect`, `send`, `disconnect`,
 //! а сообщения от сервера получает событиями:

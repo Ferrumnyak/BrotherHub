@@ -1,4 +1,4 @@
-//! Запуск сервера BrotherWatch.
+//! Запуск сервера BrotherHub.
 //!
 //! Настройки — переменные окружения:
 //! - `BROTHERWATCH_ADDR` — адрес (по умолчанию `0.0.0.0:8080`);
@@ -41,6 +41,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| panic!("не удалось занять адрес {addr}: {e}"));
-    tracing::info!("BrotherWatch server слушает {addr}");
+    tracing::info!("BrotherHub server слушает {addr}");
     serve(listener, config).await.expect("сервер упал");
 }

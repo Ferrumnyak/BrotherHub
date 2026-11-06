@@ -1,5 +1,5 @@
 ﻿# Скачивает свежую сборку mpv, из которой scripts\pack-player.ps1 делает
-# архив плеера для BrotherWatch. Обычно отдельно запускать не нужно —
+# архив плеера для BrotherHub. Обычно отдельно запускать не нужно —
 # pack-player.ps1 вызывает его сам.
 #
 # Запуск из корня репозитория:
@@ -17,7 +17,7 @@ $ProgressPreference = "SilentlyContinue"
 $root = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $root "app\src-tauri\bin"
 $mpvDir = Join-Path $bin "mpv"
-$headers = @{ "User-Agent" = "BrotherWatch-build" }
+$headers = @{ "User-Agent" = "BrotherHub-build" }
 
 New-Item -ItemType Directory -Force -Path $mpvDir | Out-Null
 

@@ -178,7 +178,7 @@ export class VoiceClient {
     let stream: MediaStream;
     try {
       // Нестандартные поля Chromium (WebView2 — это он): звук всей системы,
-      // без звука самого BrotherWatch — иначе друзья услышат себя.
+      // без звука самого BrotherHub — иначе друзья услышат себя.
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: { ideal: 30, max: 30 }, width: { max: 1920 }, height: { max: 1080 } },
         audio: {
