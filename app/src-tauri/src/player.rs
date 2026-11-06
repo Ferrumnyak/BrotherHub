@@ -466,12 +466,13 @@ fn parse_key(v: &Value) -> Option<PlayerKey> {
 /// Формат для yt-dlp: лучшее видео не выше `quality` строк (по умолчанию —
 /// 1080p) плюс лучший звук; если такого нет — лучшее, что есть.
 /// AV1 — только если другого нет: многие видеокарты его не декодируют,
-/// и тогда он грузит процессор.
+/// и тогда он грузит процессор. В конце — просто звук: у музыкальных сайтов
+/// (SoundCloud) картинки нет вовсе, а `best` требует и видео, и звук.
 pub fn ytdl_format(quality: Option<u32>) -> String {
     let h = quality.unwrap_or(1080);
     format!(
         "bestvideo[height<=?{h}][vcodec!^=av01]+bestaudio/\
-         bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best"
+         bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best/bestaudio"
     )
 }
 
@@ -626,7 +627,7 @@ mod tests {
         assert_eq!(
             ytdl_format(None),
             "bestvideo[height<=?1080][vcodec!^=av01]+bestaudio/\
-             bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best"
+             bestvideo[height<=?1080]+bestaudio/best[height<=?1080]/best/bestaudio"
         );
         assert!(ytdl_format(Some(480)).contains("height<=?480"));
     }

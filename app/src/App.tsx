@@ -688,7 +688,12 @@ export default function App() {
           break;
         }
         case "error":
-          setError(msg.message);
+          // Старый сервер не знает новых сообщений (реакции, субтитры для всех).
+          setError(
+            msg.message.includes("unknown variant")
+              ? "Сервер старой версии — реакции и субтитры для всех заработают после его обновления"
+              : msg.message,
+          );
           break;
         case "suggestions": {
           const known = new Set(suggestionsRef.current.map((x) => x.id));
