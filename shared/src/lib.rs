@@ -29,6 +29,10 @@ pub enum ClientMsg {
         /// Аватарка: `emoji:🍿` или `color:3`.
         #[serde(default)]
         avatar: Option<String>,
+        /// Постоянный случайный номер устройства. Кто создал комнату,
+        /// тот её хозяин: вернувшись, он снова получает пульт.
+        #[serde(default)]
+        device: Option<String>,
     },
     /// Выйти из комнаты насовсем (без ожидания переподключения).
     Leave,
@@ -64,6 +68,11 @@ pub enum ClientMsg {
     Spin {
         #[serde(default)]
         weights: Vec<(u64, f64)>,
+        /// Крутить сразу, без отсчёта.
+        #[serde(default)]
+        now: bool,
+        #[serde(default)]
+        key: Option<String>,
     },
     /// Отменить рулетку до того, как она закрутилась (ведущий или кто запустил).
     CancelRoulette,
@@ -387,10 +396,10 @@ mod tests {
     #[test]
     fn new_messages_round_trip() {
         let spin: ClientMsg = serde_json::from_str(r#"{"type":"spin"}"#).unwrap();
-        assert!(matches!(spin, ClientMsg::Spin { weights } if weights.is_empty()));
+        assert!(matches!(spin, ClientMsg::Spin { weights, now: false, .. } if weights.is_empty()));
         let rigged: ClientMsg =
             serde_json::from_str(r#"{"type":"spin","weights":[[3,5.0]]}"#).unwrap();
-        assert!(matches!(rigged, ClientMsg::Spin { weights } if weights == vec![(3, 5.0)]));
+        assert!(matches!(rigged, ClientMsg::Spin { weights, .. } if weights == vec![(3, 5.0)]));
         let clear: ClientMsg = serde_json::from_str(r#"{"type":"clear_media"}"#).unwrap();
         assert!(matches!(clear, ClientMsg::ClearMedia));
         let voice: ClientMsg =

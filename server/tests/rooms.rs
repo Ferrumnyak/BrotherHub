@@ -505,3 +505,67 @@ async fn replies_typing_profiles_and_series() {
     let list = a.expect("suggestions").await;
     assert_eq!(list["list"].as_array().unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn creator_gets_host_back_on_return() {
+    let url = start(Config::default()).await;
+    let mut a = Client::connect(&url).await;
+    a.send(json!({"type": "join", "room": "r", "name": "Аня", "device": "dev-a"}))
+        .await;
+    a.expect("welcome").await;
+    let (mut b, wb) = Client::join(&url, "r", "Боря").await;
+
+    // Хозяйка ушла — пульт у Бори.
+    a.send(json!({"type": "leave"})).await;
+    assert_eq!(b.expect("host_changed").await["host"], wb["you"]);
+
+    // Вернулась (с тем же устройством, даже под другим ником) — пульт снова у неё.
+    let mut a = Client::connect(&url).await;
+    a.send(json!({"type": "join", "room": "r", "name": "Аня2", "device": "dev-a"}))
+        .await;
+    let wa = a.expect("welcome").await;
+    assert_eq!(wa["host"], wa["you"]);
+    assert_eq!(b.expect("host_changed").await["host"], wa["you"]);
+
+    // Чужой с тем же ником, но другим устройством, пульт не получает.
+    let mut c = Client::connect(&url).await;
+    c.send(json!({"type": "join", "room": "r", "name": "Аня", "device": "dev-c"}))
+        .await;
+    let wc = c.expect("welcome").await;
+    assert_eq!(wc["host"], wa["you"]);
+}
+
+#[tokio::test]
+async fn roulette_can_spin_right_away() {
+    let url = start(Config {
+        roulette_delay: Duration::from_millis(400),
+        special_key: Some("k".into()),
+        ..Config::default()
+    })
+    .await;
+    let (mut a, _) = Client::join(&url, "r", "Аня").await;
+    let (mut b, _) = Client::join(&url, "r", "Боря").await;
+    b.send(json!({"type": "suggest", "media": "https://example.com/1"}))
+        .await;
+    a.expect("suggestions").await;
+    b.send(json!({"type": "spin"})).await;
+    a.expect("roulette_countdown").await;
+
+    // Без слова — нельзя.
+    b.send(json!({"type": "spin", "now": true})).await;
+    b.expect("error").await;
+
+    // Со словом — сразу, отсчёт больше не крутит второй раз.
+    b.send(json!({"type": "spin", "now": true, "key": "k"})).await;
+    let spin = a.expect("roulette").await;
+    assert_eq!(spin["by"], "Боря");
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    b.send(json!({"type": "chat", "text": "ну"})).await;
+    loop {
+        let msg = a.next().await;
+        assert_ne!(msg["type"], "roulette");
+        if msg["type"] == "chat" {
+            break;
+        }
+    }
+}

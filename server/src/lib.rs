@@ -145,6 +145,8 @@ struct Peer {
 struct Room {
     peers: HashMap<MemberId, Peer>,
     host: MemberId,
+    /// Хозяин комнаты (кто её создал) — вернувшись, снова получает пульт.
+    owner: String,
     media: Option<String>,
     paused: bool,
     /// Позиция на момент `updated_at`.
@@ -173,10 +175,11 @@ struct PendingRoulette {
 }
 
 impl Room {
-    fn new(host: MemberId) -> Self {
+    fn new(host: MemberId, owner: String) -> Self {
         Self {
             peers: HashMap::new(),
             host,
+            owner,
             media: None,
             paused: true,
             position: 0.0,
@@ -187,6 +190,15 @@ impl Room {
             next_rig: 1,
             subtitles: None,
             roulette: None,
+        }
+    }
+
+    /// Хозяин вернулся — пульт снова у него.
+    fn give_back_to_owner(&mut self, id: MemberId, owner: &str) {
+        if self.owner == owner && self.host != id {
+            self.host = id;
+            // Сам вернувшийся узнает это из `Welcome`.
+            self.broadcast_except(id, &ServerMsg::HostChanged { host: id });
         }
     }
 
@@ -594,6 +606,7 @@ async fn handle_command(
         password,
         resume,
         avatar,
+        device,
     } = cmd
     {
         let avatar = clean_avatar(avatar);
@@ -612,6 +625,13 @@ async fn handle_command(
         if room.chars().count() > MAX_NAME_LEN || name.chars().count() > MAX_NAME_LEN {
             return error("слишком длинное название комнаты или ник");
         }
+
+        // Кто этот участник «как хозяин»: по номеру устройства, а у старых
+        // версий приложения — по нику.
+        let owner = match device {
+            Some(d) if !d.trim().is_empty() && d.len() <= 64 => format!("device:{}", d.trim()),
+            _ => format!("name:{name}"),
+        };
 
         let mut rooms = state.rooms.lock().await;
 
@@ -632,6 +652,7 @@ async fn handle_command(
                         peer.avatar = avatar;
                     }
                     r.broadcast_except(id, &ServerMsg::MemberStatus { id, online: true });
+                    r.give_back_to_owner(id, &owner);
                     let welcome = welcome(state, r, &room, id, token, true);
                     send(tx, welcome);
                     tracing::info!("участник {id} вернулся в «{room}»");
@@ -646,7 +667,7 @@ async fn handle_command(
             return error("на сервере слишком много комнат, попробуй позже");
         }
         let id = state.new_id();
-        let r = rooms.entry(room.clone()).or_insert_with(|| Room::new(id));
+        let r = rooms.entry(room.clone()).or_insert_with(|| Room::new(id, owner.clone()));
         if r.peers.len() >= MAX_ROOM_MEMBERS {
             return error("в комнате уже нет мест");
         }
@@ -678,6 +699,7 @@ async fn handle_command(
                 avatar,
             },
         );
+        r.give_back_to_owner(id, &owner);
         let welcome = welcome(state, r, &room, id, token, false);
         send(tx, welcome);
         tracing::info!("участник {id} ({name}) вошёл в комнату «{room}»");
@@ -843,9 +865,31 @@ async fn handle_command(
             });
             return false;
         }
-        ClientMsg::Spin { weights } => {
+        ClientMsg::Spin { weights, now, key } => {
             if room.suggestions.is_empty() {
                 return error("в списке пусто — сначала предложите, что посмотреть");
+            }
+            let allowed = match state.config.special_key.as_deref() {
+                Some(k) => key.as_deref() == Some(k),
+                None => true,
+            };
+            if now && !allowed {
+                return error("неверное слово");
+            }
+            if now {
+                // Сразу: отсчёт (если шёл) отменяется, колесо крутится.
+                let pending = room.roulette.take();
+                let given: Vec<(u64, f64)> = weights.into_iter().take(MAX_SUGGESTIONS).collect();
+                let weights = room.active_rig().cloned().unwrap_or_else(|| {
+                    if given.is_empty() {
+                        pending.map(|p| p.weights).unwrap_or_default()
+                    } else {
+                        given
+                    }
+                });
+                let winner = pick_weighted(&room.suggestions, &weights);
+                room.broadcast(&ServerMsg::Roulette { winner, by: name });
+                return false;
             }
             if room.roulette.is_some() {
                 return error("рулетка уже запущена");
