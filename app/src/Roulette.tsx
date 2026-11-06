@@ -1,7 +1,7 @@
 // Рулетка «Что посмотреть»: настоящее колесо с секторами.
 // Какой сектор выпадет, решает сервер; колесо только красиво туда докручивается.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Suggestion } from "./protocol";
 
 /** Сколько крутится колесо, мс (совпадает с transition в стилях). */
@@ -23,6 +23,19 @@ function point(angle: number, radius: number): [number, number] {
   return [C + radius * Math.cos(a), C + radius * Math.sin(a)];
 }
 
+/**
+ * Плавный разгон за первые ~10% и долгое замедление до остановки.
+ * Самая высокая скорость — около 12° за кадр: без «стробоскопа».
+ */
+function easeOut(t: number): number {
+  const a = 0.1;
+  // Доля пути на разгоне — так, чтобы скорость на стыке совпала.
+  const p = (3 * a) / (2 + a);
+  if (t < a) return (p * t * t) / (a * a);
+  const u = (t - a) / (1 - a);
+  return p + (1 - p) * (1 - (1 - u) ** 3);
+}
+
 function label(media: string, title: (m: string) => string): string {
   const t = title(media);
   return t.length > 14 ? `${t.slice(0, 13)}…` : t;
@@ -38,7 +51,7 @@ export function RouletteWheel({
   winner: number | null;
   title: (media: string) => string;
 }) {
-  const [rotation, setRotation] = useState(0);
+  const diskRef = useRef<HTMLDivElement>(null);
   const rotationRef = useRef(0);
   const n = Math.max(list.length, 1);
   const seg = 360 / n;
@@ -51,9 +64,27 @@ export function RouletteWheel({
     const target = 360 - (winner + 0.5) * seg + jitter;
     const current = rotationRef.current;
     const base = current - (((current % 360) + 360) % 360);
-    const next = base + 360 * TURNS + target;
-    rotationRef.current = next;
-    setRotation(next);
+    const from = current;
+    const to = base + 360 * TURNS + target;
+    rotationRef.current = to;
+
+    // Крутим сами, по кадрам: CSS-переходы Windows отключает, если в
+    // настройках выключены анимации, — тогда колесо просто прыгало.
+    const disk = diskRef.current;
+    if (!disk) return;
+    const start = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const t = Math.min((now - start) / SPIN_MS, 1);
+      const angle = from + (to - from) * easeOut(t);
+      disk.style.transform = `rotate(${angle}deg) translateZ(0)`;
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      disk.style.transform = `rotate(${to}deg) translateZ(0)`;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [winner]);
 
@@ -61,10 +92,7 @@ export function RouletteWheel({
     <div className="wheel" role="img" aria-label="Рулетка">
       {/* Крутится весь слой целиком (видеокартой), а не отдельные фигуры SVG —
           так колесо идёт плавно. */}
-      <div
-        className={winner === null ? "wheel-disk" : "wheel-disk spinning"}
-        style={{ transform: `rotate(${rotation}deg) translateZ(0)` }}
-      >
+      <div ref={diskRef} className="wheel-disk">
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} width={SIZE} height={SIZE}>
         <g>
           {list.length <= 1 ? (

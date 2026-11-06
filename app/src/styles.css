@@ -1341,11 +1341,7 @@ img.emoji3d {
   display: block;
 }
 
-/* Мягкий разгон и долгое замедление: самая высокая скорость — около
-   12° за кадр, без «стробоскопа». */
-.wheel-disk.spinning {
-  transition: transform 6s cubic-bezier(0.2, 0.6, 0.35, 1);
-}
+
 
 .wheel-pointer {
   position: absolute;
