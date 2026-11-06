@@ -1938,6 +1938,29 @@ export default function App() {
     if (fullscreen || mini || joinedRoom === null) setBrowsing(null);
   }, [fullscreen, mini, joinedRoom]);
 
+  // Из полного экрана вышли не нашей кнопкой (Win+↓, перетащили окно, Windows
+  // сама) — приложение должно это заметить. Иначе оно продолжало считать
+  // себя в полном экране: панель-окно оставалась поверх кнопок.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    let active = true;
+    win
+      .onResized(async () => {
+        if (fullscreenRef.current && !(await win.isFullscreen())) {
+          invoke("ui_log", { message: "полный экран: окно вышло само" }).catch(() => {});
+          setFullscreen(false);
+          setChatOpen(true);
+        }
+      })
+      .then((u) => (active ? (unlisten = u) : u()));
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [fullscreen]);
+
   // Мини-окно развернули на весь экран — значит, мини-режим больше не нужен.
   useEffect(() => {
     if (!mini) return;
