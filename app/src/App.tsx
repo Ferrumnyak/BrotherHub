@@ -298,6 +298,7 @@ export default function App() {
   const [connecting, setConnecting] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [showServer, setShowServer] = useState(false);
+  const [showThemes, setShowThemes] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [joinedRoom, setJoinedRoom] = useState<string | null>(null);
@@ -1318,11 +1319,20 @@ export default function App() {
                   autoComplete="off"
                 />
               </label>
-              <div className="setting">
-                <span className="setting-label">Тема</span>
-                <ThemePicker />
-              </div>
               <LogsButton />
+            </details>
+
+            <details className="server-settings" open={showThemes}>
+              <summary
+                onClick={(e) => {
+                  e.preventDefault();
+                  setShowThemes((s) => !s);
+                }}
+              >
+                <Icon name="chevron" size={14} />
+                Темы
+              </summary>
+              <ThemePicker />
             </details>
           </form>
         </div>
