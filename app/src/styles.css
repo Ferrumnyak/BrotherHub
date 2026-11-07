@@ -3293,25 +3293,51 @@ html.android .video {
   background: transparent;
 }
 
-/* Телефон вертикально: видео и кнопки сверху, зал и чат — под ними. */
+/* Без синей вспышки при нажатии — как в обычном приложении. */
+html.android * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html.android button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Телефон: всё в одну колонку и страница прокручивается —
+   видео и кнопки сверху, зал и чат ниже. */
+html.android body {
+  overflow-y: auto;
+  overscroll-behavior: none;
+}
+
+html.android .room:not(.fullscreen),
+html.android .room.chat-hidden:not(.fullscreen) {
+  height: auto;
+  min-height: 100%;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto;
+}
+
+html.android .room:not(.fullscreen) .stage .video {
+  flex: none;
+  aspect-ratio: 16 / 9;
+  max-height: 75dvh;
+  margin: 0;
+  border-radius: 0;
+}
+
+/* У чата своя прокрутка — ему нужна высота. */
+html.android .room:not(.fullscreen) .side {
+  height: 85dvh;
+  border-left: 0;
+  border-top: 1px solid var(--line);
+}
+
+html.android .room.fullscreen {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 @media (max-width: 760px) {
-  html.android .room,
-  html.android .room.chat-hidden {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-
-  html.android .room .stage .video {
-    flex: none;
-    aspect-ratio: 16 / 9;
-    margin: 0;
-    border-radius: 0;
-  }
-
-  html.android .side {
-    border-left: 0;
-    border-top: 1px solid var(--line);
-  }
 
   html.android .stage-header {
     padding: 10px 14px 8px;

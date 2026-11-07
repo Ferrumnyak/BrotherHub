@@ -1219,6 +1219,9 @@ export default function App() {
     if (IS_ANDROID) {
       // Телефон: альбомная ориентация без системных панелей, панель плеера —
       // поверх видео в том же интерфейсе.
+      // Страница могла быть прокручена к чату — видео должно встать сверху.
+      document.body.scrollTop = 0;
+      window.scrollTo(0, 0);
       await invoke("mobile_fullscreen", { on: next }).catch(() => {});
       setFullscreen(next);
       setChatOpen(!next);
@@ -1838,9 +1841,12 @@ export default function App() {
     const observer = new ResizeObserver(update);
     observer.observe(el);
     window.addEventListener("resize", update);
+    // На телефоне страница прокручивается — видео под ней едет следом.
+    window.addEventListener("scroll", update, true);
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
       invoke("set_video_rect", { rect: null }).catch(() => {});
       invoke("set_side_rect", { rect: null }).catch(() => {});
     };
@@ -2088,7 +2094,8 @@ export default function App() {
   // сама) — приложение должно это заметить. Иначе оно продолжало считать
   // себя в полном экране: панель-окно оставалась поверх кнопок.
   useEffect(() => {
-    if (!fullscreen) return;
+    // На телефоне полный экран — не окно, а поворот и скрытые панели.
+    if (!fullscreen || IS_ANDROID) return;
     const win = getCurrentWindow();
     let unlisten: (() => void) | undefined;
     let active = true;
@@ -2653,7 +2660,7 @@ export default function App() {
             </div>
           ) : cover && media ? (
             <CoverView cover={cover} paused={info?.paused ?? true} />
-          ) : (
+          ) : IS_ANDROID && media && player.running && info?.duration != null ? null : (
           <div className="video-placeholder">
             {media
               ? player.running
