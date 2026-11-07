@@ -1,8 +1,9 @@
 # BrotherHub для Android
 
-Первая версия для телефона: совместный просмотр по ссылке (YouTube, VK,
-SoundCloud и всё, что открывает yt-dlp) и голосовой чат. Показа экрана,
-«Обзора», СДВГ-режима и мини-окна на телефоне нет.
+Версия для телефона и Android TV: совместный просмотр по ссылке (YouTube,
+VK, SoundCloud и всё, что открывает yt-dlp), голос, чат, реакции, «Обзор»,
+приглашения по ссылке, работа в фоне и «картинка в картинке». Показа
+экрана и СДВГ-режима на телефоне нет.
 
 Как это устроено:
 
@@ -46,9 +47,35 @@ powershell -ExecutionPolicy Bypass -File ..\scripts\android-setup.ps1
 npm run tauri icon src-tauri\icons\icon.png
 ```
 
-`android-setup.ps1` кладёт Kotlin-плеер в созданный Android-проект,
-добавляет библиотеки и разрешение на микрофон. Папку
-`src-tauri/gen/android` коммитим в репозиторий.
+Android-проект `src-tauri/gen/android` уже лежит в репозитории вместе с
+Kotlin-частью (плеер, служба для фона, «Обзор»), так что `init` и
+`android-setup.ps1` нужны только если создавать проект заново.
+
+## Ключ подписи для релизов (один раз)
+
+Обновление APK ставится поверх старого, только если оба подписаны одним
+ключом. Ключ создаётся один раз и **не теряется** (без него друзьям придётся
+удалять приложение и ставить заново):
+
+```powershell
+& "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkey -v `
+  -keystore "$env:USERPROFILE\.android\brotherhub-release.jks" `
+  -keyalg RSA -keysize 2048 -validity 10000 -alias brotherhub
+```
+
+Затем файл `app/src-tauri/gen/android/keystore.properties` (он в
+`.gitignore`, в репозиторий не попадает):
+
+```
+storeFile=C:/Users/<ты>/.android/brotherhub-release.jks
+storePassword=<пароль>
+keyAlias=brotherhub
+keyPassword=<пароль>
+```
+
+Когда этот файл есть, `scripts/release.ps1` сам собирает
+`BrotherHub-<версия>-android.apk` и прописывает его в `latest.json` —
+кнопка «Обновить» на телефоне скачивает его и открывает установку.
 
 ## Разработка и сборка
 

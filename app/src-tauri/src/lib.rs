@@ -166,6 +166,7 @@ pub fn run() {
         playlist::playlist_entries,
         mobile::deep_link_take,
         mobile::update_check,
+        mobile::update_install,
         mobile::tray_close_to_tray,
         mobile::ptt_set_key,
         mobile::mute_set_key,

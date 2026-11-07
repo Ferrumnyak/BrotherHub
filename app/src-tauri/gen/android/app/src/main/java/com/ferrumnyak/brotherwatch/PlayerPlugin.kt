@@ -67,6 +67,10 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
+import androidx.core.content.FileProvider
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.Executors
 
 private const val TAG = "BrotherHub"
@@ -118,6 +122,11 @@ class BrowserOpenArgs {
 @InvokeArg
 class BrowserPlaceArgs {
     var rect: Area? = null
+}
+
+@InvokeArg
+class InstallArgs {
+    var url: String = ""
 }
 
 @InvokeArg
@@ -286,6 +295,57 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
+    }
+
+    // ---------- Обновление ----------
+
+    /// Скачать APK новой версии и открыть установку. Отвечаем, когда файл
+    /// скачан и окно установки открыто (или с ошибкой).
+    @Command
+    fun installApk(invoke: Invoke) {
+        val args = invoke.parseArgs(InstallArgs::class.java)
+        Thread {
+            try {
+                val file = File(activity.cacheDir, "BrotherHub-update.apk")
+                var link = URL(args.url)
+                // GitHub отдаёт файл через перенаправления на другой сервер.
+                var conn: HttpURLConnection
+                var hops = 0
+                while (true) {
+                    conn = link.openConnection() as HttpURLConnection
+                    conn.instanceFollowRedirects = false
+                    conn.connectTimeout = 20000
+                    conn.readTimeout = 30000
+                    val code = conn.responseCode
+                    if (code in 300..399 && hops < 8) {
+                        link = URL(link, conn.getHeaderField("Location"))
+                        conn.disconnect()
+                        hops++
+                        continue
+                    }
+                    if (code != 200) throw IllegalStateException("сервер ответил $code")
+                    break
+                }
+                conn.inputStream.use { input -> file.outputStream().use { input.copyTo(it) } }
+                val uri = FileProvider.getUriForFile(
+                    activity, "${activity.packageName}.fileprovider", file
+                )
+                val intent = Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                main.post {
+                    try {
+                        activity.startActivity(intent)
+                        invoke.resolve()
+                    } catch (e: Throwable) {
+                        invoke.reject("Не открылась установка: ${e.message}")
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "обновление не скачалось", e)
+                invoke.reject("Не удалось скачать обновление: ${e.message}")
+            }
+        }.start()
     }
 
     // ---------- «Обзор» ----------

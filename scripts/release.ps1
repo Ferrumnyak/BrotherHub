@@ -148,8 +148,35 @@ $zip = Join-Path $releaseDir "BrotherHub-$version-portable.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $folder -DestinationPath $zip
 
-# ---------- latest.json ----------
+# ---------- Android: APK ----------
+# Собирается, если есть ключ подписи (app/src-tauri/gen/android/keystore.properties,
+# см. docs/ANDROID.md). Без него — только версия для компьютера.
 $base = "https://github.com/Ferrumnyak/BrotherHub/releases/download/v$version"
+$apkName = $null
+$androidDir = Join-Path $root "app\src-tauri\gen\android"
+if (Test-Path (Join-Path $androidDir "keystore.properties")) {
+    Write-Host "Собираю APK для Android..."
+    $env:VITE_DEFAULT_SERVER = $server
+    Push-Location (Join-Path $root "app")
+    try {
+        npm run tauri android build -- --apk --target aarch64 armv7
+        if ($LASTEXITCODE -ne 0) { throw "Сборка APK не удалась — ошибки выше." }
+    }
+    finally {
+        Pop-Location
+        Remove-Item Env:VITE_DEFAULT_SERVER -ErrorAction SilentlyContinue
+    }
+    $apk = Get-ChildItem (Join-Path $androidDir "app\build\outputs\apk") -Recurse -Filter "*release*.apk" |
+        Where-Object { $_.Name -notmatch "unsigned" } | Select-Object -First 1
+    if (-not $apk) { throw "Не нашёл подписанный APK в $androidDir\app\build\outputs\apk" }
+    $apkName = "BrotherHub-$version-android.apk"
+    Copy-Item $apk.FullName (Join-Path $releaseDir $apkName) -Force
+}
+else {
+    Write-Warning "APK не собран: нет ключа подписи (keystore.properties) — см. docs\ANDROID.md."
+}
+
+# ---------- latest.json ----------
 $latest = [ordered]@{
     version  = $version
     notes    = $Notes
@@ -165,6 +192,12 @@ $latest = [ordered]@{
         sha256 = (Get-FileHash $portableExe -Algorithm SHA256).Hash.ToLower()
     }
 }
+if ($apkName) {
+    $latest["android"] = [ordered]@{
+        version = $version
+        url     = "$base/$apkName"
+    }
+}
 $json = $latest | ConvertTo-Json -Depth 5
 [IO.File]::WriteAllText((Join-Path $releaseDir "latest.json"), $json, (New-Object Text.UTF8Encoding($false)))
 
@@ -173,5 +206,6 @@ Write-Host "Готово. Выложи в GitHub Releases с тегом v${versi
 Write-Host "  $setupName"
 Write-Host "  BrotherHub-$version-portable.zip"
 Write-Host "  $portableName"
+if ($apkName) { Write-Host "  $apkName" }
 Write-Host "  latest.json"
 Write-Host "Подробно — docs\BUILD-INSTALLER.md."

@@ -14,6 +14,16 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Ключ подписи релизного APK (обновления ставятся поверх, только если ключ
+// тот же). Сам ключ и пароли — НЕ в репозитории: файл keystore.properties
+// рядом с этим проектом (gen/android), см. docs/ANDROID.md.
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     // yt-dlp внутри APK запускается из распакованных нативных библиотек.
     packaging {
@@ -31,6 +41,16 @@ android {
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
+    signingConfigs {
+        create("release") {
+            if (keystoreProperties.isNotEmpty()) {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
     buildTypes {
         getByName("debug") {
             manifestPlaceholders["usesCleartextTraffic"] = "true"
@@ -45,6 +65,9 @@ android {
             }
         }
         getByName("release") {
+            if (keystoreProperties.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                enable = true
             }

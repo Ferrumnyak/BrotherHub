@@ -10,10 +10,70 @@ pub async fn deep_link_take() -> Option<String> {
     v.get("link")?.as_str().map(str::to_string)
 }
 
-/// Обновление на телефоне — новым APK из релизов.
+/// Где описан последний релиз (тот же файл, что и для компьютера).
+const LATEST_URL: &str =
+    "https://github.com/Ferrumnyak/BrotherHub/releases/latest/download/latest.json";
+
+#[derive(serde::Serialize)]
+pub struct UpdateInfo {
+    version: String,
+    notes: Option<String>,
+}
+
+/// APK из последнего релиза: `(версия, ссылка, что нового)`.
+async fn latest_apk() -> Result<Option<(String, String, Option<String>)>, String> {
+    let body = reqwest::Client::new()
+        .get(LATEST_URL)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("Не удалось проверить обновления: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("Не удалось проверить обновления: {e}"))?;
+    let latest: serde_json::Value =
+        serde_json::from_str(&body).map_err(|_| "Странный ответ о новой версии".to_string())?;
+    let Some(apk) = latest.get("android") else {
+        return Ok(None); // в этом релизе APK нет
+    };
+    let version = apk.get("version").and_then(|v| v.as_str()).unwrap_or_default();
+    let url = apk.get("url").and_then(|v| v.as_str()).unwrap_or_default();
+    if version.is_empty() || url.is_empty() {
+        return Ok(None);
+    }
+    let notes = latest
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .filter(|n| !n.trim().is_empty())
+        .map(str::to_string);
+    Ok(Some((version.to_string(), url.to_string(), notes)))
+}
+
+/// Есть ли APK новее этого.
 #[tauri::command]
-pub async fn update_check() -> Result<Option<()>, String> {
-    Ok(None)
+pub async fn update_check() -> Result<Option<UpdateInfo>, String> {
+    let Some((version, _, notes)) = latest_apk().await? else {
+        return Ok(None);
+    };
+    let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).ok();
+    let newer = semver::Version::parse(version.trim_start_matches('v'))
+        .ok()
+        .zip(current)
+        .is_some_and(|(new, cur)| new > cur);
+    Ok(newer.then_some(UpdateInfo { version, notes }))
+}
+
+/// Скачать новый APK и открыть установку (Android спросит подтверждение).
+#[tauri::command]
+pub async fn update_install() -> Result<(), String> {
+    let Some((_, url, _)) = latest_apk().await? else {
+        return Err("В последнем релизе нет APK".into());
+    };
+    crate::logs::info(format!("скачиваю обновление: {url}"));
+    crate::player::call("installApk", serde_json::json!({ "url": url }))
+        .await
+        .map(|_| ())
 }
 
 #[tauri::command]
