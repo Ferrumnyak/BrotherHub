@@ -21,8 +21,11 @@ desktop.ini
 node_modules/
 /app/dist/
 
-# Tauri generated
-/app/src-tauri/gen/
+# Tauri generated (Android-проект gen/android коммитим — у него свой .gitignore)
+/app/src-tauri/gen/schemas/
+
+# Android Studio
+*.iml
 
 # mpv для архива плеера (скачивает scripts/fetch-player.ps1)
 /app/src-tauri/bin/
