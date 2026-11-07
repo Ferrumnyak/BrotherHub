@@ -16,15 +16,18 @@ package com.ferrumnyak.brotherwatch
 // лежит внутри APK (библиотека youtubedl-android).
 
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.Rational
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -93,6 +96,12 @@ class RectArgs {
 }
 
 @InvokeArg
+class KeepAliveArgs {
+    var room: String? = null
+    var mic: Boolean = false
+}
+
+@InvokeArg
 class FullscreenArgs {
     var on: Boolean = false
 }
@@ -126,8 +135,13 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     private var ytdlReady = false
     /// Ссылка-приглашение brotherhub://…, которую интерфейс ещё не забрал.
     private var pendingLink: String? = null
+    /// Где видео в интерфейсе (чтобы вернуть его после «картинки в картинке»).
+    private var lastRect: RectArgs? = null
+    private var inPip = false
+    private var asked = false
 
     override fun load(webView: WebView) {
+        instance = this
         this.webView = webView
         keepLink(activity.intent)
         // Интерфейс прозрачный: под ним — видео.
@@ -243,6 +257,96 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
+        }
+    }
+
+    // ---------- Фон и «картинка в картинке» ----------
+
+    /// Пока ты в зале (`room`), приложение работает и свёрнутым:
+    /// служба с уведомлением (PlaybackService). `room = null` — вышел.
+    @Command
+    fun keepAlive(invoke: Invoke) {
+        val args = invoke.parseArgs(KeepAliveArgs::class.java)
+        invoke.resolve()
+        main.post {
+            val intent = Intent(activity, PlaybackService::class.java)
+            val room = args.room
+            if (room == null) {
+                activity.stopService(intent)
+                return@post
+            }
+            // Android 13+: уведомление показывается только с разрешения.
+            if (Build.VERSION.SDK_INT >= 33 && !asked) {
+                asked = true
+                activity.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 41)
+            }
+            intent.putExtra(PlaybackService.EXTRA_ROOM, room)
+            intent.putExtra(PlaybackService.EXTRA_MIC, args.mic)
+            try {
+                if (Build.VERSION.SDK_INT >= 26) activity.startForegroundService(intent)
+                else activity.startService(intent)
+            } catch (e: Throwable) {
+                Log.w(TAG, "служба для фона не запустилась", e)
+            }
+        }
+    }
+
+    /// Кнопка «картинка в картинке».
+    @Command
+    fun pip(invoke: Invoke) {
+        invoke.resolve()
+        main.post { enterPip() }
+    }
+
+    private fun hasVideo(): Boolean =
+        exo?.currentTracks?.groups?.any { it.type == C.TRACK_TYPE_VIDEO } == true
+
+    private fun pipParams(auto: Boolean): PictureInPictureParams? {
+        if (Build.VERSION.SDK_INT < 26) return null
+        val b = PictureInPictureParams.Builder().setAspectRatio(Rational(16, 9))
+        if (Build.VERSION.SDK_INT >= 31) b.setAutoEnterEnabled(auto)
+        return b.build()
+    }
+
+    /// Android 12+: сам уходит в «картинку в картинке», если видео идёт.
+    private fun updatePip() {
+        if (Build.VERSION.SDK_INT < 31) return
+        val auto = exo?.isPlaying == true && hasVideo()
+        try {
+            pipParams(auto)?.let { activity.setPictureInPictureParams(it) }
+        } catch (e: Throwable) {
+            Log.w(TAG, "картинка в картинке недоступна", e)
+        }
+    }
+
+    private fun enterPip() {
+        if (Build.VERSION.SDK_INT < 26 || !hasVideo()) return
+        try {
+            pipParams(exo?.isPlaying == true)?.let { activity.enterPictureInPictureMode(it) }
+        } catch (e: Throwable) {
+            Log.w(TAG, "картинка в картинке недоступна", e)
+        }
+    }
+
+    /// Android до 12: уходим в «картинку в картинке» сами, когда свернули.
+    fun onUserLeave() {
+        if (Build.VERSION.SDK_INT < 31 && exo?.isPlaying == true) enterPip()
+    }
+
+    /// В маленьком окне — только видео, без интерфейса.
+    fun onPip(on: Boolean) {
+        inPip = on
+        val v = view ?: return
+        if (on) {
+            webView?.visibility = View.INVISIBLE
+            v.layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            v.visibility = View.VISIBLE
+        } else {
+            webView?.visibility = View.VISIBLE
+            lastRect?.let { place(it) }
         }
     }
 
@@ -490,6 +594,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 view?.keepScreenOn = isPlaying
+                updatePip()
             }
 
             override fun onPlaybackStateChanged(state: Int) {
@@ -554,6 +659,8 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun place(r: RectArgs) {
+        lastRect = r
+        if (inPip) return
         val v = view ?: run {
             if (!r.visible) return
             ensurePlayer()
@@ -599,5 +706,10 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         } catch (e: Throwable) {
             Log.w(TAG, "yt-dlp не обновился", e)
         }
+    }
+
+    companion object {
+        /// Для MainActivity: «картинка в картинке» приходит туда.
+        var instance: PlayerPlugin? = null
     }
 }

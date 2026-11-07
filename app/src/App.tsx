@@ -1777,6 +1777,16 @@ export default function App() {
     invoke("set_chat_overlay", { enabled: joinedRoom !== null && !chatOpen }).catch(() => {});
   }, [joinedRoom, chatOpen]);
 
+  // Телефон: пока ты в зале, приложение работает и свёрнутым (фильм и голос
+  // не обрываются) — Android показывает об этом уведомление.
+  useEffect(() => {
+    if (!IS_ANDROID) return;
+    invoke("mobile_keep_alive", {
+      room: joinedRoom,
+      mic: voiceStatus === "connected",
+    }).catch(() => {});
+  }, [joinedRoom, voiceStatus]);
+
   // Второй плеер для СДВГ-режима живёт, пока режим включён и мы в зале.
   useEffect(() => {
     if (!adhd || joinedRoom === null) return;
@@ -2701,7 +2711,11 @@ export default function App() {
           onError={(err) => setError(err)}
           fullscreen={fullscreen}
           onFullscreen={() => applyFullscreen(!fullscreen)}
-          onMini={IS_ANDROID ? undefined : () => applyMini(true)}
+          onMini={
+            IS_ANDROID
+              ? () => invoke("mobile_pip").catch(() => {})
+              : () => applyMini(true)
+          }
           onReact={(emoji) => run(() => send({ type: "react", emoji }))}
           canShareSubtitles={isHost && media !== null}
         />

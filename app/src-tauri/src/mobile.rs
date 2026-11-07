@@ -41,3 +41,18 @@ pub async fn mobile_fullscreen(on: bool) -> Result<(), String> {
         .await
         .map(|_| ())
 }
+
+/// Пока ты в зале (`room`), приложение работает и свёрнутым (служба с
+/// уведомлением). `mic` — голос подключён: микрофону тоже можно в фоне.
+#[tauri::command]
+pub async fn mobile_keep_alive(room: Option<String>, mic: bool) -> Result<(), String> {
+    crate::player::call("keepAlive", serde_json::json!({ "room": room, "mic": mic }))
+        .await
+        .map(|_| ())
+}
+
+/// «Картинка в картинке»: видео маленьким окном поверх других приложений.
+#[tauri::command]
+pub async fn mobile_pip() -> Result<(), String> {
+    crate::player::call("pip", serde_json::json!({})).await.map(|_| ())
+}
