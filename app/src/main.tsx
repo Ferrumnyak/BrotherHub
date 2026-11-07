@@ -6,6 +6,7 @@ import { ReactionsLayer } from "./Reactions";
 import { AppContextMenu, blockBrowserMenu } from "./ContextMenu";
 import { TitleBar } from "./TitleBar";
 import { IS_ANDROID } from "./platform";
+import { initTv } from "./tv";
 // Шрифты лежат внутри приложения — работают и без интернета.
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -16,7 +17,10 @@ import "@fontsource/unbounded/700.css";
 import "./styles.css";
 import { initTheme } from "./theme";
 
-if (IS_ANDROID) document.documentElement.classList.add("android");
+if (IS_ANDROID) {
+  document.documentElement.classList.add("android");
+  initTv();
+}
 initTheme();
 blockBrowserMenu();
 

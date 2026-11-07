@@ -39,6 +39,7 @@ import { pageTitle, SITES, siteOf, videoLink, type Site } from "./browse";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
 import { IS_ANDROID } from "./platform";
+import { isTv } from "./tv";
 import { checkForUpdate, installUpdate, setBeforeUpdate, useAppVersion, useUpdate } from "./update";
 import { knownTitle, rememberTitle, requestTitle, useTitles } from "./titles";
 import { EmojiGlyph, RichText } from "./RichText";
@@ -1313,7 +1314,7 @@ export default function App() {
       if (e.code === "Space" && !typing && !onButton) {
         e.preventDefault();
         control({ type: "toggle_pause" }).catch((err) => setError(String(err)));
-      } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing) {
+      } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !typing && !isTv()) {
         e.preventDefault();
         const delta = e.key === "ArrowLeft" ? -5 : 5;
         control({ type: "seek_by", delta }).catch((err) => setError(String(err)));

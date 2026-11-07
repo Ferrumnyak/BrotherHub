@@ -3317,20 +3317,20 @@ html.android button:focus:not(:focus-visible) {
 
 /* Телефон: всё в одну колонку и страница прокручивается —
    видео и кнопки сверху, зал и чат ниже. */
-html.android body {
+html.android:not(.tv) body {
   overflow-y: auto;
   overscroll-behavior: none;
 }
 
-html.android .room:not(.fullscreen),
-html.android .room.chat-hidden:not(.fullscreen) {
+html.android:not(.tv) .room:not(.fullscreen),
+html.android:not(.tv) .room.chat-hidden:not(.fullscreen) {
   height: auto;
   min-height: 100%;
   grid-template-columns: 1fr;
   grid-template-rows: auto auto;
 }
 
-html.android .room:not(.fullscreen) .stage .video {
+html.android:not(.tv) .room:not(.fullscreen) .stage .video {
   flex: none;
   aspect-ratio: 16 / 9;
   max-height: 75dvh;
@@ -3339,7 +3339,7 @@ html.android .room:not(.fullscreen) .stage .video {
 }
 
 /* У чата своя прокрутка — ему нужна высота. */
-html.android .room:not(.fullscreen) .side {
+html.android:not(.tv) .room:not(.fullscreen) .side {
   height: 85dvh;
   border-left: 0;
   border-top: 1px solid var(--line);
@@ -3401,4 +3401,22 @@ html.android .room.fullscreen .video {
 /* Кнопки — под палец. */
 html.android button {
   min-height: 40px;
+}
+
+/* ---------- Android TV: управление пультом ----------
+   Раскладка как на компьютере (видео и зал рядом), всё крупнее, а то, на чём
+   фокус, хорошо видно с дивана. */
+
+html.tv {
+  font-size: 16px;
+}
+
+html.tv :focus {
+  outline: 3px solid var(--lamp) !important;
+  outline-offset: 3px;
+}
+
+html.tv button:focus,
+html.tv .site-chip:focus {
+  background: var(--quiet-hover);
 }

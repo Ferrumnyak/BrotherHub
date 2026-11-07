@@ -116,3 +116,9 @@ pub async fn mobile_keep_alive(room: Option<String>, mic: bool) -> Result<(), St
 pub async fn mobile_pip() -> Result<(), String> {
     crate::player::call("pip", serde_json::json!({})).await.map(|_| ())
 }
+
+/// Что за устройство: телевизор (управление пультом) или телефон.
+#[tauri::command]
+pub async fn mobile_info() -> Result<serde_json::Value, String> {
+    crate::player::call("info", serde_json::json!({})).await
+}

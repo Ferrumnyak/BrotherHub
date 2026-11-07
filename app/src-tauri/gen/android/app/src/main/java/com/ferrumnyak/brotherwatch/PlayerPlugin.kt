@@ -17,9 +17,11 @@ package com.ferrumnyak.brotherwatch
 
 import android.app.Activity
 import android.app.PictureInPictureParams
+import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
@@ -295,6 +297,14 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
+    }
+
+    /// Телевизор ли это (интерфейс включает управление пультом).
+    @Command
+    fun info(invoke: Invoke) {
+        val ui = activity.getSystemService(UiModeManager::class.java)
+        val tv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        invoke.resolve(JSObject().apply { put("tv", tv) })
     }
 
     // ---------- Обновление ----------
