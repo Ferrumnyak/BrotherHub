@@ -2949,6 +2949,19 @@ button.avatar-choice.active {
   pointer-events: none;
 }
 
+/* На телефоне — прямо в области видео, поверх картинки. */
+.reactions-layer.inline {
+  position: absolute;
+  z-index: 2;
+}
+
+/* Маленький экран телефона — реакции поменьше. */
+@media (max-width: 760px) {
+  .reactions-layer.inline {
+    zoom: 0.6;
+  }
+}
+
 .reaction {
   position: absolute;
   bottom: -90px;

@@ -44,7 +44,7 @@ import { knownTitle, rememberTitle, requestTitle, useTitles } from "./titles";
 import { EmojiGlyph, RichText } from "./RichText";
 import { RouletteWheel, SPIN_MS } from "./Roulette";
 import { STICKERS, StickerArt, stickerFromMessage, stickerMessage } from "./stickers";
-import { ReactionPicker } from "./Reactions";
+import { ReactionPicker, ReactionsLayer } from "./Reactions";
 import { setSoundsEnabled, sound, soundsEnabled } from "./sounds";
 import { keyName, listMicrophones, VoiceClient, type ScreenShare, type VoiceStatus } from "./voice";
 
@@ -2642,6 +2642,7 @@ export default function App() {
         )}
 
         <div className="video" ref={videoRef}>
+          {IS_ANDROID && <ReactionsLayer inline />}
           {browsing === "site" ? (
             <div className="video-placeholder">Открываю сайт…</div>
           ) : browsing === "pick" ? (

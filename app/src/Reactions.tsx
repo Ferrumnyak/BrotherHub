@@ -63,13 +63,14 @@ interface Flying {
   drift: number;
 }
 
-/** Содержимое окна реакций: слушает сервер и запускает эмодзи. */
-export function ReactionsLayer() {
+/** Содержимое окна реакций: слушает сервер и запускает эмодзи.
+ *  `inline` — прямо в области видео (на телефоне отдельных окон нет). */
+export function ReactionsLayer({ inline = false }: { inline?: boolean }) {
   const [flying, setFlying] = useState<Flying[]>([]);
   const next = useRef(1);
 
   useEffect(() => {
-    document.documentElement.classList.add("overlay");
+    if (!inline) document.documentElement.classList.add("overlay");
     let active = true;
     let unlisten: (() => void) | undefined;
     listen<ServerMsg>("server-message", (e) => {
@@ -89,10 +90,11 @@ export function ReactionsLayer() {
       active = false;
       unlisten?.();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <div className="reactions-layer">
+    <div className={inline ? "reactions-layer inline" : "reactions-layer"}>
       {flying.map((f) => (
         <div
           key={f.id}
