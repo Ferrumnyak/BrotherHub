@@ -1,6 +1,7 @@
 // В релизной сборке не открывать лишнее консольное окно на Windows.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod adhd;
 mod browser;
 mod certs;
 mod deeplink;
@@ -9,6 +10,7 @@ mod net;
 mod overlay;
 mod player;
 mod playlist;
+mod prefetch;
 mod ptt;
 mod reactions;
 mod session;
@@ -88,6 +90,9 @@ fn main() {
             session::subtitles_share,
             session::subtitles_clear,
             video::set_video_rect,
+            video::set_side_rect,
+            adhd::adhd_start,
+            adhd::adhd_stop,
             video::watch_cursor,
             overlay::overlay_place,
             overlay::overlay_interactive,
@@ -106,6 +111,7 @@ fn main() {
             browser::browser_close,
             browser::browser_hide,
             browser::browser_show,
+            prefetch::prefetch_media,
             update::update_check,
             update::update_install,
             deeplink::deep_link_take,

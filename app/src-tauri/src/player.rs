@@ -320,7 +320,22 @@ impl Player {
     }
 
     pub fn load(&self, path_or_url: &str) {
+        // Название из заранее подготовленной ссылки — не для этого файла.
+        self.command(json!(["set_property", "force-media-title", ""]));
         self.command(json!(["loadfile", path_or_url, "replace"]));
+    }
+
+    /// Открыть заранее разобранную ссылку (см. prefetch.rs) — без yt-dlp.
+    pub fn load_ready(&self, ready: &crate::prefetch::Ready) {
+        self.command(json!([
+            "set_property",
+            "force-media-title",
+            ready.title.clone().unwrap_or_default()
+        ]));
+        if let Some(ua) = &ready.user_agent {
+            self.command(json!(["set_property", "user-agent", ua]));
+        }
+        self.command(json!(["loadfile", ready.open, "replace"]));
     }
 
     /// Открыть другую ссылку и начать с позиции `at` (сбросить потом
@@ -424,7 +439,7 @@ impl Drop for Player {
 /// диспетчер задач, падение), Windows закрывает задание и убивает mpv
 /// вместе с запущенным им yt-dlp.
 #[cfg(windows)]
-fn bind_to_app_lifetime(child: &Child) {
+pub fn bind_to_app_lifetime(child: &Child) {
     use std::sync::OnceLock;
     use windows_sys::Win32::Foundation::HANDLE;
     use windows_sys::Win32::System::JobObjects::{
@@ -461,7 +476,7 @@ fn bind_to_app_lifetime(child: &Child) {
 }
 
 #[cfg(not(windows))]
-fn bind_to_app_lifetime(_child: &Child) {}
+pub fn bind_to_app_lifetime(_child: &Child) {}
 
 /// Обновить yt-dlp, который скачало или положило рядом с собой приложение.
 ///
@@ -607,7 +622,7 @@ pub fn ytdlp_available() -> bool {
 
 /// Путь к mpv: переменная `BROTHERWATCH_MPV`, затем стандартные места
 /// установки, иначе просто `mpv` из PATH.
-fn find_mpv() -> String {
+pub fn find_mpv() -> String {
     if let Ok(path) = std::env::var("BROTHERWATCH_MPV") {
         return path;
     }

@@ -665,6 +665,9 @@ export default function App() {
   const keyRef = useRef(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLDivElement>(null);
+  // «СДВГ-режим»: сбоку от фильма без звука крутится второй ролик
+  // (Subway Surfers, мыло, ковры…). У каждого свой, друзьям не уходит.
+  const [adhd, setAdhd] = useState(() => load("adhd", "") === "1");
   const fullscreenRef = useRef(false);
   fullscreenRef.current = fullscreen;
   const miniRef = useRef(false);
@@ -1749,6 +1752,26 @@ export default function App() {
     invoke("set_chat_overlay", { enabled: joinedRoom !== null && !chatOpen }).catch(() => {});
   }, [joinedRoom, chatOpen]);
 
+  // Второй плеер для СДВГ-режима живёт, пока режим включён и мы в зале.
+  useEffect(() => {
+    if (!adhd || joinedRoom === null) return;
+    invoke("adhd_start").catch((err) => {
+      setError(String(err));
+      setAdhd(false);
+    });
+    return () => {
+      invoke("adhd_stop").catch(() => {});
+      invoke("set_side_rect", { rect: null }).catch(() => {});
+    };
+  }, [adhd, joinedRoom]);
+
+  function toggleAdhd() {
+    setAdhd((on) => {
+      save("adhd", on ? "" : "1");
+      return !on;
+    });
+  }
+
   // Окно видео mpv лежит поверх области .video — сообщаем, где она.
   useEffect(() => {
     const el = videoRef.current;
@@ -1766,19 +1789,36 @@ export default function App() {
     const update = () => {
       if (!show || !el) {
         invoke("set_video_rect", { rect: null }).catch(() => {});
+        invoke("set_side_rect", { rect: null }).catch(() => {});
         return;
       }
       const r = el.getBoundingClientRect();
       const k = window.devicePixelRatio || 1;
+      // Углы — как у области видео в интерфейсе.
+      const radius = Math.round((fullscreen ? 0 : mini ? 10 : 16) * k);
+      // СДВГ-режим: фильм слева, ролик справа (ролики чаще вертикальные).
+      const split = adhd && !mini;
+      const gap = split ? 8 : 0;
+      const mainWidth = split ? Math.round(r.width * 0.66) : r.width;
       invoke("set_video_rect", {
         rect: {
           x: Math.round(r.left * k),
           y: Math.round(r.top * k),
-          width: Math.round(r.width * k),
+          width: Math.round((mainWidth - gap / 2) * k),
           height: Math.round(r.height * k),
         },
-        // Углы — как у области видео в интерфейсе.
-        radius: Math.round((fullscreen ? 0 : mini ? 10 : 16) * k),
+        radius,
+      }).catch(() => {});
+      invoke("set_side_rect", {
+        rect: split
+          ? {
+              x: Math.round((r.left + mainWidth + gap / 2) * k),
+              y: Math.round(r.top * k),
+              width: Math.round((r.width - mainWidth - gap / 2) * k),
+              height: Math.round(r.height * k),
+            }
+          : null,
+        radius,
       }).catch(() => {});
     };
     update();
@@ -1790,8 +1830,9 @@ export default function App() {
       observer.disconnect();
       window.removeEventListener("resize", update);
       invoke("set_video_rect", { rect: null }).catch(() => {});
+      invoke("set_side_rect", { rect: null }).catch(() => {});
     };
-  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, browsing, cover, playback?.media]);
+  }, [joinedRoom, player.running, chatOpen, fullscreen, mini, screenShare, sharing, picking, browsing, cover, playback?.media, adhd]);
 
   // Вернулись из трея с открытым «Обзором» — показать сайт обратно.
   useEffect(() => {
@@ -1877,6 +1918,19 @@ export default function App() {
     resumeSavedRef.current = pos;
     saveResume(media, info?.ended || pos > dur - 60 ? null : pos > 30 ? pos : null);
   }, [playback?.media, player.loaded, info?.position, info?.duration, info?.ended, isHost, resumeOffer]);
+
+  // За ~25 секунд до конца заранее готовим следующее из очереди — у всех,
+  // чтобы оно открылось сразу, без нескольких секунд чёрного экрана.
+  const prefetchedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const next = suggestions[0]?.media;
+    const dur = info?.duration ?? 0;
+    const pos = info?.position ?? 0;
+    if (!next || !isUrl(next) || !playback?.media || player.loaded !== playback.media) return;
+    if (dur < 30 || dur - pos > 25 || prefetchedRef.current === next) return;
+    prefetchedRef.current = next;
+    invoke("prefetch_media", { url: next }).catch(() => {});
+  }, [suggestions, info?.duration, info?.position, playback?.media, player.loaded]);
 
   // Доиграло до конца — у того, у кого пульт, включается следующее из списка.
   // «Доиграло» считаем, только если это видео при нас уже шло (не было в
@@ -2314,6 +2368,28 @@ export default function App() {
                 >
                   <Icon name="close" size={17} />
                   Закрыть видео
+                </button>
+              )}
+              <button
+                className={adhd ? "ghost adhd-toggle on" : "ghost adhd-toggle"}
+                onClick={toggleAdhd}
+                title={
+                  adhd
+                    ? "Выключить СДВГ-режим"
+                    : "СДВГ-режим: сбоку без звука идёт Subway Surfers, мыло, ковры… (только у тебя)"
+                }
+              >
+                <span aria-hidden="true">🧠</span>
+                {adhd ? "СДВГ: вкл" : "СДВГ"}
+              </button>
+              {adhd && (
+                <button
+                  className="ghost icon-only"
+                  onClick={() => invoke("adhd_start").catch((err) => setError(String(err)))}
+                  title="Другие ролики сбоку"
+                  aria-label="Другие ролики сбоку"
+                >
+                  <span aria-hidden="true">🔀</span>
                 </button>
               )}
               <button

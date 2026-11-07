@@ -3269,3 +3269,8 @@ html.is-mini .titlebar-label span {
 html.is-mini .titlebar-btn {
   width: 36px;
 }
+
+/* СДВГ-режим: кнопка в шапке зала. */
+.adhd-toggle.on {
+  color: var(--lamp);
+}

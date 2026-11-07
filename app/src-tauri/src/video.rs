@@ -16,12 +16,19 @@ use tauri::{AppHandle, State, WebviewWindow};
 pub struct VideoHost {
     /// HWND окна. Храним числом: так его можно передавать между потоками.
     hwnd: Mutex<Option<isize>>,
+    /// Второе окно — для ролика сбоку в «СДВГ-режиме» (adhd.rs).
+    side: Mutex<Option<isize>>,
 }
 
 impl VideoHost {
     /// Идентификатор окна для `mpv --wid`.
     pub fn wid(&self) -> Option<isize> {
         *self.hwnd.lock().unwrap()
+    }
+
+    /// Окно для ролика сбоку.
+    pub fn side_wid(&self) -> Option<isize> {
+        *self.side.lock().unwrap()
     }
 }
 
@@ -54,7 +61,7 @@ pub fn create(window: &WebviewWindow, host: &VideoHost) -> Result<(), String> {
 
     let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
     // Окно создаётся скрытым и показывается, когда интерфейс скажет, где оно.
-    let child = unsafe {
+    let make = || unsafe {
         CreateWindowExW(
             0,
             class.as_ptr(),
@@ -70,10 +77,15 @@ pub fn create(window: &WebviewWindow, host: &VideoHost) -> Result<(), String> {
             std::ptr::null(),
         )
     };
+    let child = make();
     if child.is_null() {
         return Err("не удалось создать окно для видео".into());
     }
     *host.hwnd.lock().unwrap() = Some(child as isize);
+    let side = make();
+    if !side.is_null() {
+        *host.side.lock().unwrap() = Some(side as isize);
+    }
     Ok(())
 }
 
@@ -191,6 +203,22 @@ pub fn set_video_rect(
     radius: Option<u32>,
 ) -> Result<(), String> {
     let Some(hwnd) = host.wid() else {
+        return Ok(());
+    };
+    let radius = radius.unwrap_or(0);
+    app.run_on_main_thread(move || place(hwnd, rect, radius))
+        .map_err(|e| e.to_string())
+}
+
+/// Где показать ролик сбоку («СДВГ-режим»; `None` — спрятать).
+#[tauri::command]
+pub fn set_side_rect(
+    app: AppHandle,
+    host: State<'_, VideoHost>,
+    rect: Option<Rect>,
+    radius: Option<u32>,
+) -> Result<(), String> {
+    let Some(hwnd) = host.side_wid() else {
         return Ok(());
     };
     let radius = radius.unwrap_or(0);

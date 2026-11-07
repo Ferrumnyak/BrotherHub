@@ -190,6 +190,9 @@ pub struct Session {
     overlay: VecDeque<(Instant, String, String)>,
     /// Субтитры, которые ведущий раздал к текущему видео.
     subtitles: Option<SubtitleFile>,
+    /// Текущее видео открыто по заранее разобранной ссылке (prefetch.rs):
+    /// смена качества тогда открывает ссылку заново, через yt-dlp.
+    direct: bool,
 }
 
 impl Session {
@@ -215,6 +218,7 @@ impl Session {
             overlay_enabled: false,
             overlay: VecDeque::new(),
             subtitles: None,
+            direct: false,
         }));
 
         // События от mpv.
@@ -721,7 +725,20 @@ impl Session {
             return;
         }
         let position = player.time_pos().await;
-        player.reload_with_quality(quality, position);
+        if self.direct {
+            // Открыто напрямую — заново через yt-dlp, уже в новом качестве.
+            player.command(serde_json::json!([
+                "set_property",
+                "ytdl-format",
+                crate::player::ytdl_format(quality)
+            ]));
+            if let Some(media) = self.loaded.clone() {
+                player.load_at(&media, position);
+            }
+            self.direct = false;
+        } else {
+            player.reload_with_quality(quality, position);
+        }
         self.reloading = true;
     }
 
@@ -790,9 +807,23 @@ impl Session {
 
     /// Открыть ссылку в плеере. Ссылки с сайтов, которые yt-dlp не знает
     /// (см. [`crate::sites`]), сначала превращаем в прямую ссылку на поток.
-    async fn load_media(&self, url: &str) -> Result<(), String> {
+    pub fn quality(&self) -> Option<u32> {
+        self.quality
+    }
+
+    async fn load_media(&mut self, url: &str) -> Result<(), String> {
         crate::logs::info(format!("открываю ссылку: {url}"));
         let _ = self.app.emit("player-cover", None::<Cover>);
+        self.direct = false;
+        // Заранее подготовленное (следующее в очереди) открывается сразу.
+        if let Some(ready) = crate::prefetch::take(url, self.quality) {
+            if let Some(player) = &self.player {
+                crate::logs::info("открываю заранее подготовленное");
+                player.load_ready(&ready);
+                self.direct = true;
+                return Ok(());
+            }
+        }
         let target = if crate::sites::handles(url) {
             crate::sites::resolve(url, self.quality)
                 .await
