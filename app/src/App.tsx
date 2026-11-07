@@ -1682,9 +1682,15 @@ export default function App() {
     let unlisten: (() => void) | undefined;
     let active = true;
     listen("deep-link", take).then((u) => (active ? (unlisten = u) : u()));
+    // На телефоне ссылку ловит Android: проверяем, когда приложение снова на экране.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") take();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       active = false;
       unlisten?.();
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
 

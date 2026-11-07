@@ -17,6 +17,7 @@ package com.ferrumnyak.brotherwatch
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -123,9 +124,12 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     /// Ждём готовности после loadfile, чтобы прислать file-loaded.
     private var loading = false
     private var ytdlReady = false
+    /// Ссылка-приглашение brotherhub://…, которую интерфейс ещё не забрал.
+    private var pendingLink: String? = null
 
     override fun load(webView: WebView) {
         this.webView = webView
+        keepLink(activity.intent)
         // Интерфейс прозрачный: под ним — видео.
         webView.setBackgroundColor(Color.TRANSPARENT)
         activity.window.setBackgroundDrawable(ColorDrawable(HALL))
@@ -137,6 +141,26 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             } catch (e: Throwable) {
                 Log.e(TAG, "yt-dlp не запустился", e)
             }
+        }
+    }
+
+    // Приложение уже открыто, а друг прислал ещё ссылку.
+    override fun onNewIntent(intent: Intent) {
+        keepLink(intent)
+    }
+
+    private fun keepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme == "brotherhub") pendingLink = data.toString()
+    }
+
+    /// Забрать ссылку-приглашение (один раз).
+    @Command
+    fun takeLink(invoke: Invoke) {
+        main.post {
+            val link = pendingLink
+            pendingLink = null
+            invoke.resolve(JSObject().apply { put("link", link) })
         }
     }
 

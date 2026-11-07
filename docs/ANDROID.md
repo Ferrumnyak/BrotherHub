@@ -13,7 +13,7 @@ SoundCloud и всё, что открывает yt-dlp) и голосовой ч
   при каждом запуске он сам обновляется;
 - Rust-часть (синхронизация, сеть, голосовой токен) — общая с компьютером;
   с плеером она говорит теми же командами, что с mpv
-  (`src-tauri/src/player_android.rs` ↔ `src-tauri/android/PlayerPlugin.kt`).
+  (`src-tauri/src/player_android.rs` ↔ `src-tauri/gen/android/app/src/main/java/com/ferrumnyak/brotherwatch/PlayerPlugin.kt`).
 
 ## Что установить (один раз)
 

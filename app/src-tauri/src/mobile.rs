@@ -2,10 +2,12 @@
 //! отвечаем «ничего не сделано», чтобы не было ошибок. И то, что есть
 //! только на телефоне.
 
-/// Ссылки-приглашения на телефоне пока открываются вручную.
+/// Ссылка-приглашение brotherhub://…, с которой открыли приложение
+/// (её ловит Kotlin-часть, см. PlayerPlugin.kt).
 #[tauri::command]
-pub fn deep_link_take() -> Option<String> {
-    None
+pub async fn deep_link_take() -> Option<String> {
+    let v = crate::player::call("takeLink", serde_json::json!({})).await.ok()?;
+    v.get("link")?.as_str().map(str::to_string)
 }
 
 /// Обновление на телефоне — новым APK из релизов.

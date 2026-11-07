@@ -4,7 +4,6 @@
 #   powershell -ExecutionPolicy Bypass -File ..\scripts\android-setup.ps1
 #
 # Что делает:
-#  - кладёт Kotlin-плеер (src-tauri/android/PlayerPlugin.kt) в Android-проект;
 #  - добавляет библиотеки: ExoPlayer (Media3) и yt-dlp для Android;
 #  - разрешает микрофон (голосовой чат) и распаковку нативных библиотек
 #    (её требует yt-dlp внутри APK).
@@ -22,11 +21,9 @@ function Write-Text($path, $text) {
     [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-# 1. Kotlin-плеер
-$kotlinDir = Join-Path $gen "app\src\main\java\com\ferrumnyak\brotherwatch"
-New-Item -ItemType Directory -Force $kotlinDir | Out-Null
-Copy-Item (Join-Path $root "app\src-tauri\android\PlayerPlugin.kt") $kotlinDir -Force
-Write-Host "PlayerPlugin.kt скопирован"
+# 1. Kotlin-плеер лежит прямо в Android-проекте (gen/android коммитится):
+#    app/src-tauri/gen/android/app/src/main/java/com/ferrumnyak/brotherwatch/PlayerPlugin.kt
+#    Если проект создан заново (`android init`), верни его из git.
 
 # 2. Библиотеки
 $gradle = Join-Path $gen "app\build.gradle.kts"
