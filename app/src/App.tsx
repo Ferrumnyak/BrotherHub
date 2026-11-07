@@ -2161,6 +2161,8 @@ export default function App() {
     const observer = new ResizeObserver(update);
     if (el) observer.observe(el);
     window.addEventListener("resize", update);
+    // На телефоне страница прокручивается — сайт едет следом.
+    window.addEventListener("scroll", update, true);
     const poll = setInterval(() => {
       invoke<string | null>("browser_url")
         .then((u) => {
@@ -2173,6 +2175,7 @@ export default function App() {
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
       clearInterval(poll);
       // Не закрываем, а прячем: в следующий раз вернёмся на ту же страницу.
       invoke("browser_hide").catch(() => {});
@@ -2485,7 +2488,6 @@ export default function App() {
         )}
         {!fullscreen && !mini && (
           <form className="source-bar" onSubmit={handleOpenUrl}>
-            {!IS_ANDROID && (
             <button
               type="button"
               className={browsing ? "browse-open active" : "browse-open"}
@@ -2495,7 +2497,6 @@ export default function App() {
               <Icon name="grid" size={18} />
               Обзор
             </button>
-            )}
             <label className="source-input">
               <Icon name="link" size={18} />
               <input

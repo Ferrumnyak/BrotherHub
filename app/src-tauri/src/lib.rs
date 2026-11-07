@@ -21,7 +21,7 @@ mod video;
 
 #[cfg(desktop)]
 mod adhd;
-#[cfg(desktop)]
+#[cfg_attr(mobile, path = "browser_mobile.rs")]
 mod browser;
 #[cfg(desktop)]
 mod certs;

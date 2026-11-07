@@ -31,7 +31,10 @@ import android.util.Rational
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -60,6 +63,8 @@ import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -93,6 +98,26 @@ class RectArgs {
     var y: Int = 0
     var width: Int = 0
     var height: Int = 0
+}
+
+@InvokeArg
+class Area {
+    var x: Int = 0
+    var y: Int = 0
+    var width: Int = 0
+    var height: Int = 0
+}
+
+@InvokeArg
+class BrowserOpenArgs {
+    var url: String = ""
+    var rect: Area? = null
+    var script: String? = null
+}
+
+@InvokeArg
+class BrowserPlaceArgs {
+    var rect: Area? = null
 }
 
 @InvokeArg
@@ -138,6 +163,9 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     /// Где видео в интерфейсе (чтобы вернуть его после «картинки в картинке»).
     private var lastRect: RectArgs? = null
     private var inPip = false
+    /// «Обзор»: сайт в своём WebView поверх области видео.
+    private var browser: WebView? = null
+    private var browserScript: String? = null
     private var asked = false
 
     override fun load(webView: WebView) {
@@ -258,6 +286,133 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
+    }
+
+    // ---------- «Обзор» ----------
+
+    @Command
+    fun browserOpen(invoke: Invoke) {
+        val args = invoke.parseArgs(BrowserOpenArgs::class.java)
+        main.post {
+            val b = ensureBrowser(args.script)
+            b.loadUrl(args.url)
+            args.rect?.let { placeBrowser(b, it) }
+            b.visibility = View.VISIBLE
+            invoke.resolve()
+        }
+    }
+
+    @Command
+    fun browserPlace(invoke: Invoke) {
+        val args = invoke.parseArgs(BrowserPlaceArgs::class.java)
+        invoke.resolve()
+        main.post {
+            val b = browser ?: return@post
+            val r = args.rect
+            if (r == null) b.visibility = View.GONE
+            else {
+                placeBrowser(b, r)
+                b.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    @Command
+    fun browserUrl(invoke: Invoke) {
+        main.post { invoke.resolve(JSObject().apply { put("url", browser?.url) }) }
+    }
+
+    @Command
+    fun browserBack(invoke: Invoke) {
+        invoke.resolve()
+        main.post { browser?.let { if (it.canGoBack()) it.goBack() } }
+    }
+
+    /// Спрятать, не закрывая: в следующий раз — та же страница.
+    @Command
+    fun browserHide(invoke: Invoke) {
+        invoke.resolve()
+        main.post {
+            browser?.let {
+                it.evaluateJavascript(
+                    "document.querySelectorAll('video,audio').forEach(function(m){try{m.pause()}catch(e){}})",
+                    null
+                )
+                it.visibility = View.GONE
+            }
+        }
+    }
+
+    @Command
+    fun browserShow(invoke: Invoke) {
+        val args = invoke.parseArgs(BrowserPlaceArgs::class.java)
+        main.post {
+            val b = browser
+            if (b == null) {
+                invoke.resolve(JSObject().apply { put("shown", false) })
+                return@post
+            }
+            args.rect?.let { placeBrowser(b, it) }
+            b.visibility = View.VISIBLE
+            invoke.resolve(JSObject().apply { put("shown", true) })
+        }
+    }
+
+    @Command
+    fun browserClose(invoke: Invoke) {
+        invoke.resolve()
+        main.post {
+            browser?.let {
+                (it.parent as? ViewGroup)?.removeView(it)
+                it.destroy()
+            }
+            browser = null
+        }
+    }
+
+    private fun ensureBrowser(script: String?): WebView {
+        browser?.let { return it }
+        browserScript = script
+        val b = WebView(activity)
+        b.settings.javaScriptEnabled = true
+        b.settings.domStorageEnabled = true
+        b.settings.mediaPlaybackRequiresUserGesture = true
+        // Ссылки «в новом окне» открываются здесь же.
+        b.settings.setSupportMultipleWindows(false)
+        b.setBackgroundColor(Color.BLACK)
+        val docStart = script != null &&
+            WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)
+        if (docStart) {
+            WebViewCompat.addDocumentStartJavaScript(b, script!!, setOf("*"))
+        }
+        b.webViewClient = object : WebViewClient() {
+            // Только https — приложения и странные схемы не открываем.
+            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                request.url.scheme != "https"
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                if (!docStart) browserScript?.let { view.evaluateJavascript(it, null) }
+            }
+        }
+        b.webChromeClient = WebChromeClient()
+        b.visibility = View.GONE
+        // Поверх интерфейса — в тот же контейнер, последним.
+        val parent = webView?.parent as? ViewGroup
+        val lp = FrameLayout.LayoutParams(1, 1, Gravity.TOP or Gravity.START)
+        if (parent != null) parent.addView(b, lp) else activity.addContentView(b, lp)
+        browser = b
+        return b
+    }
+
+    private fun placeBrowser(b: WebView, r: Area) {
+        val lp = (b.layoutParams as? FrameLayout.LayoutParams)
+            ?: FrameLayout.LayoutParams(r.width, r.height)
+        lp.width = r.width.coerceAtLeast(1)
+        lp.height = r.height.coerceAtLeast(1)
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.leftMargin = (webView?.left ?: 0) + r.x
+        lp.topMargin = (webView?.top ?: 0) + r.y
+        b.layoutParams = lp
     }
 
     // ---------- Фон и «картинка в картинке» ----------
