@@ -5,6 +5,12 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 
+# Библиотека — для Android (там приложение запускается из Kotlin),
+# exe на Windows просто вызывает brotherwatch_lib::run().
+[lib]
+name = "brotherwatch_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -16,22 +22,30 @@ tokio = { workspace = true, features = ["io-util", "process", "fs"] }
 futures-util.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
-# Обновление по кнопке (update.rs). TLS — тот же SChannel, что и у остального.
-tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }
 semver = "1"
 # Русские субтитры часто в Windows-1251 — переводим в UTF-8.
 encoding_rs = "0.8"
+# Проверка скачанных mpv и yt-dlp.
+sha2 = "0.10"
+
+# Компьютер: шифрование (wss://, https://) через встроенный в Windows SChannel.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# Обновление по кнопке (update.rs).
+tauri-plugin-updater = { version = "2", default-features = false, features = ["native-tls"] }
 # Ссылки-приглашения brotherhub:// (deeplink.rs); второй запуск — в то же окно.
 tauri-plugin-deep-link = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
-# native-tls — шифрование (wss://) через встроенный в Windows SChannel.
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 # Загрузка страниц сайтов, которые yt-dlp не знает (см. sites.rs), и
-# скачивание плеера при первом запуске (tools.rs). TLS — тот же SChannel,
-# что и у tokio-tungstenite: второй TLS-движок в exe не нужен.
+# скачивание плеера при первом запуске (tools.rs).
 reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
-# Проверка скачанных mpv и yt-dlp.
-sha2 = "0.10"
+
+# Телефон: OpenSSL под Android собирать долго и сложно — берём rustls.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Шифрование на ring: его проще всего собрать под Android (без cmake).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 # Только Windows: встраивание видео в окно и привязка mpv к жизни приложения.
 [target.'cfg(windows)'.dependencies]

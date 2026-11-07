@@ -5,6 +5,7 @@ import PlayerSetup from "./PlayerSetup";
 import { ReactionsLayer } from "./Reactions";
 import { AppContextMenu, blockBrowserMenu } from "./ContextMenu";
 import { TitleBar } from "./TitleBar";
+import { IS_ANDROID } from "./platform";
 // Шрифты лежат внутри приложения — работают и без интернета.
 import "@fontsource/manrope/400.css";
 import "@fontsource/manrope/500.css";
@@ -15,6 +16,7 @@ import "@fontsource/unbounded/700.css";
 import "./styles.css";
 import { initTheme } from "./theme";
 
+if (IS_ANDROID) document.documentElement.classList.add("android");
 initTheme();
 blockBrowserMenu();
 
@@ -46,7 +48,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       <ReactionsLayer />
     ) : (
       <div className="app-shell">
-        <TitleBar />
+        {!IS_ANDROID && <TitleBar />}
         <div className="app-body">
           <PlayerSetup>
             <App />

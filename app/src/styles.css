@@ -3274,3 +3274,92 @@ html.is-mini .titlebar-btn {
 .adhd-toggle.on {
   color: var(--lamp);
 }
+
+/* ---------- Телефон (Android) ----------
+   Видео (ExoPlayer) лежит ПОД интерфейсом: всё, что поверх области видео,
+   должно быть прозрачным. Фон «зала» рисует само окно (цвет темы). */
+
+html.android,
+html.android body {
+  background: transparent;
+}
+
+html.android body {
+  height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+
+html.android .video {
+  background: transparent;
+}
+
+/* Телефон вертикально: видео и кнопки сверху, зал и чат — под ними. */
+@media (max-width: 760px) {
+  html.android .room,
+  html.android .room.chat-hidden {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  html.android .room .stage .video {
+    flex: none;
+    aspect-ratio: 16 / 9;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  html.android .side {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  html.android .stage-header {
+    padding: 10px 14px 8px;
+  }
+
+  html.android .source-bar {
+    padding: 0 14px 8px;
+  }
+
+  html.android .controls {
+    padding: 8px 14px 10px;
+  }
+
+  html.android .header-actions button:not(.icon-only) {
+    width: 36px;
+    padding: 0;
+    font-size: 0;
+    gap: 0;
+  }
+}
+
+/* Полный экран на телефоне: панель плеера поверх видео, прячется сама. */
+html.android .room.fullscreen .stage {
+  position: relative;
+}
+
+html.android .room.fullscreen .stage > .controls {
+  display: flex;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 40px 24px calc(14px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(var(--shade-rgb), 0.92) 0, rgba(var(--shade-rgb), 0.7) 60px, rgba(var(--shade-rgb), 0) 100%);
+  transition: opacity 0.35s ease;
+}
+
+html.android .room.fullscreen.controls-hidden .stage > .controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+html.android .room.fullscreen .video {
+  aspect-ratio: auto;
+  flex: 1;
+}
+
+/* Кнопки — под палец. */
+html.android button {
+  min-height: 40px;
+}

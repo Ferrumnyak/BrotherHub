@@ -54,7 +54,8 @@ pub fn take(url: &str, quality: Option<u32>) -> Option<Ready> {
 #[tauri::command]
 pub async fn prefetch_media(session: State<'_, SharedSession>, url: String) -> Result<(), String> {
     let url = url.trim().to_string();
-    if !is_url(&url) || crate::sites::handles(&url) {
+    // На телефоне yt-dlp внутри Kotlin-части, заранее готовить нечем.
+    if cfg!(mobile) || !is_url(&url) || crate::sites::handles(&url) {
         return Ok(());
     }
     let quality = session.lock().await.quality();

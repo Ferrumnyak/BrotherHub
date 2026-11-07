@@ -38,6 +38,7 @@ import {
 import { pageTitle, SITES, siteOf, videoLink, type Site } from "./browse";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
+import { IS_ANDROID } from "./platform";
 import { checkForUpdate, installUpdate, setBeforeUpdate, useAppVersion, useUpdate } from "./update";
 import { knownTitle, rememberTitle, requestTitle, useTitles } from "./titles";
 import { EmojiGlyph, RichText } from "./RichText";
@@ -591,7 +592,7 @@ export default function App() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<Set<string>>(new Set());
   const [voiceMode, setVoiceMode] = useState<VoiceMode>(() =>
-    load("voiceMode", "open") === "ptt" ? "ptt" : "open",
+    !IS_ANDROID && load("voiceMode", "open") === "ptt" ? "ptt" : "open",
   );
   const [micOn, setMicOn] = useState(true);
   const [sounds, setSounds] = useState(soundsEnabled);
@@ -1215,6 +1216,14 @@ export default function App() {
   async function applyFullscreen(next: boolean) {
     if (next && miniRef.current) await applyMini(false);
     invoke("ui_log", { message: next ? "полный экран: вход" : "полный экран: выход" }).catch(() => {});
+    if (IS_ANDROID) {
+      // Телефон: альбомная ориентация без системных панелей, панель плеера —
+      // поверх видео в том же интерфейсе.
+      await invoke("mobile_fullscreen", { on: next }).catch(() => {});
+      setFullscreen(next);
+      setChatOpen(!next);
+      return;
+    }
     try {
       await getCurrentWindow().setFullscreen(next);
     } catch (err) {
@@ -1327,6 +1336,7 @@ export default function App() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const show = (visible: boolean) => {
       setControlsHidden(!visible);
+      if (IS_ANDROID) return;
       emit("overlay-visible", visible).catch(() => {});
       // В полном экране панель накрывает всё видео и всегда ловит мышь:
       // только так можно спрятать курсор (над mpv он не прячется).
@@ -1373,7 +1383,9 @@ export default function App() {
     );
     window.addEventListener("mousemove", poke);
     window.addEventListener("keydown", poke);
+    window.addEventListener("pointerdown", poke);
     return () => {
+      window.removeEventListener("pointerdown", poke);
       active = false;
       clearTimeout(timer);
       unlisten?.();
@@ -1965,7 +1977,7 @@ export default function App() {
   // трансляцией экрана. Номер сеанса запоминаем: команды от уже закрытого
   // режима (окно меняет размер при выходе) панель заново не откроют.
   useEffect(() => {
-    if (!fullscreen && !mini) return;
+    if (IS_ANDROID || (!fullscreen && !mini)) return;
     const el = videoRef.current;
     if (!el) return;
     const session = overlaySession.current;
@@ -2370,6 +2382,7 @@ export default function App() {
                   Закрыть видео
                 </button>
               )}
+              {!IS_ANDROID && (
               <button
                 className={adhd ? "ghost adhd-toggle on" : "ghost adhd-toggle"}
                 onClick={toggleAdhd}
@@ -2382,7 +2395,8 @@ export default function App() {
                 <span aria-hidden="true">🧠</span>
                 {adhd ? "СДВГ: вкл" : "СДВГ"}
               </button>
-              {adhd && (
+              )}
+              {adhd && !IS_ANDROID && (
                 <button
                   className="ghost icon-only"
                   onClick={() => invoke("adhd_start").catch((err) => setError(String(err)))}
@@ -2392,6 +2406,7 @@ export default function App() {
                   <span aria-hidden="true">🔀</span>
                 </button>
               )}
+              {!IS_ANDROID && (
               <button
                 className={sharing ? "ghost sharing" : "ghost"}
                 onClick={toggleScreenShare}
@@ -2407,6 +2422,7 @@ export default function App() {
                 <Icon name="cast" size={17} />
                 {sharing ? "Остановить показ" : "Экран"}
               </button>
+              )}
               <button
                 className={invited ? "ghost done" : "ghost"}
                 onClick={copyInvite}
@@ -2442,6 +2458,7 @@ export default function App() {
         )}
         {!fullscreen && !mini && (
           <form className="source-bar" onSubmit={handleOpenUrl}>
+            {!IS_ANDROID && (
             <button
               type="button"
               className={browsing ? "browse-open active" : "browse-open"}
@@ -2451,6 +2468,7 @@ export default function App() {
               <Icon name="grid" size={18} />
               Обзор
             </button>
+            )}
             <label className="source-input">
               <Icon name="link" size={18} />
               <input
@@ -2665,7 +2683,7 @@ export default function App() {
           onError={(err) => setError(err)}
           fullscreen={fullscreen}
           onFullscreen={() => applyFullscreen(!fullscreen)}
-          onMini={() => applyMini(true)}
+          onMini={IS_ANDROID ? undefined : () => applyMini(true)}
           onReact={(emoji) => run(() => send({ type: "react", emoji }))}
           canShareSubtitles={isHost && media !== null}
         />
@@ -2808,6 +2826,7 @@ export default function App() {
                 />
                 Звуки: микрофон, вход и выход людей, упоминания
               </label>
+              {!IS_ANDROID && (
               <label className="setting-check">
                 <input
                   type="checkbox"
@@ -2819,7 +2838,9 @@ export default function App() {
                 />
                 Крестик сворачивает в трей (значок у часов), а не закрывает
               </label>
+              )}
               <h3 className="settings-sub">Голос</h3>
+              {!IS_ANDROID && (
               <fieldset>
                 <legend>Микрофон</legend>
                 <label className="radio">
@@ -2841,8 +2862,9 @@ export default function App() {
                   Нажми и говори
                 </label>
               </fieldset>
+              )}
 
-              {voiceMode === "open" && (
+              {voiceMode === "open" && !IS_ANDROID && (
                 <div className="setting">
                   <span className="setting-label">
                     Клавиша вкл/выкл микрофона — работает и в других окнах
@@ -2868,7 +2890,7 @@ export default function App() {
                 </div>
               )}
 
-              {voiceMode === "ptt" && (
+              {voiceMode === "ptt" && !IS_ANDROID && (
                 <div className="setting">
                   <span className="setting-label">Кнопка — работает и в других окнах</span>
                   <button className="quiet" onClick={() => setCapturing((c) => !c)}>
