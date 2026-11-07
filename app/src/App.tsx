@@ -922,8 +922,12 @@ export default function App() {
     };
   }, []);
 
+  // Новое сообщение — листаем вниз только сам чат. scrollIntoView листал бы
+  // и всю страницу: на телефоне она прокручивается, и ссылка с видео
+  // каждый раз уезжали за верх экрана.
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const list = chatEndRef.current?.parentElement;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
   }, [lines]);
 
   async function run(action: () => Promise<unknown>) {
