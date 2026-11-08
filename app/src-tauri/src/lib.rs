@@ -5,6 +5,8 @@
 //! Всё, что бывает только на компьютере (окна поверх видео, трей,
 //! глобальные клавиши, обновление exe), собирается только там.
 
+#[cfg_attr(mobile, path = "dpi_mobile.rs")]
+mod dpi;
 mod logs;
 mod net;
 #[cfg_attr(target_os = "android", path = "player_android.rs")]
@@ -118,6 +120,9 @@ pub fn run() {
         ptt::mute_set_key,
         tools::player_tools,
         tools::player_setup,
+        dpi::dpi_status,
+        dpi::dpi_set_enabled,
+        dpi::dpi_find_best,
         logs::open_logs,
         logs::ui_log,
         browser::browser_open,
@@ -197,6 +202,8 @@ pub fn run() {
 /// Окна, трей, ссылки-приглашения — только на компьютере.
 #[cfg(desktop)]
 fn desktop_setup(app: &mut tauri::App) {
+    // Ускорение YouTube, если его включали.
+    dpi::start_saved();
     // Окно для встроенного видео (setup выполняется в главном потоке).
     if let Some(window) = app.get_webview_window("main") {
         app.manage(overlay::MainWindow(window.clone()));

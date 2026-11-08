@@ -194,6 +194,11 @@ impl Player {
         if let Some(ca) = crate::certs::ca_bundle() {
             cmd.arg(format!("--tls-ca-file={}", ca.display()));
         }
+        // Ускорение YouTube (dpi.rs): mpv и его yt-dlp — через прокси обхода.
+        if let Some(proxy) = crate::dpi::proxy() {
+            cmd.arg(format!("--http-proxy={proxy}"));
+            cmd.arg(format!("--ytdl-raw-options=proxy={proxy}"));
+        }
         // Подробный журнал плеера и yt-dlp (см. logs.rs).
         let log_file = crate::logs::mpv_log_path(id);
         if let Some(log) = &log_file {
@@ -319,7 +324,17 @@ impl Player {
         self.probe().get(property).await
     }
 
+    /// Обход замедления YouTube включили или выключили после запуска
+    /// плеера — новая ссылка откроется уже с нужным прокси.
+    fn apply_proxy(&self) {
+        let proxy = crate::dpi::proxy().unwrap_or_default();
+        let raw = if proxy.is_empty() { String::new() } else { format!("proxy={proxy}") };
+        self.command(json!(["set_property", "http-proxy", proxy]));
+        self.command(json!(["set_property", "ytdl-raw-options", raw]));
+    }
+
     pub fn load(&self, path_or_url: &str) {
+        self.apply_proxy();
         // Название из заранее подготовленной ссылки — не для этого файла.
         self.command(json!(["set_property", "force-media-title", ""]));
         self.command(json!(["loadfile", path_or_url, "replace"]));
@@ -327,6 +342,7 @@ impl Player {
 
     /// Открыть заранее разобранную ссылку (см. prefetch.rs) — без yt-dlp.
     pub fn load_ready(&self, ready: &crate::prefetch::Ready) {
+        self.apply_proxy();
         self.command(json!([
             "set_property",
             "force-media-title",
@@ -406,6 +422,7 @@ impl Player {
 
     /// Сменить качество ссылки и перезапустить её с позиции `resume_at`.
     pub fn reload_with_quality(&self, quality: Option<u32>, resume_at: Option<f64>) {
+        self.apply_proxy();
         self.command(json!(["set_property", "ytdl-format", ytdl_format(quality)]));
         if let Some(at) = resume_at {
             // `start` действует на следующую загрузку; после неё сбрасываем.

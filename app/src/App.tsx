@@ -308,6 +308,110 @@ export function ThemePicker() {
   );
 }
 
+type DpiStatus = {
+  enabled: boolean;
+  running: boolean;
+  profile: string | null;
+  speed: number;
+  baseline: number;
+};
+
+/** Скорость в байтах в секунду — по-человечески. */
+function formatSpeed(bytes: number) {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1).replace(".", ",")} МБ/с`;
+  return `${Math.round(bytes / 1024)} КБ/с`;
+}
+
+/**
+ * Ускорение YouTube (обход замедления, dpi.rs): поиск лучших настроек по
+ * кнопке и выключатель. Только на компьютере.
+ */
+function DpiSettings() {
+  const [status, setStatus] = useState<DpiStatus | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    invoke<DpiStatus>("dpi_status").then(setStatus).catch(() => {});
+    const off = listen<{ done: number; total: number }>("dpi-progress", (e) => setProgress(e.payload));
+    return () => {
+      off.then((f) => f());
+    };
+  }, []);
+
+  if (!status) return null;
+
+  const findBest = async () => {
+    setBusy(true);
+    setError(null);
+    setProgress(null);
+    try {
+      setStatus(await invoke<DpiStatus>("dpi_find_best"));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+
+  const toggle = async (enabled: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await invoke<DpiStatus>("dpi_set_enabled", { enabled }));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  let hint: string;
+  if (busy && progress) {
+    hint =
+      progress.done === 0
+        ? "Готовлю проверку…"
+        : `Проверяю способы: ${progress.done} из ${progress.total}. Это займёт около минуты.`;
+  } else if (busy) {
+    hint = "Готовлю проверку…";
+  } else if (status.profile && status.enabled) {
+    hint = `Включено: ${formatSpeed(status.speed)} вместо ${formatSpeed(status.baseline)} без обхода.`;
+  } else if (status.profile) {
+    hint = "Выключено. Найденный способ можно включить снова.";
+  } else if (status.baseline > 0) {
+    hint = `Замедления не видно (${formatSpeed(status.baseline)}) — обход не нужен.`;
+  } else {
+    hint = "Если YouTube грузится медленно, нажми кнопку — приложение подберёт способ обхода замедления. Работает только для BrotherHub, остальные программы не затрагивает.";
+  }
+
+  return (
+    <div className="setting">
+      <span className="setting-label">Ускорение YouTube</span>
+      {status.profile && (
+        <label className="setting-check">
+          <input
+            type="checkbox"
+            checked={status.enabled}
+            disabled={busy}
+            onChange={(e) => toggle(e.target.checked)}
+          />
+          Обход замедления YouTube
+        </label>
+      )}
+      <button type="button" className="quiet" disabled={busy} onClick={findBest}>
+        {busy ? "Ищу…" : "Найти лучший обход"}
+      </button>
+      <span className="setting-hint">{hint}</span>
+      {status.enabled && !status.running && !busy && (
+        <span className="setting-hint error-text">Обход сейчас не работает — нажми «Найти лучший обход».</span>
+      )}
+      {error && <span className="setting-hint error-text">{error}</span>}
+    </div>
+  );
+}
+
 /**
  * Открыть папку с логами. В ней папка «1» — этот запуск, «2» — предыдущий
  * и так далее: её и нужно прислать, если что-то сломалось.
@@ -2941,6 +3045,7 @@ export default function App() {
                 Крестик сворачивает в трей (значок у часов), а не закрывает
               </label>
               )}
+              {!IS_ANDROID && <DpiSettings />}
               <h3 className="settings-sub">Голос</h3>
               {!IS_ANDROID && (
               <fieldset>

@@ -76,6 +76,7 @@ async fn youtube_title(url: &str) -> Option<String> {
 async fn ytdlp_title(url: &str) -> Option<String> {
     let ytdlp = crate::player::find_ytdlp().unwrap_or_else(|| "yt-dlp".into());
     let mut cmd = tokio::process::Command::new(ytdlp);
+    crate::dpi::ytdlp_proxy(&mut cmd);
     cmd.args([
         "--no-warnings",
         "--skip-download",

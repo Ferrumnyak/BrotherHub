@@ -85,6 +85,7 @@ pub async fn prefetch_media(session: State<'_, SharedSession>, url: String) -> R
 async fn resolve(url: &str, quality: Option<u32>) -> Option<Ready> {
     let ytdlp = crate::player::find_ytdlp().unwrap_or_else(|| "yt-dlp".into());
     let mut cmd = tokio::process::Command::new(ytdlp);
+    crate::dpi::ytdlp_proxy(&mut cmd);
     cmd.args(["--no-warnings", "--no-playlist", "--encoding", "utf-8", "-J", "-f"])
         .arg(crate::player::ytdl_format(quality))
         .arg("--")

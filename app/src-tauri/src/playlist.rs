@@ -23,6 +23,7 @@ pub struct Entry {
 pub async fn playlist_entries(url: String) -> Result<Vec<Entry>, String> {
     let ytdlp = crate::player::find_ytdlp().unwrap_or_else(|| "yt-dlp".into());
     let mut cmd = tokio::process::Command::new(ytdlp);
+    crate::dpi::ytdlp_proxy(&mut cmd);
     cmd.args([
         "--no-warnings",
         "--flat-playlist",

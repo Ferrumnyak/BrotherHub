@@ -261,7 +261,7 @@ async fn download(
 
 /// Распаковать zip встроенным в Windows 10/11 `tar.exe`, а если его нет —
 /// через PowerShell.
-async fn unzip(archive: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) async fn unzip(archive: &Path, dest: &Path) -> Result<(), String> {
     let tar = std::env::var_os("SystemRoot")
         .map(|root| PathBuf::from(root).join("System32").join("tar.exe"))
         .filter(|p| p.is_file())

@@ -63,6 +63,27 @@ static LAST: Mutex<Option<Area>> = Mutex::new(None);
 /// созданное окно сразу убираем.
 static WANTED: AtomicBool = AtomicBool::new(false);
 
+/// С каким прокси обхода (dpi.rs) создано окно. Обход включили, выключили
+/// или прокси перезапустился на другом порту — окно создаём заново.
+static BUILT_PROXY: Mutex<Option<String>> = Mutex::new(None);
+
+/// Есть ли окно браузера с нынешним прокси; устаревшее — закрыть.
+async fn current_view(app: &AppHandle) -> Option<WebviewWindow> {
+    let view = app.get_webview_window(LABEL)?;
+    if *BUILT_PROXY.lock().unwrap() == crate::dpi::proxy() {
+        return Some(view);
+    }
+    let _ = view.destroy();
+    // Окно с тем же именем можно создать, только когда старое исчезло.
+    for _ in 0..20 {
+        if app.get_webview_window(LABEL).is_none() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    None
+}
+
 /// Открытие по одному: второй вызов, пока окно создаётся, создал бы ещё одно.
 fn open_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
@@ -105,14 +126,13 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
     }
     WANTED.store(true, Ordering::SeqCst);
     let _turn = open_lock().lock().await;
-    if let Some(view) = app.get_webview_window(LABEL) {
+    if let Some(view) = current_view(&app).await {
         view.navigate(url).map_err(|e| e.to_string())?;
         place(&app, &view, rect)?;
         view.show().map_err(|e| e.to_string())?;
         return Ok(());
     }
     let main = main_window(&app)?;
-    let handle = app.clone();
     // Своя папка данных: у сайтов отдельные входы и куки, и им не достаётся
     // автоматический доступ к микрофону, который есть у окон приложения.
     let data = app
@@ -120,7 +140,40 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
         .app_local_data_dir()
         .map_err(|e| e.to_string())?
         .join("browser");
-    let view = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::External(url))
+    // Ускорение YouTube (dpi.rs): страницы — через прокси обхода. Если
+    // WebView2 не примет прокси, открываем как обычно.
+    let current = crate::dpi::proxy();
+    *BUILT_PROXY.lock().unwrap() = current.clone();
+    let proxy = current.and_then(|p| p.parse::<Url>().ok());
+    let view = match build(&app, &main, url.clone(), data.clone(), proxy.clone()) {
+        Err(e) if proxy.is_some() => {
+            logs::warn(format!("браузер с прокси обхода не открылся ({e}), открываю без него"));
+            build(&app, &main, url, data, None)
+        }
+        other => other,
+    }
+    .map_err(|e| {
+        logs::warn(format!("браузер не открылся: {e}"));
+        format!("Не получилось открыть сайт: {e}")
+    })?;
+    if !WANTED.load(Ordering::SeqCst) {
+        let _ = view.destroy();
+        return Ok(());
+    }
+    place(&app, &view, rect)?;
+    view.show().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn build(
+    app: &AppHandle,
+    main: &WebviewWindow,
+    url: Url,
+    data: std::path::PathBuf,
+    proxy: Option<Url>,
+) -> tauri::Result<WebviewWindow> {
+    let handle = app.clone();
+    let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(url))
         .title("BrotherHub — обзор")
         .data_directory(data)
         .initialization_script(ADBLOCK)
@@ -138,21 +191,11 @@ pub async fn browser_open(app: AppHandle, url: String, rect: Area) -> Result<(),
         .shadow(false)
         .resizable(false)
         .skip_taskbar(true)
-        .visible(false)
-        .parent(&main)
-        .map_err(|e| e.to_string())?
-        .build()
-        .map_err(|e| {
-            logs::warn(format!("браузер не открылся: {e}"));
-            format!("Не получилось открыть сайт: {e}")
-        })?;
-    if !WANTED.load(Ordering::SeqCst) {
-        let _ = view.destroy();
-        return Ok(());
+        .visible(false);
+    if let Some(proxy) = proxy {
+        builder = builder.proxy_url(proxy);
     }
-    place(&app, &view, rect)?;
-    view.show().map_err(|e| e.to_string())?;
-    Ok(())
+    builder.parent(main)?.build()
 }
 
 /// Передвинуть браузер вслед за областью видео (`None` — спрятать).
@@ -219,7 +262,7 @@ pub async fn browser_hide(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn browser_show(app: AppHandle, rect: Area) -> Result<bool, String> {
     let _turn = open_lock().lock().await;
-    let Some(view) = app.get_webview_window(LABEL) else {
+    let Some(view) = current_view(&app).await else {
         return Ok(false);
     };
     WANTED.store(true, Ordering::SeqCst);
