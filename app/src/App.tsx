@@ -2474,6 +2474,7 @@ export default function App() {
 
             <details className="server-settings" open={showServer}>
               <summary
+                tabIndex={0}
                 onClick={(e) => {
                   e.preventDefault();
                   setShowServer((s) => !s);
@@ -2511,6 +2512,7 @@ export default function App() {
 
             <details className="server-settings" open={showThemes}>
               <summary
+                tabIndex={0}
                 onClick={(e) => {
                   e.preventDefault();
                   setShowThemes((s) => !s);

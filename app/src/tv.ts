@@ -33,10 +33,21 @@ function visible(el: Element): boolean {
 
 /** Ближайший элемент в направлении `dir` от `from`. */
 function next(from: Element | null, dir: Dir): HTMLElement | null {
-  const all = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-    (el) => el !== from && visible(el),
+  const ordered = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => el === from || visible(el),
   );
+  const all = ordered.filter((el) => el !== from);
   if (!from) return all[0] ?? null;
+  const spatial = nearest(from, all, dir);
+  if (spatial) return spatial;
+  // В эту сторону по раскладке ничего нет — следующий (или предыдущий)
+  // по порядку на странице: так можно дойти до любого элемента.
+  const i = ordered.indexOf(from as HTMLElement);
+  if (i < 0) return null;
+  return (dir === "down" || dir === "right" ? ordered[i + 1] : ordered[i - 1]) ?? null;
+}
+
+function nearest(from: Element, all: HTMLElement[], dir: Dir): HTMLElement | null {
   const a = from.getBoundingClientRect();
   const ax = a.left + a.width / 2;
   const ay = a.top + a.height / 2;
@@ -213,6 +224,9 @@ function onKey(e: KeyboardEvent) {
   if (target) {
     if (isTextField(target)) quiet(target);
     target.focus({ preventScroll: true });
+    if (document.activeElement !== target) {
+      console.info(`BrotherHub: пульт: не выделяется ${target.tagName.toLowerCase()}.${target.className}`);
+    }
     target.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 }
