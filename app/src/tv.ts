@@ -79,6 +79,53 @@ function arrowStaysInField(el: Element | null, dir: Dir): boolean {
   return false;
 }
 
+/** Поле для текста (на нём пульт открывает экранную клавиатуру). */
+function isTextField(el: Element | null): el is HTMLInputElement | HTMLTextAreaElement {
+  if (el instanceof HTMLTextAreaElement) return true;
+  return (
+    el instanceof HTMLInputElement &&
+    ["text", "search", "password", "url", "email", "number", "tel", ""].includes(el.type)
+  );
+}
+
+/** Поле, в котором сейчас печатают (клавиатуру открыли кнопкой «ОК»). */
+let typing: Element | null = null;
+
+/**
+ * Не открывать клавиатуру, когда на поле просто перешли стрелками: на ТВ она
+ * закрывает пол-экрана. `inputmode="none"` прячет её; прежнее значение
+ * возвращаем, когда поле теряет фокус.
+ */
+function quiet(el: HTMLInputElement | HTMLTextAreaElement) {
+  if (el === typing || el.dataset.tvQuiet) return;
+  el.dataset.tvQuiet = el.getAttribute("inputmode") ?? "-";
+  el.setAttribute("inputmode", "none");
+}
+
+function unquiet(el: HTMLInputElement | HTMLTextAreaElement) {
+  const before = el.dataset.tvQuiet;
+  if (before === undefined) return;
+  delete el.dataset.tvQuiet;
+  if (before === "-") el.removeAttribute("inputmode");
+  else el.setAttribute("inputmode", before);
+}
+
+/** «ОК» на поле: открыть клавиатуру. */
+function startTyping(el: HTMLInputElement | HTMLTextAreaElement) {
+  typing = el;
+  unquiet(el);
+  // Клавиатура появляется при новом фокусе.
+  el.blur();
+  el.focus({ preventScroll: true });
+  el.click();
+}
+
+/**
+ * Элементы, которые браузер сам по «ОК» не нажимает: заголовки раскрывашек
+ * и строки с tabindex. Кнопки, ссылки и поля он нажимает сам.
+ */
+const CLICK_ON_OK = 'summary, [tabindex]:not(button):not(a):not(input):not(select):not(textarea)';
+
 /** Включить управление пультом, если это телевизор. */
 export async function initTv() {
   let tv = false;
@@ -112,6 +159,29 @@ function enable(how = "по системе") {
   console.info(`BrotherHub: пульт: режим ТВ включён ${how}`);
   document.documentElement.classList.add("tv");
   window.addEventListener("keydown", onKey, true);
+  document.addEventListener(
+    "focusin",
+    (e) => {
+      if (isTextField(e.target as Element)) quiet(e.target as HTMLInputElement);
+    },
+    true,
+  );
+  document.addEventListener(
+    "focusout",
+    (e) => {
+      const el = e.target as Element;
+      if (el === typing) typing = null;
+      if (isTextField(el)) unquiet(el);
+    },
+    true,
+  );
+  // Поле с autoFocus уже в фокусе (и клавиатура могла открыться) — прячем.
+  const active = document.activeElement;
+  if (isTextField(active)) {
+    quiet(active);
+    active.blur();
+    active.focus({ preventScroll: true });
+  }
   // Сразу что-нибудь в фокусе — иначе первое нажатие «ничего не делает».
   setTimeout(() => {
     if (document.activeElement === document.body) next(null, "down")?.focus();
@@ -119,6 +189,19 @@ function enable(how = "по системе") {
 }
 
 function onKey(e: KeyboardEvent) {
+  if (e.key === "Enter") {
+    const el = document.activeElement;
+    if (isTextField(el) && el !== typing) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      startTyping(el);
+    } else if (el instanceof HTMLElement && el.matches(CLICK_ON_OK)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      el.click();
+    }
+    return;
+  }
   const dir = DIRS[e.key];
   if (!dir) return;
   const current = document.activeElement === document.body ? null : document.activeElement;
@@ -128,6 +211,7 @@ function onKey(e: KeyboardEvent) {
   e.preventDefault();
   e.stopImmediatePropagation();
   if (target) {
+    if (isTextField(target)) quiet(target);
     target.focus({ preventScroll: true });
     target.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
