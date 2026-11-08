@@ -309,6 +309,7 @@ export function ThemePicker() {
 }
 
 type DpiStatus = {
+  available: boolean;
   enabled: boolean;
   running: boolean;
   profile: string | null;
@@ -340,7 +341,7 @@ function DpiSettings() {
     };
   }, []);
 
-  if (!status) return null;
+  if (!status || !status.available) return null;
 
   const findBest = async () => {
     setBusy(true);

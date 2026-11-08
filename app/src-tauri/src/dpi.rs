@@ -473,6 +473,8 @@ fn to_args(list: &[&str]) -> Vec<String> {
 
 #[derive(Serialize)]
 pub struct Status {
+    /// Есть ли ByeDPI в этой сборке (на компьютере скачивается — всегда да).
+    available: bool,
     enabled: bool,
     running: bool,
     profile: Option<String>,
@@ -485,6 +487,7 @@ pub struct Status {
 pub fn dpi_status() -> Status {
     let s = load_settings();
     Status {
+        available: cfg!(desktop) || ciadpi_path().is_some_and(|p| p.is_file()),
         enabled: s.enabled,
         running: proxy().is_some(),
         profile: s.profile,
