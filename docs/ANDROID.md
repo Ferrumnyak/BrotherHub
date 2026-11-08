@@ -107,20 +107,9 @@ Rust (`logs.rs` пишет туда же), и записи интерфейса 
 
 ### Android TV: пульт
 
-- Навигация — `app/src/tv.ts`; «ОК», «Назад», кнопки микрофона —
+- Навигация — `app/src/tv.ts`; «ОК», «Назад» —
   `PlayerPlugin.routeKey` (из `MainActivity.dispatchKeyEvent`).
-- «Нажми и говори» на кнопке приложения (на пультах Xiaomi — «Премьер», код
-  354): такие кнопки «глобальные», приложению их система не отдаёт, поэтому —
-  служба специальных возможностей `RemoteKeyService.kt` с фильтром клавиш.
-  Включить без пульта:
-
-  ```
-  adb shell settings put secure enabled_accessibility_services com.ferrumnyak.brotherwatch/com.ferrumnyak.brotherwatch.RemoteKeyService
-  adb shell settings put secure accessibility_enabled 1
-  ```
-
-  (затирает другие включённые службы — сначала посмотри
-  `settings get secure enabled_accessibility_services`). Нажатия, вставленные
-  `adb shell input keyevent`, служба не видит — проверять настоящим пультом.
 - Кнопку микрофона самого пульта Google TV отдаёт Ассистенту в обход
-  приложений — её не перехватить.
+  приложений — её не перехватить, и звук пульта приложению тоже не достаётся.
+  Встроенный микрофон Xiaomi MiTV-MZTU1 отдаёт приложениям ровно нули (проверено
+  `AudioRecord` со всеми источниками) — для голоса нужен USB-микрофон.

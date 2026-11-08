@@ -1,5 +1,4 @@
 <resources>
     <string name="app_name">"BrotherHub"</string>
     <string name="main_activity_title">"BrotherHub"</string>
-    <string name="remote_key_service_description">"Кнопка «Премьер» на пульте включает микрофон в зале, пока её держишь (только когда открыт BrotherHub). В остальное время кнопка работает как обычно."</string>
 </resources>

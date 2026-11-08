@@ -1844,17 +1844,6 @@ export default function App() {
     };
   });
 
-  // ТВ: кнопка пульта (на Xiaomi — «Премьер», см. RemoteKeyService.kt) —
-  // «нажми и говори»: держишь — микрофон включён, отпустил — выключен
-  // (встроенный микрофон ТВ иначе всё время слышит фильм из динамиков).
-  useEffect(() => {
-    const w = window as unknown as { __bhMic?: (down: boolean) => void };
-    w.__bhMic = (down) => setMicOn(down);
-    return () => {
-      delete w.__bhMic;
-    };
-  }, []);
-
   // Глобальная кнопка «нажми и говори» работает, только пока мы в комнате.
   useEffect(() => {
     const active = joinedRoom !== null && voiceMode === "ptt" && pttKey !== null;

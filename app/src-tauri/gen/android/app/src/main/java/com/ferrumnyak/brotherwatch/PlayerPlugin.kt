@@ -387,36 +387,12 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         (v as? ViewGroup)?.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
     }
 
-    /// BrotherHub на экране (для RemoteKeyService).
-    @Volatile
-    var isOnScreen = false
-        private set
-
-    override fun onResume() {
-        super.onResume()
-        isOnScreen = true
-    }
-
-    override fun onPause() {
-        super.onPause()
-        isOnScreen = false
-    }
-
-    /// «Нажми и говори» с кнопки пульта: держишь — микрофон включён.
-    fun pushToTalk(down: Boolean, keyCode: Int) {
-        main.post {
-            Log.i(TAG, "пульт: микрофон ${if (down) "нажат" else "отпущен"} ($keyCode)")
-            webView?.evaluateJavascript("window.__bhMic && window.__bhMic($down)", null)
-        }
-    }
-
     private var keyLogged = false
     private val loggedKeys = HashSet<Int>()
 
     /// Из MainActivity.dispatchKeyEvent: стрелки и «ОК» пульта — в интерфейс
     /// (или в «Обзор», если фокус в нём). `false` — обработать как обычно.
     fun routeKey(event: KeyEvent): Boolean {
-        // Кнопка микрофона (голосового поиска) на пульте — «нажми и говори».
         when (event.keyCode) {
             // «Назад» на ТВ: сначала закрыть открытое в интерфейсе (tv.ts/App.tsx,
             // window.__bhBack), в «Обзоре» — страница сайта назад; выйти —
@@ -438,17 +414,6 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                             if (result != "true") activity.finish()
                         }
                     }
-                }
-                return true
-            }
-            KeyEvent.KEYCODE_SEARCH, KeyEvent.KEYCODE_VOICE_ASSIST, KeyEvent.KEYCODE_ASSIST -> {
-                val ui = webView ?: return false
-                if (event.repeatCount == 0 &&
-                    (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)
-                ) {
-                    val down = event.action == KeyEvent.ACTION_DOWN
-                    Log.i(TAG, "пульт: микрофон ${if (down) "нажат" else "отпущен"} (${event.keyCode})")
-                    ui.evaluateJavascript("window.__bhMic && window.__bhMic($down)", null)
                 }
                 return true
             }
