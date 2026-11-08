@@ -102,5 +102,25 @@ npm run tauri android build -- --apk --debug --target aarch64
 На телефоне при установке нужно разрешить «установку из неизвестных
 источников». Почти все современные телефоны — `aarch64` (arm64).
 
-Логи приложения на телефоне: `adb logcat -s BrotherHub` (плеер) и
-`adb logcat | findstr RustStdoutStderr` (Rust).
+Логи приложения на телефоне и ТВ: `adb logcat -s BrotherHub` — и Kotlin, и
+Rust (`logs.rs` пишет туда же), и записи интерфейса (`ui_log`).
+
+### Android TV: пульт
+
+- Навигация — `app/src/tv.ts`; «ОК», «Назад», кнопки микрофона —
+  `PlayerPlugin.routeKey` (из `MainActivity.dispatchKeyEvent`).
+- «Нажми и говори» на кнопке приложения (на пультах Xiaomi — «Премьер», код
+  354): такие кнопки «глобальные», приложению их система не отдаёт, поэтому —
+  служба специальных возможностей `RemoteKeyService.kt` с фильтром клавиш.
+  Включить без пульта:
+
+  ```
+  adb shell settings put secure enabled_accessibility_services com.ferrumnyak.brotherwatch/com.ferrumnyak.brotherwatch.RemoteKeyService
+  adb shell settings put secure accessibility_enabled 1
+  ```
+
+  (затирает другие включённые службы — сначала посмотри
+  `settings get secure enabled_accessibility_services`). Нажатия, вставленные
+  `adb shell input keyevent`, служба не видит — проверять настоящим пультом.
+- Кнопку микрофона самого пульта Google TV отдаёт Ассистенту в обход
+  приложений — её не перехватить.

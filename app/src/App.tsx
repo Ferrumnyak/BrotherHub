@@ -1844,24 +1844,12 @@ export default function App() {
     };
   });
 
-  // ТВ: кнопка микрофона на пульте — «нажми и говори». Держишь — микрофон
-  // включён, отпустил — как было (её передаёт Kotlin, PlayerPlugin.routeKey).
-  const micBeforeRemote = useRef<boolean | null>(null);
+  // ТВ: кнопка пульта (на Xiaomi — «Премьер», см. RemoteKeyService.kt) —
+  // «нажми и говори»: держишь — микрофон включён, отпустил — выключен
+  // (встроенный микрофон ТВ иначе всё время слышит фильм из динамиков).
   useEffect(() => {
     const w = window as unknown as { __bhMic?: (down: boolean) => void };
-    w.__bhMic = (down) => {
-      if (down) {
-        if (micBeforeRemote.current !== null) return;
-        setMicOn((on) => {
-          micBeforeRemote.current = on;
-          return true;
-        });
-      } else if (micBeforeRemote.current !== null) {
-        const before = micBeforeRemote.current;
-        micBeforeRemote.current = null;
-        setMicOn(before);
-      }
-    };
+    w.__bhMic = (down) => setMicOn(down);
     return () => {
       delete w.__bhMic;
     };

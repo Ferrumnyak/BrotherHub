@@ -387,6 +387,29 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         (v as? ViewGroup)?.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
     }
 
+    /// BrotherHub на экране (для RemoteKeyService).
+    @Volatile
+    var isOnScreen = false
+        private set
+
+    override fun onResume() {
+        super.onResume()
+        isOnScreen = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isOnScreen = false
+    }
+
+    /// «Нажми и говори» с кнопки пульта: держишь — микрофон включён.
+    fun pushToTalk(down: Boolean, keyCode: Int) {
+        main.post {
+            Log.i(TAG, "пульт: микрофон ${if (down) "нажат" else "отпущен"} ($keyCode)")
+            webView?.evaluateJavascript("window.__bhMic && window.__bhMic($down)", null)
+        }
+    }
+
     private var keyLogged = false
     private val loggedKeys = HashSet<Int>()
 
