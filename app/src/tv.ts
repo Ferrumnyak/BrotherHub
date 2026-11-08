@@ -255,6 +255,19 @@ function okFromRemote() {
     if (el !== typing) startTyping(el);
     return;
   }
+  // Выпадающий список WebView на ТВ по «ОК» не открывает — переключаем
+  // на следующий вариант по кругу.
+  if (el instanceof HTMLSelectElement) {
+    const n = el.options.length;
+    if (n > 0) {
+      const next = (el.selectedIndex + 1) % n;
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+      setter?.call(el, el.options[next].value);
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      say(`пульт: список → «${el.options[next].text}»`);
+    }
+    return;
+  }
   el.click();
 }
 
