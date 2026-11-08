@@ -198,6 +198,8 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     private var browser: WebView? = null
     private var browserScript: String? = null
     private var asked = false
+    /// Подключён голосовой чат: Android переводит звук в «режим звонка».
+    private var voiceOn = false
 
     override fun load(webView: WebView) {
         instance = this
@@ -671,6 +673,8 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(KeepAliveArgs::class.java)
         invoke.resolve()
         main.post {
+            voiceOn = args.room != null && args.mic
+            applyAudioRoute()
             val intent = Intent(activity, PlaybackService::class.java)
             val room = args.room
             if (room == null) {
@@ -691,6 +695,26 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 Log.w(TAG, "служба для фона не запустилась", e)
             }
         }
+    }
+
+    /// Пока идёт голосовой чат, Android переводит звук в «режим звонка», и
+    /// обычный звук фильма в нём сильно приглушается. Поэтому фильм на это
+    /// время играет по тому же каналу, что и голос: громко, и эхоподавление
+    /// не пускает фильм в твой микрофон. Без голоса — обычный звук.
+    private fun applyAudioRoute() {
+        val p = exo ?: return
+        val attrs = if (voiceOn) {
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_VOICE_COMMUNICATION)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build()
+        } else {
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build()
+        }
+        p.setAudioAttributes(attrs, false)
     }
 
     /// Кнопка «картинка в картинке».
@@ -1040,6 +1064,8 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             .setHandleAudioBecomingNoisy(false)
             .build()
         p.playWhenReady = false
+        exo = p
+        applyAudioRoute()
         p.addListener(object : Player.Listener {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 event("property-change") { it.put("name", "pause").put("data", !playWhenReady) }
