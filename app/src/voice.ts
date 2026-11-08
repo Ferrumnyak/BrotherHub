@@ -19,6 +19,8 @@ import {
   type RemoteVideoTrack,
 } from "livekit-client";
 import { PROCESSOR_NAME, RnnoiseProcessor, type NoiseMode } from "./noise";
+import { isTv } from "./tv";
+import { prepareRemoteMic, remoteMicActive, remoteMicTrack } from "./remoteMic";
 
 /** Чужая трансляция экрана. */
 export type ScreenShare = { identity: string; track: RemoteVideoTrack };
@@ -69,6 +71,9 @@ export class VoiceClient {
   /** Аудиоконтекст для RNNoise: 48 кГц — частота, на которой она обучена. */
   private noiseCtx: AudioContext | null = null;
 
+  /** ТВ: опубликованная дорожка микрофона пульта (remoteMic.ts). */
+  private remotePub: LocalTrackPublication | null = null;
+
   constructor(private cb: VoiceCallbacks) {}
 
   /** Сменить шумоподавление (сразу, если микрофон уже включён). */
@@ -80,7 +85,8 @@ export class VoiceClient {
   private async applyNoise() {
     const pub = this.room?.localParticipant.getTrackPublication(Track.Source.Microphone);
     const track = pub?.track as LocalAudioTrack | undefined;
-    if (!track) return;
+    // ТВ: звук пульта уже очищен самим пультом (как у голосового поиска).
+    if (!track || isTv()) return;
     const active = track.getProcessor()?.name === PROCESSOR_NAME;
     try {
       if (this.noise === "strong" && !active) {
@@ -139,15 +145,24 @@ export class VoiceClient {
     await this.disconnect();
 
     const room = new Room({
+      // ТВ: голоса друзей — через Web Audio. Иначе WebView играет их как
+      // звонок, а звонок ТВ отдаёт только своим динамикам: с Bluetooth-
+      // наушниками голосов не слышно.
+      webAudioMix: isTv(),
       audioCaptureDefaults: {
         deviceId: micDeviceId || undefined,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        // ТВ: без обработки «для звонков» — с ней WebView переводит весь звук
+        // приложения в звонок (см. выше).
+        echoCancellation: !isTv(),
+        noiseSuppression: !isTv(),
+        autoGainControl: !isTv(),
       },
     });
     this.room = room;
     this.micOn = false;
+    this.remotePub = null;
+    // ТВ: микрофон — пульт; звук для него готовим заранее.
+    if (isTv()) prepareRemoteMic().catch(() => {});
 
     room.on(
       RoomEvent.TrackSubscribed,
@@ -205,6 +220,7 @@ export class VoiceClient {
     room.on(RoomEvent.Disconnected, () => {
       if (this.room !== room) return;
       this.room = null;
+      this.remotePub = null;
       this.stopMeters();
       this.dropShares();
       this.cb.onStatus("off");
@@ -229,6 +245,7 @@ export class VoiceClient {
     const room = this.room;
     this.room = null;
     this.micOn = false;
+    this.remotePub = null;
     this.stopMeters();
     this.dropShares();
     if (room) await room.disconnect();
@@ -414,9 +431,15 @@ export class VoiceClient {
 
   /** Включить/выключить передачу своего голоса. */
   async setMic(on: boolean) {
+    // ТВ: говорить можно, только пока пульт передаёт звук.
+    if (isTv() && on && !remoteMicActive()) on = false;
     const room = this.room;
     if (!room || on === this.micOn) return;
     this.micOn = on;
+    if (isTv()) {
+      await this.setRemoteMic(room, on);
+      return;
+    }
     try {
       await room.localParticipant.setMicrophoneEnabled(on);
       if (on) await this.wakeNoise();
@@ -430,6 +453,36 @@ export class VoiceClient {
             ? "Микрофон не найден"
             : `Микрофон: ${text}`,
       );
+    }
+  }
+
+  /**
+   * ТВ: вместо микрофона (у ТВ его нет) — звук пульта. Дорожка публикуется
+   * один раз и дальше только включается/выключается: так начало фразы не
+   * теряется на переподключении.
+   */
+  private async setRemoteMic(room: Room, on: boolean) {
+    try {
+      let pub = this.remotePub;
+      if (pub && pub.track?.mediaStreamTrack.readyState !== "live") {
+        pub = this.remotePub = null;
+      }
+      if (on && !pub) {
+        const track = await remoteMicTrack();
+        if (this.room !== room || !this.micOn) return;
+        this.remotePub = await room.localParticipant.publishTrack(track, {
+          source: Track.Source.Microphone,
+        });
+        // Пока публиковали, микрофон успели выключить.
+        if (!this.micOn) await this.remotePub.mute();
+      } else if (on && pub) {
+        await pub.unmute();
+      } else if (pub) {
+        await pub.mute();
+      }
+    } catch (err) {
+      this.micOn = false;
+      this.cb.onError(`Микрофон пульта: ${err}`);
     }
   }
 

@@ -40,6 +40,7 @@ import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
 import { IS_ANDROID, IS_MAC } from "./platform";
 import { isTv } from "./tv";
+import { onRemoteMic, remoteMicActive, stopRemoteMic } from "./remoteMic";
 import { checkForUpdate, installUpdate, setBeforeUpdate, useAppVersion, useUpdate } from "./update";
 import { knownTitle, rememberTitle, requestTitle, useTitles } from "./titles";
 import { EmojiGlyph, RichText } from "./RichText";
@@ -74,6 +75,9 @@ type ChatLine =
       icon: EventIcon;
       media?: string;
     };
+
+/** ТВ: сколько секунд пульт передаёт звук после нажатия кнопки микрофона. */
+const REMOTE_TALK_S = 15;
 
 // Цвета кружков участников и их имён в чате — по нику, чтобы у каждого был свой.
 const SEAT_COLORS = ["#6E4A3A", "#3F5260", "#4E5A3C", "#5B3F5C", "#6A5130", "#3E4E4A", "#5E3A40", "#46466A"];
@@ -1825,13 +1829,66 @@ export default function App() {
     micSoundRef.current = micOn;
   }, [micOn, voiceStatus, voiceMode]);
 
+  // ТВ: микрофон — кнопка на пульте (remoteMic.ts, PlayerPlugin). Кнопка
+  // микрофона в интерфейсе и значок у друзей показывают, идёт ли звук с пульта.
+  const deafenedRef = useRef(deafened);
+  deafenedRef.current = deafened;
+  /** Сколько секунд пульт ещё передаёт звук (`null` — микрофон пульта выключен). */
+  const [remoteLeft, setRemoteLeft] = useState<number | null>(null);
+  const remoteStartRef = useRef<number | null>(null);
+  useEffect(() => {
+    const w = window as unknown as { __bhRemoteMicPress?: () => boolean };
+    w.__bhRemoteMicPress = () => {
+      if (voiceStatusRef.current !== "connected") {
+        setError("Микрофон пульта работает, когда подключён голос");
+        return false;
+      }
+      if (deafenedRef.current) {
+        setError("Звук выключен — включи его, чтобы говорить");
+        return false;
+      }
+      return true;
+    };
+    const off = onRemoteMic((on, err) => {
+      remoteStartRef.current = on ? performance.now() : null;
+      setRemoteLeft(on ? REMOTE_TALK_S : null);
+      setMicOn(on);
+      if (err) setVoiceError(err);
+      else if (on) setVoiceError(null);
+    });
+    return () => {
+      delete w.__bhRemoteMicPress;
+      off();
+    };
+  }, []);
+  // Обратный отсчёт: пульт передаёт звук ~15 с от нажатия.
+  const remoteTalking = remoteLeft !== null;
+  useEffect(() => {
+    if (!remoteTalking) return;
+    const t = window.setInterval(() => {
+      const start = remoteStartRef.current;
+      if (start === null) return;
+      const left = Math.max(0, Math.ceil(REMOTE_TALK_S - (performance.now() - start) / 1000));
+      setRemoteLeft((prev) => (prev === null ? null : left));
+    }, 250);
+    return () => window.clearInterval(t);
+  }, [remoteTalking]);
+  useEffect(() => {
+    if (!isTv()) return;
+    if ((voiceStatus !== "connected" || deafened) && remoteMicActive()) stopRemoteMic();
+    if (voiceStatus === "connected") setMicOn(remoteMicActive() && !deafened);
+  }, [voiceStatus, deafened]);
+
   // ТВ: «Назад» на пульте сначала закрывает открытое (меню, смайлики,
   // настройки, «Обзор», полный экран); `false` — закрывать нечего, Kotlin
   // выходит из приложения (PlayerPlugin.routeKey).
   useEffect(() => {
     const w = window as unknown as { __bhBack?: () => boolean };
     w.__bhBack = () => {
-      if (memberMenu) setMemberMenu(null);
+      // Повторное нажатие кнопки микрофона пульт не присылает (пока передаёт
+      // голос) — выключить микрофон пульта можно «Назад».
+      if (remoteMicActive()) stopRemoteMic();
+      else if (memberMenu) setMemberMenu(null);
       else if (emojiOpen) setEmojiOpen(false);
       else if (stickersOpen) setStickersOpen(false);
       else if (voiceSettings) setVoiceSettings(false);
@@ -1958,6 +2015,12 @@ export default function App() {
       mic: voiceStatus === "connected",
     }).catch(() => {});
   }, [joinedRoom, voiceStatus]);
+
+  // Android: СДВГ-режим включён — ролики готовим заранее, ещё до входа в
+  // зал (на ТВ yt-dlp разбирает ролик долго).
+  useEffect(() => {
+    if (IS_ANDROID && adhd) invoke("adhd_prepare").catch(() => {});
+  }, [adhd]);
 
   // Второй плеер для СДВГ-режима живёт, пока режим включён и мы в зале.
   useEffect(() => {
@@ -2586,8 +2649,12 @@ export default function App() {
             ? `Нажми и говори: ${keyName(pttKey)}`
             : "Назначь кнопку в настройках"
           : micOn
-            ? "Микрофон включён"
-            : "Микрофон выключен";
+            ? remoteLeft !== null
+              ? `Говори — ещё ${remoteLeft} с («Назад» — выключить)`
+              : "Микрофон включён"
+            : isTv()
+              ? "Говорить — кнопка микрофона на пульте"
+              : "Микрофон выключен";
 
   const roomClass = [
     "room",
@@ -3546,7 +3613,12 @@ export default function App() {
             {voiceMode === "open" && (
               <button
                 className={micOn && !deafened ? "dock" : "dock off"}
-                onClick={() => setMicOn((on) => !on)}
+                onClick={() => {
+                  // ТВ: включается только кнопкой на пульте (звук идёт с пульта).
+                  if (!isTv()) setMicOn((on) => !on);
+                  else if (micOn) stopRemoteMic();
+                  else setError("Нажми кнопку микрофона на пульте");
+                }}
                 disabled={voiceStatus !== "connected" || deafened}
                 aria-label={micOn ? "Выключить микрофон" : "Включить микрофон"}
                 title={
@@ -3554,7 +3626,11 @@ export default function App() {
                   (muteKey !== null && voiceMode === "open" ? ` (${keyName(muteKey)})` : "")
                 }
               >
-                <Icon name={micOn && !deafened ? "mic" : "mic-off"} size={18} />
+                {remoteLeft !== null && micOn && !deafened ? (
+                  <span className="mic-left">{remoteLeft}</span>
+                ) : (
+                  <Icon name={micOn && !deafened ? "mic" : "mic-off"} size={18} />
+                )}
               </button>
             )}
             {voiceMode === "ptt" && (

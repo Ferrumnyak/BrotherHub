@@ -25,10 +25,14 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.util.Log
 import android.util.Rational
 import android.view.Gravity
@@ -80,6 +84,12 @@ import java.net.URL
 import java.util.concurrent.Executors
 
 private const val TAG = "BrotherHub"
+
+/// СДВГ-режим: какие ролики брать, как часто искать заново, сколько живёт ссылка.
+private const val SIDE_FORMAT = "bestvideo[height<=?480][vcodec!^=av01]/best[height<=?480]/best"
+private const val SIDE_LIST_TTL_MS = 3L * 24 * 60 * 60 * 1000
+private const val SIDE_LINK_TTL_MS = 3L * 60 * 60 * 1000
+private val ID_RE = Regex("^[A-Za-z0-9_-]{11}$")
 
 /// Фон «зала» — виден там, где нет ни интерфейса, ни видео.
 private const val HALL = 0xFF0F0D10.toInt()
@@ -159,6 +169,11 @@ class KeepAliveArgs {
 }
 
 @InvokeArg
+class RemoteMicArgs {
+    var on: Boolean = false
+}
+
+@InvokeArg
 class BackgroundArgs {
     var color: String = "#0f0d10"
 }
@@ -224,6 +239,13 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         instance = this
         this.webView = webView
         keepLink(activity.intent)
+        if (isTv()) {
+            keepNormalAudioMode()
+            // Звук интерфейса (голоса друзей, микрофон пульта через Web Audio)
+            // без «сначала нажми»: кнопка микрофона пульта до WebView не
+            // доходит, и AudioContext иначе остался бы спящим.
+            webView.settings.mediaPlaybackRequiresUserGesture = false
+        }
         // Интерфейс прозрачный: под ним — видео.
         webView.setBackgroundColor(Color.TRANSPARENT)
         // Фокус — интерфейсу: на ТВ иначе стрелки пульта никуда не попадают.
@@ -233,8 +255,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         activity.window.setBackgroundDrawable(ColorDrawable(HALL))
         worker.execute {
             try {
-                YoutubeDL.getInstance().init(activity.applicationContext)
-                ytdlReady = true
+                ensureYtdl()
                 updateYtdlp(activity.applicationContext)
             } catch (e: Throwable) {
                 Log.e(TAG, "yt-dlp не запустился", e)
@@ -417,6 +438,13 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 }
                 return true
             }
+            // Кнопка микрофона на пульте (доходит, только если Google
+            // Ассистент выключен) — микрофон пульта в голосовой чат.
+            KeyEvent.KEYCODE_PROG_BLUE -> {
+                if (!isTv()) return false
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) remoteMicPress()
+                return true
+            }
         }
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
@@ -511,10 +539,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(YtdlStreamArgs::class.java)
         Thread {
             try {
-                if (!ytdlReady) {
-                    YoutubeDL.getInstance().init(activity.applicationContext)
-                    ytdlReady = true
-                }
+                ensureYtdl()
                 // Как при открытии видео: если основной клиент YouTube не
                 // отдаёт ссылку — запасные.
                 var last: Throwable? = null
@@ -556,35 +581,17 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         main.post {
             ensureSide()
             val token = ++sideToken
-            Thread {
-                val found = mutableListOf<String>()
-                for (q in args.queries) {
-                    try {
-                        val request = DpiProxy.apply(YoutubeDLRequest("ytsearch3:$q"))
-                        request.addOption("--flat-playlist")
-                        request.addOption("--no-warnings")
-                        request.addOption("-J")
-                        val json = JSONObject(YoutubeDL.getInstance().execute(request).out)
-                        val entries = json.optJSONArray("entries") ?: continue
-                        for (i in 0 until entries.length()) {
-                            val e = entries.getJSONObject(i)
-                            val id = e.optString("id")
-                            if (id.isNotEmpty()) found.add("https://www.youtube.com/watch?v=$id")
-                        }
-                    } catch (e: Throwable) {
-                        Log.w(TAG, "СДВГ: не нашлось «$q»", e)
-                    }
-                }
-                found.shuffle()
-                main.post {
-                    if (token != sideToken) return@post
-                    sideAll = found
-                    sideQueue.clear()
-                    sideQueue.addAll(found)
-                    nextSide(token)
-                }
-            }.start()
+            loadSideList(args.queries) { if (token == sideToken) nextSide(token) }
         }
+    }
+
+    /// СДВГ-режим включён, а в зал ещё не зашли: список роликов и первый
+    /// ролик готовим заранее, чтобы в зале он включился сразу.
+    @Command
+    fun adhdPrepare(invoke: Invoke) {
+        val args = invoke.parseArgs(AdhdArgs::class.java)
+        invoke.resolve()
+        loadSideList(args.queries) { prefetchSide() }
     }
 
     @Command
@@ -592,6 +599,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         invoke.resolve()
         main.post {
             sideToken++
+            sideWaiting = false
             sideExo?.release()
             sideExo = null
             sideView?.let { (it.parent as? ViewGroup)?.removeView(it) }
@@ -650,30 +658,198 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         return p
     }
 
-    /// Следующий ролик: разбираем ссылку и включаем без звука.
-    private fun nextSide(token: Int) {
-        if (token != sideToken) return
+    // ---------- СДВГ-режим: всё заранее ----------
+    //
+    // yt-dlp на ТВ (armv7) запускается по нескольку секунд. Раньше при каждом
+    // включении он искал ролики по 8 запросам подряд и потом ещё разбирал
+    // ролик — почти минута ожидания. Теперь:
+    // - список роликов лежит в файле (adhd-list.json), поиск заново — раз в
+    //   3 дня, в фоне и одним запуском yt-dlp на все запросы;
+    // - следующий ролик разбирается заранее (пока играет текущий и ещё до
+    //   входа в зал) и тоже сохраняется (adhd-next.json): ссылки YouTube живут
+    //   несколько часов, берём не старше 3 ч.
+
+    private class SidePrepared(val url: String, val res: Resolved, val json: String, val at: Long)
+
+    /// yt-dlp для СДВГ — отдельно от основного видео, чтобы не задерживать его.
+    private val sideWorker = Executors.newSingleThreadExecutor()
+    private var sidePrepared: SidePrepared? = null
+    private var sidePreparing = false
+    /// Плеер ждёт ролик, который ещё разбирается.
+    private var sideWaiting = false
+
+    private val sideListFile get() = File(activity.filesDir, "adhd-list.json")
+    private val sideNextFile get() = File(activity.filesDir, "adhd-next.json")
+
+    private fun fresh(p: SidePrepared) = System.currentTimeMillis() - p.at < SIDE_LINK_TTL_MS
+
+    /// Список роликов → sideAll/sideQueue, потом `then` (всё на главном потоке).
+    private fun loadSideList(queries: Array<String>, then: () -> Unit) {
+        main.post {
+            if (sideAll.isNotEmpty()) {
+                then()
+                return@post
+            }
+            sideWorker.execute {
+                val list = sideList(queries)
+                val saved = if (sidePrepared == null) readSideNext() else null
+                main.post {
+                    if (sideAll.isEmpty() && list.isNotEmpty()) {
+                        sideAll = list.shuffled()
+                        sideQueue.clear()
+                        sideQueue.addAll(sideAll)
+                    }
+                    if (sidePrepared == null && saved != null) sidePrepared = saved
+                    then()
+                }
+            }
+        }
+    }
+
+    /// Список из файла; нет его — ищем сейчас; устарел — отдаём старый и
+    /// обновляем в фоне. (Поток sideWorker.)
+    private fun sideList(queries: Array<String>): List<String> {
+        var cached = listOf<String>()
+        var at = 0L
+        try {
+            if (sideListFile.exists()) {
+                val o = JSONObject(sideListFile.readText())
+                at = o.optLong("at")
+                val arr = o.optJSONArray("urls") ?: JSONArray()
+                cached = (0 until arr.length()).map { arr.getString(it) }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "СДВГ: список не прочитался", e)
+        }
+        if (cached.isNotEmpty()) {
+            if (System.currentTimeMillis() - at > SIDE_LIST_TTL_MS) {
+                sideWorker.execute { searchSide(queries) }
+            }
+            Log.i(TAG, "СДВГ: список из файла, ${cached.size} роликов")
+            return cached
+        }
+        return searchSide(queries)
+    }
+
+    /// Поиск роликов по всем запросам и сохранение списка. (Поток sideWorker.)
+    private fun searchSide(queries: Array<String>): List<String> {
+        ensureYtdl()
+        val started = System.currentTimeMillis()
+        val ids = LinkedHashSet<String>()
+        try {
+            // Один запуск yt-dlp на все запросы: на ТВ сам запуск — секунды.
+            val request = DpiProxy.apply(YoutubeDLRequest(queries.map { "ytsearch3:$it" }))
+            request.addOption("--flat-playlist")
+            request.addOption("--no-warnings")
+            request.addOption("--ignore-errors")
+            request.addOption("--print", "id")
+            YoutubeDL.getInstance().execute(request).out.lines().forEach { line ->
+                val id = line.trim()
+                if (ID_RE.matches(id)) ids.add(id)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "СДВГ: общий поиск не удался, ищу по одному", e)
+        }
+        if (ids.isEmpty()) {
+            for (q in queries) {
+                try {
+                    val request = DpiProxy.apply(YoutubeDLRequest("ytsearch3:$q"))
+                    request.addOption("--flat-playlist")
+                    request.addOption("--no-warnings")
+                    request.addOption("--print", "id")
+                    YoutubeDL.getInstance().execute(request).out.lines().forEach { line ->
+                        val id = line.trim()
+                        if (ID_RE.matches(id)) ids.add(id)
+                    }
+                } catch (e: Throwable) {
+                    Log.w(TAG, "СДВГ: не нашлось «$q»", e)
+                }
+            }
+        }
+        val urls = ids.map { "https://www.youtube.com/watch?v=$it" }
+        Log.i(TAG, "СДВГ: нашлось ${urls.size} роликов за ${System.currentTimeMillis() - started} мс")
+        if (urls.isNotEmpty()) {
+            try {
+                sideListFile.writeText(
+                    JSONObject().put("at", System.currentTimeMillis()).put("urls", JSONArray(urls)).toString()
+                )
+            } catch (e: Throwable) {
+                Log.w(TAG, "СДВГ: список не сохранился", e)
+            }
+        }
+        return urls
+    }
+
+    private fun readSideNext(): SidePrepared? = try {
+        if (!sideNextFile.exists()) null
+        else {
+            val o = JSONObject(sideNextFile.readText())
+            val json = o.getString("json")
+            val res = parseResolved(json)
+            val p = res?.let { SidePrepared(o.getString("url"), it, json, o.getLong("at")) }
+            if (p != null && fresh(p)) p else null
+        }
+    } catch (e: Throwable) {
+        null
+    }
+
+    /// Разобрать следующий ролик заранее (главный поток).
+    private fun prefetchSide() {
+        if (sidePreparing) return
+        sidePrepared?.let { if (fresh(it)) return }
         if (sideQueue.isEmpty()) sideQueue.addAll(sideAll.shuffled())
         val url = sideQueue.removeFirstOrNull() ?: return
-        Thread {
-            val result = try {
-                resolve(url, "bestvideo[height<=?480][vcodec!^=av01]/best[height<=?480]/best")
+        sidePreparing = true
+        sideWorker.execute {
+            val started = System.currentTimeMillis()
+            val json = try {
+                ensureYtdl()
+                ytdlJson(url, SIDE_FORMAT)
             } catch (e: Throwable) {
+                Log.w(TAG, "СДВГ: ролик не разобрался", e)
                 null
             }
-            main.post {
-                if (token != sideToken) return@post
-                val p = sideExo ?: return@post
-                if (result == null) {
-                    // Не разобрался — следующий, но не чаще раза в 2 секунды.
-                    main.postDelayed({ nextSide(token) }, 2000)
-                    return@post
+            val res = json?.let { try { parseResolved(it) } catch (_: Throwable) { null } }
+            val p = if (res != null && json != null) SidePrepared(url, res, json, System.currentTimeMillis()) else null
+            if (p != null) {
+                Log.i(TAG, "СДВГ: следующий ролик готов за ${System.currentTimeMillis() - started} мс")
+                try {
+                    sideNextFile.writeText(
+                        JSONObject().put("url", p.url).put("json", p.json).put("at", p.at).toString()
+                    )
+                } catch (_: Throwable) {
                 }
-                // Только картинка: звук ролика не нужен.
-                p.setMediaSource(source(result.streams.first()))
-                p.prepare()
             }
-        }.start()
+            main.post {
+                sidePreparing = false
+                if (p != null) sidePrepared = p
+                if (sideWaiting) {
+                    sideWaiting = false
+                    // Не разобрался — следующий, но не чаще раза в 2 секунды.
+                    if (p != null) nextSide(sideToken)
+                    else main.postDelayed({ nextSide(sideToken) }, 2000)
+                }
+            }
+        }
+    }
+
+    /// Следующий ролик (без звука): готовый заранее — сразу, иначе ждём разбора.
+    private fun nextSide(token: Int) {
+        if (token != sideToken) return
+        val p = sideExo ?: return
+        val ready = sidePrepared?.takeIf { fresh(it) }
+        sidePrepared = null
+        if (ready == null) {
+            sideWaiting = true
+            prefetchSide()
+            return
+        }
+        sideNextFile.delete()
+        // Только картинка: звук ролика не нужен.
+        p.setMediaSource(source(ready.res.streams.first()))
+        p.prepare()
+        // Пока играет этот — готовим следующий.
+        prefetchSide()
     }
 
     /// Телевизор ли это (интерфейс включает управление пультом).
@@ -921,7 +1097,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     /// не пускает фильм в твой микрофон. Без голоса — обычный звук.
     private fun applyAudioRoute() {
         val p = exo ?: return
-        val attrs = if (voiceOn) {
+        val attrs = if (voiceOn && !isTv()) {
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_VOICE_COMMUNICATION)
                 .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
@@ -933,6 +1109,181 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 .build()
         }
         p.setAudioAttributes(attrs, false)
+    }
+
+    /// ТВ: WebRTC в WebView включает «режим звонка», а звонок на ТВ идёт только
+    /// в его динамики — с Bluetooth-наушниками звука нет вовсе (динамики
+    /// выключены), и фильм, и голоса пропадают. Ни трубки, ни гарнитуры у ТВ
+    /// нет, так что режим звонка ему не нужен — держим обычный, тогда звук
+    /// идёт туда же, куда весь звук ТВ.
+    private fun keepNormalAudioMode() {
+        val am = activity.getSystemService(android.media.AudioManager::class.java) ?: return
+        fun reset() {
+            if (am.mode != android.media.AudioManager.MODE_NORMAL) {
+                am.mode = android.media.AudioManager.MODE_NORMAL
+                Log.i(TAG, "звук: режим звонка на ТВ выключен")
+            }
+        }
+        if (Build.VERSION.SDK_INT >= 31) {
+            am.addOnModeChangedListener({ main.post(it) }) { reset() }
+        } else {
+            main.postDelayed(object : Runnable {
+                override fun run() { reset(); main.postDelayed(this, 2000) }
+            }, 2000)
+        }
+        reset()
+    }
+
+    // ---------- Микрофон пульта (ТВ) ----------
+    //
+    // Встроенного микрофона у ТВ нет, а пульт отдаёт звук только записи,
+    // открытой ПОСЛЕ нажатия его кнопки, и только на 16 кГц (как голосовой
+    // поиск). WebView пишет на 48 кГц и получает нули. Поэтому пишем сами:
+    // AudioRecord 16 кГц, кусками по 40 мс → в интерфейс (remoteMic.ts), а он
+    // отправляет это друзьям вместо обычного микрофона. Пульт передаёт звук
+    // ~15 с после нажатия; замолчал или нажали ещё раз — выключаемся.
+
+    @Volatile
+    private var remoteOn = false
+    /// Номер записи: остановка от старой записи новую не трогает.
+    @Volatile
+    private var remoteSession = 0
+    private var remoteThread: Thread? = null
+
+    private fun remoteMicPress() {
+        if (remoteOn) {
+            stopRemoteMic("нажали ещё раз")
+            return
+        }
+        val ui = webView ?: return
+        // Интерфейс решает, можно ли сейчас говорить (подключён ли голос).
+        ui.evaluateJavascript("window.__bhRemoteMicPress ? window.__bhRemoteMicPress() : false") { r ->
+            if (r == "true") startRemoteMic()
+            else Log.i(TAG, "микрофон пульта: голос не подключён")
+        }
+    }
+
+    private fun startRemoteMic() {
+        if (remoteOn) return
+        if (activity.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            activity.requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 42)
+            remoteMicState(false, "Разреши приложению микрофон и нажми кнопку на пульте ещё раз")
+            return
+        }
+        // Прошлая запись ещё закрывается — дождёмся (не дольше 200 мс).
+        remoteThread?.join(200)
+        val rate = 16000
+        val chunk = rate / 25 // 40 мс
+        val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val rec = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                maxOf(min, chunk * 2 * 4),
+            )
+        } catch (e: Throwable) {
+            Log.w(TAG, "микрофон пульта: запись не создалась", e)
+            remoteMicState(false, "Микрофон пульта не открылся")
+            return
+        }
+        if (rec.state != AudioRecord.STATE_INITIALIZED) {
+            rec.release()
+            Log.w(TAG, "микрофон пульта: запись не готова")
+            remoteMicState(false, "Микрофон пульта не открылся")
+            return
+        }
+        try {
+            rec.startRecording()
+        } catch (e: Throwable) {
+            rec.release()
+            Log.w(TAG, "микрофон пульта: запись не началась", e)
+            remoteMicState(false, "Микрофон пульта не открылся")
+            return
+        }
+        val session = ++remoteSession
+        remoteOn = true
+        remoteMicState(true, null)
+        Log.i(TAG, "микрофон пульта: пишу 16 кГц")
+        val t = Thread({
+            val buf = ShortArray(chunk)
+            val bytes = ByteArray(chunk * 2)
+            var heard = false
+            var silentMs = 0
+            var peakMax = 0
+            while (remoteOn && remoteSession == session) {
+                val n = rec.read(buf, 0, chunk)
+                if (n < 0) {
+                    Log.w(TAG, "микрофон пульта: ошибка чтения $n")
+                    main.post { if (remoteSession == session) stopRemoteMic("ошибка записи", "Микрофон пульта отключился") }
+                    break
+                }
+                if (n == 0) continue
+                var peak = 0
+                for (i in 0 until n) {
+                    val v = buf[i].toInt()
+                    val a = if (v < 0) -v else v
+                    if (a > peak) peak = a
+                    bytes[2 * i] = (v and 0xff).toByte()
+                    bytes[2 * i + 1] = ((v shr 8) and 0xff).toByte()
+                }
+                if (peak > peakMax) peakMax = peak
+                if (peak > 0) {
+                    heard = true
+                    silentMs = 0
+                } else {
+                    silentMs += n * 1000 / rate
+                }
+                // Пульт замолчал (ровные нули). До первого звука ждём дольше.
+                if (silentMs >= (if (heard) 1500 else 3000)) {
+                    val wasHeard = heard
+                    main.post {
+                        if (remoteSession != session) return@post
+                        if (wasHeard) stopRemoteMic("пульт замолчал")
+                        else stopRemoteMic(
+                            "от пульта нет звука",
+                            "От пульта не пришёл звук. Если включён Google Ассистент, он забирает микрофон пульта",
+                        )
+                    }
+                    break
+                }
+                val b64 = Base64.encodeToString(bytes, 0, n * 2, Base64.NO_WRAP)
+                main.post {
+                    if (remoteSession == session && remoteOn) {
+                        webView?.evaluateJavascript("window.__bhRemotePcm && window.__bhRemotePcm('$b64')", null)
+                    }
+                }
+            }
+            try {
+                rec.stop()
+            } catch (_: Throwable) {
+            }
+            rec.release()
+            Log.i(TAG, "микрофон пульта: запись закрыта, наибольший пик $peakMax")
+        }, "remote-mic")
+        remoteThread = t
+        t.start()
+    }
+
+    private fun stopRemoteMic(reason: String, error: String? = null) {
+        if (!remoteOn) return
+        remoteOn = false
+        Log.i(TAG, "микрофон пульта: выключен ($reason)")
+        remoteMicState(false, error)
+    }
+
+    private fun remoteMicState(on: Boolean, error: String?) {
+        val err = if (error == null) "null" else JSONObject.quote(error)
+        webView?.evaluateJavascript("window.__bhRemoteMic && window.__bhRemoteMic($on, $err)", null)
+    }
+
+    /// Интерфейс выключает микрофон пульта (кнопка микрофона, вышел из голоса).
+    @Command
+    fun remoteMic(invoke: Invoke) {
+        val args = invoke.parseArgs(RemoteMicArgs::class.java)
+        invoke.resolve()
+        main.post { if (!args.on) stopRemoteMic("из интерфейса") }
     }
 
     /// Кнопка «картинка в картинке».
@@ -1239,11 +1590,12 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         pid: String? = null,
         alive: () -> Boolean = { true },
     ): Resolved? {
-        if (!ytdlReady) {
-            YoutubeDL.getInstance().init(activity.applicationContext)
-            ytdlReady = true
-        }
-        val json = ytdlJson(url, fmt, pid, alive)
+        ensureYtdl()
+        return parseResolved(ytdlJson(url, fmt, pid, alive))
+    }
+
+    /// Ответ yt-dlp (-J) → ссылки на потоки.
+    private fun parseResolved(json: String): Resolved? {
         val info = JSONObject(json)
         val formats = info.optJSONArray("requested_formats")
         val list = mutableListOf<JSONObject>()
@@ -1263,6 +1615,18 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         }
         if (streams.isEmpty()) return null
         return Resolved(streams, info.optString("title").ifEmpty { null }, json)
+    }
+
+    private val ytdlLock = Any()
+
+    /// Запустить yt-dlp один раз (из любого потока).
+    private fun ensureYtdl() {
+        if (ytdlReady) return
+        synchronized(ytdlLock) {
+            if (ytdlReady) return
+            YoutubeDL.getInstance().init(activity.applicationContext)
+            ytdlReady = true
+        }
     }
 
     private fun looksLikeStream(url: String): Boolean {

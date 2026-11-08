@@ -87,6 +87,12 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    // Lint перед релизом (lintVitalAnalyzeRelease) — самая долгая задача
+    // Gradle после R8, а для нас бесполезная: проверяем сами на устройстве.
+    // Запустить вручную: gradlew lintArmRelease.
+    lint {
+        checkReleaseBuilds = false
+    }
 }
 
 kotlin {

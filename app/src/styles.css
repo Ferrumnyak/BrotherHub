@@ -1731,6 +1731,13 @@ button.dock:hover:not(:disabled) {
   color: var(--lamp-ink);
 }
 
+.mic-left {
+  font-weight: 700;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
 /* Настройки голоса */
 .voice-settings {
   flex: 1;

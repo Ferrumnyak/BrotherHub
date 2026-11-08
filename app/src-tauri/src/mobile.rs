@@ -112,6 +112,14 @@ pub async fn adhd_start() -> Result<(), String> {
         .map(|_| ())
 }
 
+/// СДВГ-режим включён: заранее найти ролики и разобрать первый (до входа в зал).
+#[tauri::command]
+pub async fn adhd_prepare() -> Result<(), String> {
+    crate::player::call("adhdPrepare", serde_json::json!({ "queries": ADHD_QUERIES }))
+        .await
+        .map(|_| ())
+}
+
 #[tauri::command]
 pub async fn adhd_stop() -> Result<(), String> {
     crate::player::call("adhdStop", serde_json::json!({})).await.map(|_| ())
@@ -150,6 +158,14 @@ pub async fn mobile_fullscreen(on: bool, lock: Option<bool>) -> Result<(), Strin
 #[tauri::command]
 pub async fn mobile_keep_alive(room: Option<String>, mic: bool) -> Result<(), String> {
     crate::player::call("keepAlive", serde_json::json!({ "room": room, "mic": mic }))
+        .await
+        .map(|_| ())
+}
+
+/// ТВ: выключить микрофон пульта (включается кнопкой на пульте).
+#[tauri::command]
+pub async fn mobile_remote_mic(on: bool) -> Result<(), String> {
+    crate::player::call("remoteMic", serde_json::json!({ "on": on }))
         .await
         .map(|_| ())
 }
