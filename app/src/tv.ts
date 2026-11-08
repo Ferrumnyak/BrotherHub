@@ -84,32 +84,47 @@ export async function initTv() {
   try {
     tv = (await invoke<{ tv: boolean }>("mobile_info")).tv;
   } catch {
+    return; // не Android
+  }
+  if (tv) {
+    enable();
     return;
   }
-  if (!tv) return;
+  // Приставка не сказала, что она телевизор, но нажали стрелку пульта —
+  // значит, всё-таки телевизор.
+  const probe = (e: KeyboardEvent) => {
+    if (!DIRS[e.key]) return;
+    window.removeEventListener("keydown", probe, true);
+    enable();
+    onKey(e);
+  };
+  window.addEventListener("keydown", probe, true);
+}
+
+let enabled = false;
+
+function enable() {
+  if (enabled) return;
+  enabled = true;
   document.documentElement.classList.add("tv");
-
-  window.addEventListener(
-    "keydown",
-    (e) => {
-      const dir = DIRS[e.key];
-      if (!dir) return;
-      const current = document.activeElement === document.body ? null : document.activeElement;
-      if (arrowStaysInField(current, dir)) return;
-      const target = next(current, dir);
-      // Перехватываем стрелку, даже если идти некуда: иначе она перематывала бы видео.
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      if (target) {
-        target.focus({ preventScroll: true });
-        target.scrollIntoView({ block: "nearest", inline: "nearest" });
-      }
-    },
-    true,
-  );
-
+  window.addEventListener("keydown", onKey, true);
   // Сразу что-нибудь в фокусе — иначе первое нажатие «ничего не делает».
   setTimeout(() => {
     if (document.activeElement === document.body) next(null, "down")?.focus();
   }, 800);
+}
+
+function onKey(e: KeyboardEvent) {
+  const dir = DIRS[e.key];
+  if (!dir) return;
+  const current = document.activeElement === document.body ? null : document.activeElement;
+  if (arrowStaysInField(current, dir)) return;
+  const target = next(current, dir);
+  // Перехватываем стрелку, даже если идти некуда: иначе она перематывала бы видео.
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (target) {
+    target.focus({ preventScroll: true });
+    target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
 }

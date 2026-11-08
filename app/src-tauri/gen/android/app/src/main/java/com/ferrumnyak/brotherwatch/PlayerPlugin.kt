@@ -21,6 +21,7 @@ import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -523,7 +524,13 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun info(invoke: Invoke) {
         val ui = activity.getSystemService(UiModeManager::class.java)
-        val tv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        val pm = activity.packageManager
+        // Многие дешёвые приставки не включают «режим ТВ», поэтому смотрим
+        // ещё на функции Android TV и на отсутствие сенсорного экрана.
+        val tv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            pm.hasSystemFeature("android.hardware.type.television") ||
+            !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
         invoke.resolve(JSObject().apply { put("tv", tv) })
     }
 
