@@ -33,6 +33,7 @@ import android.util.Log
 import android.util.Rational
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.inputmethod.InputMethodManager
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
@@ -389,11 +390,45 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             Log.i(TAG, "пульт: кнопка ${event.keyCode}, фокус у ${focused?.javaClass?.simpleName ?: "никого"}")
         }
         val b = browser
-        if (focused === ui || (b != null && focused === b && b.visibility == View.VISIBLE)) return false
-        ui.isFocusable = true
-        ui.isFocusableInTouchMode = true
-        ui.requestFocus()
+        if (b != null && focused === b && b.visibility == View.VISIBLE) return false
+        if (focused !== ui) {
+            ui.isFocusable = true
+            ui.isFocusableInTouchMode = true
+            ui.requestFocus()
+        }
+        // «ОК» пульта: в поле ввода WebView отдаёт его полю, и до интерфейса
+        // оно не доходит. Поэтому нажимаем сами — через tv.ts (window.__bhOk).
+        if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                ui.evaluateJavascript("window.__bhOk ? window.__bhOk() : false", null)
+            }
+            return true
+        }
         return false
+    }
+
+    /// Показать экранную клавиатуру для поля, выделенного пультом.
+    @Command
+    fun showKeyboard(invoke: Invoke) {
+        main.post {
+            val w = webView
+            val imm = activity.getSystemService(InputMethodManager::class.java)
+            if (w != null && imm != null) {
+                if (!w.hasFocus()) w.requestFocus()
+                // Даём WebView подключить поле ввода к системе — и просим клавиатуру.
+                main.postDelayed({
+                    val shown = imm.showSoftInput(w, 0)
+                    Log.i(TAG, "клавиатура: showSoftInput=$shown, активна=${imm.isActive(w)}")
+                    if (!shown) {
+                        @Suppress("DEPRECATION")
+                        imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0)
+                    }
+                }, 100)
+            } else {
+                Log.w(TAG, "клавиатура: нет WebView или InputMethodManager")
+            }
+            invoke.resolve()
+        }
     }
 
     // ---------- Ускорение YouTube (dpi.rs) ----------

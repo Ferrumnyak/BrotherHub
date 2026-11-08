@@ -184,6 +184,7 @@ pub fn run() {
         mobile::adhd_stop,
         mobile::mobile_insets,
         mobile::mobile_fullscreen,
+        mobile::mobile_keyboard,
         mobile::mobile_background,
         mobile::mobile_keep_alive,
         mobile::mobile_pip,

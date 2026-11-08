@@ -123,6 +123,13 @@ pub async fn mobile_insets() -> Result<serde_json::Value, String> {
     crate::player::call("insets", serde_json::json!({})).await
 }
 
+/// ТВ: показать экранную клавиатуру для поля в фокусе (WebView сам её не
+/// показывает, если поле выделено пультом).
+#[tauri::command]
+pub async fn mobile_keyboard() -> Result<(), String> {
+    crate::player::call("showKeyboard", serde_json::json!({})).await.map(|_| ())
+}
+
 /// Полный экран на телефоне: альбомная ориентация и без системных панелей.
 #[tauri::command]
 pub async fn mobile_fullscreen(on: bool, lock: Option<bool>) -> Result<(), String> {

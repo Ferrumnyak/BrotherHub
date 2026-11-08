@@ -13,7 +13,7 @@ class MainActivity : TauriActivity() {
 
   // Пульт ТВ: стрелки и «ОК» — в интерфейс, а не в плеер под ним.
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-    PlayerPlugin.instance?.routeKey(event)
+    if (PlayerPlugin.instance?.routeKey(event) == true) return true
     return super.dispatchKeyEvent(event)
   }
 

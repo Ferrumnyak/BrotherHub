@@ -43,18 +43,28 @@ function isOk(e: KeyboardEvent): boolean {
 }
 
 function visible(el: Element): boolean {
+  // Содержимое закрытой раскрывашки не видно, хотя размеры у него есть
+  // (иначе стрелка всё время целилась в скрытые поля «Сервер и пароль»).
+  const details = el.closest("details");
+  if (details && !details.open && el.tagName !== "SUMMARY") return false;
+  if (typeof el.checkVisibility === "function" && !el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) {
+    return false;
+  }
   const r = el.getBoundingClientRect();
   if (r.width < 2 || r.height < 2) return false;
   const style = getComputedStyle(el);
   return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
 }
 
+/** Элементы, которые не удалось выделить при этом нажатии. */
+const skip = new Set<Element>();
+
 /** Ближайший элемент в направлении `dir` от `from`. */
 function next(from: Element | null, dir: Dir): HTMLElement | null {
   const ordered = Array.from(document.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
     (el) => el === from || visible(el),
   );
-  const all = ordered.filter((el) => el !== from);
+  const all = ordered.filter((el) => el !== from && !skip.has(el));
   if (!from) return all[0] ?? null;
   const spatial = nearest(from, all, dir);
   if (spatial) return spatial;
@@ -67,16 +77,11 @@ function next(from: Element | null, dir: Dir): HTMLElement | null {
 
 function nearest(from: Element, all: HTMLElement[], dir: Dir): HTMLElement | null {
   const a = from.getBoundingClientRect();
-  const ax = a.left + a.width / 2;
-  const ay = a.top + a.height / 2;
+  const vertical = dir === "up" || dir === "down";
   let best: HTMLElement | null = null;
   let bestScore = Infinity;
   for (const el of all) {
     const b = el.getBoundingClientRect();
-    const bx = b.left + b.width / 2;
-    const by = b.top + b.height / 2;
-    const dx = bx - ax;
-    const dy = by - ay;
     // Только то, что действительно в эту сторону.
     const ahead =
       dir === "up" ? b.bottom <= a.top + 4 :
@@ -84,10 +89,19 @@ function nearest(from: Element, all: HTMLElement[], dir: Dir): HTMLElement | nul
       dir === "left" ? b.right <= a.left + 4 :
       b.left >= a.right - 4;
     if (!ahead) continue;
-    // Вдоль направления — расстояние, поперёк — штраф побольше.
-    const along = dir === "up" || dir === "down" ? Math.abs(dy) : Math.abs(dx);
-    const across = dir === "up" || dir === "down" ? Math.abs(dx) : Math.abs(dy);
-    const score = along + across * 2.5;
+    // Расстояния считаем между краями, а не центрами: узкий заголовок прямо
+    // над кнопкой ближе, чем широкая кнопка, у которой центр по пути.
+    const along = Math.max(
+      0,
+      dir === "up" ? a.top - b.bottom :
+      dir === "down" ? b.top - a.bottom :
+      dir === "left" ? a.left - b.right :
+      b.left - a.right,
+    );
+    const across = vertical
+      ? Math.max(0, b.left - a.right, a.left - b.right)
+      : Math.max(0, b.top - a.bottom, a.top - b.bottom);
+    const score = along + across * 3;
     if (score < bestScore) {
       bestScore = score;
       best = el;
@@ -141,12 +155,15 @@ function unquiet(el: HTMLInputElement | HTMLTextAreaElement) {
 
 /** «ОК» на поле: открыть клавиатуру. */
 function startTyping(el: HTMLInputElement | HTMLTextAreaElement) {
+  // Клавиатура появляется при новом фокусе. Сначала убираем фокус (это
+  // сбрасывает `typing`), потом отмечаем поле и фокусируем снова.
+  el.blur();
   typing = el;
   unquiet(el);
-  // Клавиатура появляется при новом фокусе.
-  el.blur();
   el.focus({ preventScroll: true });
   el.click();
+  // WebView на ТВ сам клавиатуру не показывает — просим систему.
+  setTimeout(() => invoke("mobile_keyboard").catch(() => {}), 50);
 }
 
 /**
@@ -190,9 +207,25 @@ export async function initTv() {
 
 let enabled = false;
 
+/**
+ * «ОК» с пульта (вызывает Kotlin, см. PlayerPlugin.routeKey): поле — открыть
+ * клавиатуру, остальное — нажать.
+ */
+function okFromRemote() {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement) || el === document.body) return;
+  say(`пульт: ОК → ${describe(el)}`);
+  if (isTextField(el)) {
+    if (el !== typing) startTyping(el);
+    return;
+  }
+  el.click();
+}
+
 function enable(how = "по системе") {
   if (enabled) return;
   enabled = true;
+  (window as unknown as { __bhOk?: () => void }).__bhOk = okFromRemote;
   say(`пульт: режим ТВ включён ${how}`);
   document.documentElement.classList.add("tv");
   window.addEventListener("keydown", onKey, true);
@@ -207,6 +240,9 @@ function enable(how = "по системе") {
     "focusout",
     (e) => {
       const el = e.target as Element;
+      // Фокус ушёл из всего окна (а не на другой элемент) — поле осталось
+      // выделенным, ничего не сбрасываем.
+      if (document.activeElement === el) return;
       if (el === typing) typing = null;
       if (isTextField(el)) unquiet(el);
     },
@@ -235,6 +271,7 @@ function onKey(e: KeyboardEvent) {
     } else if (el instanceof HTMLElement && el.matches(CLICK_ON_OK)) {
       e.preventDefault();
       e.stopImmediatePropagation();
+      say(`пульт: ОК → ${describe(el)}`);
       el.click();
     }
     return;
@@ -243,19 +280,25 @@ function onKey(e: KeyboardEvent) {
   if (!dir) return;
   const current = document.activeElement === document.body ? null : document.activeElement;
   if (arrowStaysInField(current, dir)) return;
-  const target = next(current, dir);
+  let target = next(current, dir);
   // Перехватываем стрелку, даже если идти некуда: иначе она перематывала бы видео.
   e.preventDefault();
   e.stopImmediatePropagation();
   if (!target) {
     say(`пульт: ${dir} — некуда (с ${describe(current)})`);
   }
-  if (target) {
+  // Не выделился — пробуем следующий в ту же сторону (не больше 5 раз).
+  for (let tries = 0; target && tries < 5; tries++) {
     if (isTextField(target)) quiet(target);
     target.focus({ preventScroll: true });
-    if (document.activeElement !== target) {
-      say(`пульт: не выделяется ${describe(target)}`);
-    }
+    if (document.activeElement === target) break;
+    say(`пульт: не выделяется ${describe(target)}`);
+    skip.add(target);
+    target = next(current, dir);
+  }
+  skip.clear();
+  if (target && document.activeElement === target) {
+    say(`пульт: ${dir} → ${describe(target)}`);
     target.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 }
