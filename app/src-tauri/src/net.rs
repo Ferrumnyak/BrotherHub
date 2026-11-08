@@ -124,6 +124,7 @@ pub async fn disconnect(
 
 /// Закрыть приложение, сначала честно выйдя из комнаты: сервер сразу
 /// освобождает место, а не ждёт 30 секунд возвращения.
+#[cfg_attr(mobile, allow(dead_code))]
 pub fn quit(app: &AppHandle) {
     static QUITTING: AtomicBool = AtomicBool::new(false);
     if QUITTING.swap(true, Ordering::SeqCst) {

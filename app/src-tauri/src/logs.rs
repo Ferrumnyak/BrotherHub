@@ -62,7 +62,8 @@ pub fn init() {
     ));
 }
 
-/// Куда mpv с номером `id` пишет свой журнал.
+/// Куда mpv с номером `id` пишет свой журнал (только на компьютере).
+#[cfg_attr(mobile, allow(dead_code))]
 pub fn mpv_log_path(id: u64) -> Option<PathBuf> {
     SESSION_DIR
         .get()
@@ -95,13 +96,14 @@ fn write(level: &str, msg: &str) {
     }
 }
 
-/// Открыть папку с логами в Проводнике.
 /// Строчка в журнал от интерфейса (что делал пользователь перед сбоем).
 #[tauri::command]
 pub fn ui_log(message: String) {
     info(format!("интерфейс: {}", message.chars().take(200).collect::<String>()));
 }
 
+/// Открыть папку с логами (только на компьютере).
+#[cfg_attr(mobile, allow(dead_code))]
 #[tauri::command]
 pub fn open_logs() -> Result<(), String> {
     let root = logs_root().ok_or("Не нашёл папку с логами.")?;

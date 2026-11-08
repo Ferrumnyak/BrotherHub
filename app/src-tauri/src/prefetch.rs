@@ -28,6 +28,7 @@ pub struct Ready {
     pub open: String,
     pub title: Option<String>,
     /// С каким браузером представляться сайту (как просит yt-dlp).
+    #[cfg_attr(mobile, allow(dead_code))]
     pub user_agent: Option<String>,
 }
 

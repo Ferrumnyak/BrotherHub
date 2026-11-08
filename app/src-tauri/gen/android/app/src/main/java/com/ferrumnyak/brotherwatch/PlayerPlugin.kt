@@ -405,14 +405,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 v.visibility = View.GONE
                 return@post
             }
-            val lp = (v.layoutParams as? FrameLayout.LayoutParams)
-                ?: FrameLayout.LayoutParams(args.width, args.height)
-            lp.width = args.width
-            lp.height = args.height
-            lp.gravity = Gravity.TOP or Gravity.START
-            lp.leftMargin = (webView?.left ?: 0) + args.x
-            lp.topMargin = (webView?.top ?: 0) + args.y
-            v.layoutParams = lp
+            moveTo(v, args.x, args.y, args.width, args.height)
             v.visibility = View.VISIBLE
         }
     }
@@ -654,14 +647,27 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private fun placeBrowser(b: WebView, r: Area) {
-        val lp = (b.layoutParams as? FrameLayout.LayoutParams)
-            ?: FrameLayout.LayoutParams(r.width, r.height)
-        lp.width = r.width.coerceAtLeast(1)
-        lp.height = r.height.coerceAtLeast(1)
-        lp.gravity = Gravity.TOP or Gravity.START
-        lp.leftMargin = (webView?.left ?: 0) + r.x
-        lp.topMargin = (webView?.top ?: 0) + r.y
-        b.layoutParams = lp
+        moveTo(b, r.x, r.y, r.width, r.height)
+    }
+
+    /// Поставить окно (видео, ролик, сайт) в прямоугольник интерфейса.
+    /// Положение — сдвигом (дёшево, можно каждый кадр при прокрутке),
+    /// размер — только если он поменялся: перерасчёт раскладки дорогой.
+    private fun moveTo(v: View, x: Int, y: Int, width: Int, height: Int) {
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
+        val lp = v.layoutParams as? FrameLayout.LayoutParams
+        if (lp == null || lp.width != w || lp.height != h || lp.leftMargin != 0 || lp.topMargin != 0) {
+            val next = lp ?: FrameLayout.LayoutParams(w, h)
+            next.width = w
+            next.height = h
+            next.gravity = Gravity.TOP or Gravity.START
+            next.leftMargin = 0
+            next.topMargin = 0
+            v.layoutParams = next
+        }
+        v.translationX = ((webView?.left ?: 0) + x).toFloat()
+        v.translationY = ((webView?.top ?: 0) + y).toFloat()
     }
 
     // ---------- Фон и «картинка в картинке» ----------
@@ -770,6 +776,8 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+            v.translationX = 0f
+            v.translationY = 0f
             v.visibility = View.VISIBLE
         } else {
             webView?.visibility = View.VISIBLE
@@ -1150,16 +1158,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             v.visibility = View.GONE
             return
         }
-        val left = (webView?.left ?: 0) + r.x
-        val top = (webView?.top ?: 0) + r.y
-        val lp = (v.layoutParams as? FrameLayout.LayoutParams)
-            ?: FrameLayout.LayoutParams(r.width, r.height)
-        lp.width = r.width
-        lp.height = r.height
-        lp.gravity = Gravity.TOP or Gravity.START
-        lp.leftMargin = left
-        lp.topMargin = top
-        v.layoutParams = lp
+        moveTo(v, r.x, r.y, r.width, r.height)
         v.visibility = View.VISIBLE
     }
 

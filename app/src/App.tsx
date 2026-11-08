@@ -1765,12 +1765,30 @@ export default function App() {
       return;
     }
     let active = true;
-    const poll = () =>
+    const poll = () => {
+      // Свёрнутое приложение не перерисовываем зря.
+      if (document.hidden) return;
       invoke<PlaybackInfo>("player_info")
-        .then((i) => active && setInfo(i))
+        .then((i) => {
+          if (!active) return;
+          // Ничего не поменялось — не перерисовываем весь зал.
+          setInfo((old) =>
+            old &&
+            old.paused === i.paused &&
+            old.ended === i.ended &&
+            old.volume === i.volume &&
+            old.title === i.title &&
+            old.duration === i.duration &&
+            Math.abs((old.position ?? -1) - (i.position ?? -1)) < 0.25
+              ? old
+              : i,
+          );
+        })
         .catch(() => {});
+    };
     poll();
-    const timer = setInterval(poll, 400);
+    // На телефоне — реже: меньше работы, а полоса перемотки и так плавная.
+    const timer = setInterval(poll, IS_ANDROID ? 700 : 400);
     return () => {
       active = false;
       clearInterval(timer);
@@ -1897,15 +1915,26 @@ export default function App() {
     };
     update();
     if (!show || !el) return;
-    const observer = new ResizeObserver(update);
+    // Прокрутка и изменение размера сыплют событиями десятки раз в секунду —
+    // двигаем видео не чаще одного раза за кадр.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    const observer = new ResizeObserver(schedule);
     observer.observe(el);
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", schedule);
     // На телефоне страница прокручивается — видео под ней едет следом.
-    window.addEventListener("scroll", update, true);
+    window.addEventListener("scroll", schedule, true);
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
       invoke("set_video_rect", { rect: null }).catch(() => {});
       invoke("set_side_rect", { rect: null }).catch(() => {});
     };
@@ -2197,11 +2226,19 @@ export default function App() {
       const rect = videoArea();
       if (rect) invoke("browser_place", { rect }).catch(() => {});
     };
-    const observer = new ResizeObserver(update);
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        update();
+      });
+    };
+    const observer = new ResizeObserver(schedule);
     if (el) observer.observe(el);
-    window.addEventListener("resize", update);
+    window.addEventListener("resize", schedule);
     // На телефоне страница прокручивается — сайт едет следом.
-    window.addEventListener("scroll", update, true);
+    window.addEventListener("scroll", schedule, true);
     const poll = setInterval(() => {
       invoke<string | null>("browser_url")
         .then((u) => {
@@ -2212,9 +2249,10 @@ export default function App() {
         .catch(() => {});
     }, 600);
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
       clearInterval(poll);
       // Не закрываем, а прячем: в следующий раз вернёмся на ту же страницу.
       invoke("browser_hide").catch(() => {});
