@@ -38,7 +38,7 @@ import {
 import { pageTitle, SITES, siteOf, videoLink, type Site } from "./browse";
 import { EMOJI_GROUPS, recentEmoji, rememberEmoji } from "./emoji";
 import { savedTheme, setTheme, THEMES, type ThemeId } from "./theme";
-import { IS_ANDROID } from "./platform";
+import { IS_ANDROID, IS_MAC } from "./platform";
 import { isTv } from "./tv";
 import { checkForUpdate, installUpdate, setBeforeUpdate, useAppVersion, useUpdate } from "./update";
 import { knownTitle, rememberTitle, requestTitle, useTitles } from "./titles";
@@ -1342,7 +1342,8 @@ export default function App() {
       return;
     }
     try {
-      await getCurrentWindow().setFullscreen(next);
+      if (IS_MAC) await invoke("window_fullscreen", { on: next });
+      else await getCurrentWindow().setFullscreen(next);
     } catch (err) {
       setError(String(err));
       return;
@@ -2310,7 +2311,8 @@ export default function App() {
   // себя в полном экране: панель-окно оставалась поверх кнопок.
   useEffect(() => {
     // На телефоне полный экран — не окно, а поворот и скрытые панели.
-    if (!fullscreen || IS_ANDROID) return;
+    // На macOS «простой» полный экран окно само не покидает.
+    if (!fullscreen || IS_ANDROID || IS_MAC) return;
     const win = getCurrentWindow();
     let unlisten: (() => void) | undefined;
     let active = true;

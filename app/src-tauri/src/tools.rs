@@ -6,8 +6,10 @@
 //! `%LOCALAPPDATA%\com.ferrumnyak.brotherwatch\` (см. [`tools_dir`]):
 //!
 //! - mpv — архив из релизов BrotherHub на GitHub. Адрес и SHA-256 архива
-//!   записаны в `player-pack.json` (его заполняет `scripts/pack-player.ps1`),
-//!   поэтому версия mpv закреплена и меняется только вместе с приложением;
+//!   записаны в `player-pack.json` (его заполняет `scripts/pack-player.ps1`,
+//!   для macOS — `scripts/pack-player-mac.sh`: там два архива с mpv.app,
+//!   для Apple Silicon и для Intel), поэтому версия mpv закреплена и
+//!   меняется только вместе с приложением;
 //! - yt-dlp — последняя версия с официальной страницы релизов, с проверкой
 //!   по файлу `SHA2-256SUMS` оттуда же. Дальше он обновляет себя сам
 //!   (см. [`crate::player::update_bundled_ytdlp`]).
@@ -29,7 +31,13 @@ use crate::player;
 /// WebView2, и деинсталлятор предлагает удалить её вместе с данными.
 const APP_ID: &str = "com.ferrumnyak.brotherwatch";
 
-const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+/// Файл yt-dlp в релизах: для Windows — exe, для macOS — универсальная
+/// программа (Apple Silicon и Intel).
+#[cfg(not(target_os = "macos"))]
+const YTDLP_ASSET: &str = "yt-dlp.exe";
+#[cfg(target_os = "macos")]
+const YTDLP_ASSET: &str = "yt-dlp_macos";
+const YTDLP_BASE: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/";
 const YTDLP_SUMS_URL: &str =
     "https://github.com/yt-dlp/yt-dlp/releases/latest/download/SHA2-256SUMS";
 
@@ -37,17 +45,67 @@ const YTDLP_SUMS_URL: &str =
 const MPV_PACK: &str = include_str!("../player-pack.json");
 
 #[derive(Deserialize)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 struct MpvPack {
     url: String,
     sha256: String,
     size: u64,
+    /// Архивы с mpv.app для macOS.
+    #[serde(default)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    macos: Option<MacPacks>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+struct MacPacks {
+    arm64: Option<Archive>,
+    x86_64: Option<Archive>,
+}
+
+#[derive(Deserialize)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+struct Archive {
+    url: String,
+    sha256: String,
+    size: u64,
+}
+
+/// Какой архив mpv скачивать на этой системе.
+fn mpv_archive(pack: MpvPack) -> Option<Archive> {
+    #[cfg(target_os = "macos")]
+    {
+        let mac = pack.macos?;
+        if cfg!(target_arch = "aarch64") {
+            mac.arm64
+        } else {
+            mac.x86_64
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Some(Archive { url: pack.url, sha256: pack.sha256, size: pack.size })
+    }
+}
+
+/// Где внутри папки mpv лежит сама программа.
+fn mpv_inside(dir: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        dir.join("mpv.app").join("Contents").join("MacOS").join("mpv")
+    } else {
+        dir.join(player::exe_name("mpv"))
+    }
 }
 
 /// Папка, куда скачиваются mpv и yt-dlp.
 pub fn tools_dir() -> Option<PathBuf> {
     #[cfg(windows)]
     let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
-    #[cfg(not(windows))]
+    // ~/Library/Application Support — там же папка данных WebView (Tauri).
+    #[cfg(target_os = "macos")]
+    let base = std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join("Library").join("Application Support"));
+    #[cfg(not(any(windows, target_os = "macos")))]
     let base = std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("share"));
     base.map(|b| b.join(APP_ID))
 }
@@ -90,7 +148,7 @@ pub async fn player_setup(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let dir = tools_dir().ok_or("Не нашёл папку для плеера (%LOCALAPPDATA%).")?;
+    let dir = tools_dir().ok_or("Не нашёл папку для плеера.")?;
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| format!("Не удалось создать папку {}: {e}", dir.display()))?;
@@ -125,13 +183,14 @@ pub async fn player_setup(app: AppHandle) -> Result<(), String> {
 async fn install_mpv(app: &AppHandle, client: &reqwest::Client, dir: &Path) -> Result<(), String> {
     let pack: MpvPack = serde_json::from_str(MPV_PACK)
         .map_err(|e| format!("Испорчен player-pack.json: {e}"))?;
-    crate::logs::info(format!("mpv: {}", pack.url));
-    if pack.url.is_empty() || pack.sha256.is_empty() {
-        return Err(
+    let pack = mpv_archive(pack)
+        .filter(|p| !p.url.is_empty() && !p.sha256.is_empty())
+        .ok_or(if cfg!(target_os = "macos") {
+            "В эту сборку не вписан адрес плеера для macOS (player-pack.json). Собери её заново после scripts/pack-player-mac.sh."
+        } else {
             "В эту сборку не вписан адрес плеера (player-pack.json). Собери её заново после scripts\\pack-player.ps1."
-                .into(),
-        );
-    }
+        })?;
+    crate::logs::info(format!("mpv: {}", pack.url));
 
     let archive = dir.join("mpv-download.zip");
     let hash = download(app, client, &pack.url, &archive, "mpv", Some(pack.size)).await?;
@@ -149,9 +208,9 @@ async fn install_mpv(app: &AppHandle, client: &reqwest::Client, dir: &Path) -> R
     let unpacked = unzip(&archive, &fresh).await;
     let _ = tokio::fs::remove_file(&archive).await;
     unpacked?;
-    if !fresh.join(player::exe_name("mpv")).is_file() {
+    if !mpv_inside(&fresh).is_file() {
         let _ = tokio::fs::remove_dir_all(&fresh).await;
-        return Err("В архиве плеера нет mpv.exe.".into());
+        return Err("В архиве плеера нет mpv.".into());
     }
 
     let target = dir.join("mpv");
@@ -183,15 +242,23 @@ async fn install_ytdlp(app: &AppHandle, client: &reqwest::Client, dir: &Path) ->
             let mut parts = line.split_whitespace();
             Some((parts.next()?, parts.next()?))
         })
-        .find(|(_, name)| *name == "yt-dlp.exe")
+        .find(|(_, name)| *name == YTDLP_ASSET)
         .map(|(hash, _)| hash.to_owned())
         .ok_or("Не нашёл контрольную сумму yt-dlp на странице релизов.")?;
 
-    let part = target_dir.join("yt-dlp.exe.part");
-    let hash = download(app, client, YTDLP_URL, &part, "yt-dlp", None).await?;
+    let part = target_dir.join("yt-dlp.part");
+    let url = format!("{YTDLP_BASE}{YTDLP_ASSET}");
+    let hash = download(app, client, &url, &part, "yt-dlp", None).await?;
     if !hash.eq_ignore_ascii_case(&expected) {
         let _ = tokio::fs::remove_file(&part).await;
         return Err("Скачанный yt-dlp повреждён (не совпала контрольная сумма). Попробуй ещё раз.".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755))
+            .await
+            .map_err(|e| format!("Не удалось сделать yt-dlp запускаемым: {e}"))?;
     }
     let exe = target_dir.join(player::exe_name("yt-dlp"));
     tokio::fs::rename(&part, &exe)
@@ -259,8 +326,21 @@ async fn download(
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+/// Распаковать zip: на macOS — `ditto` (сохраняет права, ссылки и подписи
+/// внутри mpv.app).
+#[cfg(target_os = "macos")]
+pub(crate) async fn unzip(archive: &Path, dest: &Path) -> Result<(), String> {
+    let mut cmd = tokio::process::Command::new("/usr/bin/ditto");
+    cmd.arg("-x").arg("-k").arg(archive).arg(dest);
+    if run_hidden(cmd).await {
+        return Ok(());
+    }
+    Err("Не удалось распаковать плеер.".into())
+}
+
 /// Распаковать zip встроенным в Windows 10/11 `tar.exe`, а если его нет —
 /// через PowerShell.
+#[cfg(not(target_os = "macos"))]
 pub(crate) async fn unzip(archive: &Path, dest: &Path) -> Result<(), String> {
     let tar = std::env::var_os("SystemRoot")
         .map(|root| PathBuf::from(root).join("System32").join("tar.exe"))
@@ -316,6 +396,15 @@ mod tests {
     #[test]
     fn pack_file_parses() {
         let pack: MpvPack = serde_json::from_str(MPV_PACK).unwrap();
+        if let Some(mac) = &pack.macos {
+            for a in [&mac.arm64, &mac.x86_64].into_iter().flatten() {
+                assert_eq!(a.url.is_empty(), a.sha256.is_empty());
+                if !a.sha256.is_empty() {
+                    assert_eq!(a.sha256.len(), 64);
+                    assert!(a.size > 0);
+                }
+            }
+        }
         // Пустые поля допустимы до первого запуска pack-player.ps1.
         assert_eq!(pack.url.is_empty(), pack.sha256.is_empty());
         if !pack.sha256.is_empty() {

@@ -88,6 +88,8 @@ pub async fn reactions_place(app: AppHandle, rect: Option<Area>) -> Result<(), S
     if !window.is_visible().unwrap_or(false) {
         window.show().map_err(|e| e.to_string())?;
         let _ = window.set_ignore_cursor_events(true);
+        // macOS: реакции — над окном mpv.
+        crate::video::follow();
     }
     Ok(())
 }

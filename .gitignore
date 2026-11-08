@@ -36,3 +36,6 @@ node_modules/
 
 # Настройки сервера с паролем и ключами — только на сервере
 /deploy/.env
+
+# ByeDPI, собранный под macOS (app/src-tauri/build.rs)
+/app/src-tauri/byedpi-build/

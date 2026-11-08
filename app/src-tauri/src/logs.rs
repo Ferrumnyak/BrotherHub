@@ -133,7 +133,9 @@ pub fn open_logs() -> Result<(), String> {
     std::fs::create_dir_all(&root).map_err(|e| format!("Не удалось создать {}: {e}", root.display()))?;
     #[cfg(windows)]
     let opener = "explorer";
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(not(any(windows, target_os = "macos")))]
     let opener = "xdg-open";
     std::process::Command::new(opener)
         .arg(&root)

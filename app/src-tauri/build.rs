@@ -16,6 +16,10 @@ fn main() {
 fn build_ciadpi() {
     println!("cargo:rerun-if-changed=byedpi");
     let target = env::var("TARGET").unwrap_or_default();
+    if target.contains("apple-darwin") {
+        build_ciadpi_macos();
+        return;
+    }
     if !target.contains("android") {
         return;
     }
@@ -64,4 +68,45 @@ fn build_ciadpi() {
         .status()
         .unwrap_or_else(|e| panic!("не удалось запустить компилятор для ByeDPI: {e}"));
     assert!(status.success(), "ByeDPI не собрался под {target} ({status})");
+}
+
+/// macOS: собрать `ciadpi` сразу для Apple Silicon и Intel (один файл на
+/// обе архитектуры — так он подходит и к универсальной сборке приложения) в
+/// `byedpi-build/ciadpi`; оттуда tauri.macos.conf.json кладёт его в
+/// `BrotherHub.app/Contents/Resources`. Не собрался — приложение всё равно
+/// соберётся, но без ускорения YouTube (пустой файл, см. dpi.rs).
+fn build_ciadpi_macos() {
+    let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let src = manifest.join("byedpi");
+    let out_dir = manifest.join("byedpi-build");
+    std::fs::create_dir_all(&out_dir).expect("не удалось создать папку byedpi-build");
+    let out = out_dir.join("ciadpi");
+
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&src)
+        .map(|dir| {
+            dir.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "c"))
+                .filter(|p| !p.file_name().is_some_and(|n| n == "win_service.c"))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+
+    let built = !files.is_empty()
+        && Command::new("xcrun")
+            .args(["clang", "-arch", "arm64", "-arch", "x86_64", "-mmacosx-version-min=11.0"])
+            .args(["-std=gnu99", "-O2", "-w"])
+            .arg(format!("-I{}", src.display()))
+            .args(&files)
+            .arg("-o")
+            .arg(&out)
+            .status()
+            .is_ok_and(|s| s.success());
+    if !built {
+        println!(
+            "cargo:warning=ByeDPI не собрался под macOS — приложение будет без ускорения YouTube"
+        );
+        std::fs::write(&out, b"").expect("не удалось записать byedpi-build/ciadpi");
+    }
 }

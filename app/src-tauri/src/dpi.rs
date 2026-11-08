@@ -11,8 +11,12 @@
 //! пробует наборы из [`PROFILES`], на каждом качает начало тестового ролика
 //! и запоминает самый быстрый. Сами по себе проверки не повторяются.
 //!
-//! Компьютер: `ciadpi.exe` скачивается с GitHub при первом поиске обхода;
+//! Windows: `ciadpi.exe` скачивается с GitHub при первом поиске обхода;
 //! версия и SHA-256 архива закреплены ниже.
+//!
+//! macOS: готовой сборки ByeDPI нет — build.rs собирает `ciadpi` из тех же
+//! исходников (`app/src-tauri/byedpi`) сразу для Apple Silicon и Intel, и он
+//! кладётся в приложение (`BrotherHub.app/Contents/Resources/ciadpi`).
 //!
 //! Телефон и ТВ: `ciadpi` собирается из исходников (`app/src-tauri/byedpi`,
 //! см. build.rs) и лежит в APK рядом с библиотекой приложения как
@@ -38,10 +42,10 @@ use tokio::{
 
 use crate::logs;
 
-#[cfg(desktop)]
+#[cfg(windows)]
 const CIADPI_URL: &str =
     "https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-x86_64-w64.zip";
-#[cfg(desktop)]
+#[cfg(windows)]
 const CIADPI_SHA256: &str = "70d2c94147193cb915f9c6eb5144b8d404dacbcfa90bda2383b6b211afafa456";
 
 /// Домены, соединения с которыми ByeDPI запутывает (вместе с поддоменами).
@@ -146,9 +150,23 @@ pub fn ytdlp_proxy(cmd: &mut Command) {
     }
 }
 
-#[cfg(desktop)]
+#[cfg(all(desktop, not(target_os = "macos")))]
 fn ciadpi_path() -> Option<PathBuf> {
     crate::tools::tools_dir().map(|d| d.join("byedpi").join("ciadpi.exe"))
+}
+
+/// macOS: внутри приложения — `Contents/Resources/ciadpi` (рядом с
+/// `Contents/MacOS/brotherwatch`); при `tauri dev` — рядом с программой.
+#[cfg(target_os = "macos")]
+fn ciadpi_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let bundled = dir.parent().map(|c| c.join("Resources").join("ciadpi"));
+    // Пустой файл — ByeDPI не собрался (см. build.rs).
+    [bundled, Some(dir.join("ciadpi"))]
+        .into_iter()
+        .flatten()
+        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && m.len() > 0))
 }
 
 /// На телефоне — рядом с библиотекой приложения (папка нативных библиотек,
@@ -306,7 +324,7 @@ pub fn start_saved() {
 
 // ---------- Скачивание ciadpi ----------
 
-#[cfg(mobile)]
+#[cfg(any(mobile, target_os = "macos"))]
 async fn ensure_ciadpi() -> Result<(), String> {
     match ciadpi_path() {
         Some(p) if p.is_file() => Ok(()),
@@ -314,7 +332,7 @@ async fn ensure_ciadpi() -> Result<(), String> {
     }
 }
 
-#[cfg(desktop)]
+#[cfg(all(desktop, not(target_os = "macos")))]
 async fn ensure_ciadpi() -> Result<(), String> {
     let exe = ciadpi_path().ok_or("Не нашёл папку данных (%LOCALAPPDATA%).")?;
     if exe.is_file() {
@@ -366,7 +384,7 @@ async fn ensure_ciadpi() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(desktop)]
+#[cfg(all(desktop, not(target_os = "macos")))]
 fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
@@ -519,7 +537,7 @@ pub struct Status {
 pub fn dpi_status() -> Status {
     let s = load_settings();
     Status {
-        available: cfg!(desktop) || ciadpi_path().is_some_and(|p| p.is_file()),
+        available: cfg!(windows) || ciadpi_path().is_some_and(|p| p.is_file()),
         enabled: s.enabled,
         running: proxy().is_some(),
         profile: s.profile,

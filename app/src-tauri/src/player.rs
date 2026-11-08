@@ -1,7 +1,7 @@
 //! Управление плеером mpv.
 //!
 //! mpv запускается отдельным процессом и управляется через JSON IPC:
-//! на Windows это именованный канал (named pipe), на Linux — unix-сокет.
+//! на Windows это именованный канал (named pipe), на macOS и Linux — unix-сокет.
 //! Протокол: https://mpv.io/manual/stable/#json-ipc
 //!
 //! Где искать mpv и yt-dlp — см. [`find_mpv`] и [`find_ytdlp`].
@@ -57,12 +57,20 @@ pub enum PlayerKey {
 const INPUT_CONF: &str = "\
 q ignore
 Q ignore
+Meta+q ignore
+Meta+w ignore
 CLOSE_WIN ignore
 f script-message bw fullscreen
 MBTN_LEFT_DBL script-message bw fullscreen
 ESC script-message bw exit-fullscreen
 TAB script-message bw toggle-chat
 ";
+
+/// Шрифт экранных подсказок и субтитров — системный.
+#[cfg(windows)]
+const UI_FONT: &str = "Segoe UI Semibold";
+#[cfg(not(windows))]
+const UI_FONT: &str = "Helvetica Neue";
 
 /// Событие с номером плеера, от которого оно пришло.
 pub type PlayerEventMsg = (u64, PlayerEvent);
@@ -154,10 +162,7 @@ impl Player {
             "--input-media-keys=no",
             // Управление — панелью приложения, свою панель mpv прячем.
             "--osc=no",
-            // Шрифты экранных подсказок и обычных (не ASS) субтитров.
-            "--osd-font=Segoe UI Semibold",
             "--osd-font-size=36",
-            "--sub-font=Segoe UI Semibold",
             "--sub-border-size=2.5",
             "--sub-shadow-offset=1",
             // Озвучка и субтитры отдельными файлами рядом с видео или в
@@ -171,10 +176,15 @@ impl Player {
         ])
         .arg(format!("--input-ipc-server={ipc}"))
         .kill_on_drop(true);
+        // Шрифты экранных подсказок и обычных (не ASS) субтитров.
+        cmd.args([format!("--osd-font={UI_FONT}"), format!("--sub-font={UI_FONT}")]);
         cmd.arg(format!("--ytdl-format={}", ytdl_format(quality)));
         if let Some(wid) = wid {
             cmd.arg(format!("--wid={wid}"));
         }
+        // macOS: своё окно без рамки над областью видео (video.rs).
+        #[cfg(target_os = "macos")]
+        cmd.args(crate::video::mac::spawn_args());
         let input_conf = std::env::temp_dir().join("brotherwatch-input.conf");
         if std::fs::write(&input_conf, INPUT_CONF).is_ok() {
             cmd.arg(format!("--input-conf={}", input_conf.display()));
@@ -239,6 +249,8 @@ impl Player {
                 }
             }
         });
+        #[cfg(target_os = "macos")]
+        crate::video::mac::attach(false, write_tx.clone());
 
         // Чтение ответов и событий из mpv.
         let pending: Pending = Arc::default();
@@ -599,7 +611,27 @@ fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
     list
 }
 
-#[cfg(not(windows))]
+/// macOS: скачанный приложением (mpv — внутри mpv.app), затем
+/// установленный вручную или через Homebrew: у приложений из Finder в PATH
+/// нет `/opt/homebrew/bin`, поэтому эти папки смотрим сами.
+#[cfg(target_os = "macos")]
+fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
+    let mut list = Vec::new();
+    if let Some(dir) = crate::tools::tools_dir() {
+        if app == "mpv" {
+            list.push(dir.join("mpv").join("mpv.app").join("Contents").join("MacOS").join(exe));
+        }
+        list.push(dir.join(app).join(exe));
+    }
+    if app == "mpv" {
+        list.push(PathBuf::from("/Applications/mpv.app/Contents/MacOS/mpv"));
+    }
+    list.push(PathBuf::from("/opt/homebrew/bin").join(exe));
+    list.push(PathBuf::from("/usr/local/bin").join(exe));
+    list
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn install_locations(app: &str, exe: &str) -> Vec<PathBuf> {
     crate::tools::tools_dir()
         .map(|dir| dir.join(app).join(exe))
@@ -658,13 +690,38 @@ pub fn find_ytdlp() -> Option<String> {
 }
 
 #[cfg(windows)]
-fn ipc_path(id: u64) -> String {
+pub(crate) fn ipc_path(id: u64) -> String {
     format!(r"\\.\pipe\brotherwatch-mpv-{}-{id}", std::process::id())
 }
 
 #[cfg(unix)]
-fn ipc_path(id: u64) -> String {
+pub(crate) fn ipc_path(id: u64) -> String {
     format!("/tmp/brotherwatch-mpv-{}-{id}.sock", std::process::id())
+}
+
+/// Подключиться к mpv, запущенному не через [`Player`] (ролик сбоку,
+/// adhd.rs), — только чтобы отправлять ему команды. Ответы читаем и
+/// выбрасываем, иначе mpv упрётся в полный канал.
+#[cfg(target_os = "macos")]
+pub(crate) async fn command_channel(
+    path: &str,
+    child: &mut Child,
+) -> Result<mpsc::UnboundedSender<String>, String> {
+    let stream = connect_ipc(path, child).await?;
+    let (read, mut write) = tokio::io::split(stream);
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    tauri::async_runtime::spawn(async move {
+        while let Some(line) = rx.recv().await {
+            if write.write_all(line.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+    });
+    tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(read).lines();
+        while let Ok(Some(_)) = lines.next_line().await {}
+    });
+    Ok(tx)
 }
 
 /// mpv создаёт канал не сразу после запуска — ждём до 10 секунд.

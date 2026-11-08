@@ -355,6 +355,7 @@ dependencies = [
  "cc",
  "encoding_rs",
  "futures-util",
+ "objc2",
  "raw-window-handle",
  "reqwest 0.12.28",
  "rustls",

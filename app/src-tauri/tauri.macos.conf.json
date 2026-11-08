@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["app"],
+    "icon": ["icons/icon.png"],
+    "resources": {
+      "byedpi-build/ciadpi": "ciadpi"
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    }
+  }
+}

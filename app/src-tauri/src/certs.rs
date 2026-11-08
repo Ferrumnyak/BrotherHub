@@ -34,13 +34,15 @@ fn build() -> Option<PathBuf> {
     for der in &system {
         pem.push_str(&to_pem(der));
     }
+    let keychain = keychain_pem();
+    let system_count = system.len() + keychain.matches("-----BEGIN CERTIFICATE-----").count();
+    pem.push_str(&keychain);
 
     let path = dir.join("ca-bundle.pem");
     match std::fs::write(&path, pem) {
         Ok(()) => {
             logs::info(format!(
-                "сертификаты для mpv: {mozilla} Mozilla + {} из Windows → {}",
-                system.len(),
+                "сертификаты для mpv: {mozilla} Mozilla + {system_count} из системы → {}",
                 path.display()
             ));
             Some(path)
@@ -110,6 +112,40 @@ fn system_roots() -> Vec<Vec<u8>> {
 #[cfg(not(windows))]
 fn system_roots() -> Vec<Vec<u8>> {
     Vec::new()
+}
+
+/// macOS: сертификаты из связок ключей — системной и пользователя (туда
+/// ставят, например, «Russian Trusted Root CA»). Берём их утилитой
+/// `security` сразу в PEM.
+#[cfg(target_os = "macos")]
+fn keychain_pem() -> String {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let mut keychains = vec![
+        std::path::PathBuf::from("/Library/Keychains/System.keychain"),
+    ];
+    if let Some(home) = home {
+        keychains.push(home.join("Library/Keychains/login.keychain-db"));
+    }
+    let mut out = String::new();
+    for keychain in keychains.into_iter().filter(|k| k.exists()) {
+        let result = std::process::Command::new("/usr/bin/security")
+            .args(["find-certificate", "-a", "-p"])
+            .arg(&keychain)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output();
+        if let Ok(output) = result {
+            if output.status.success() {
+                out.push_str(&pem_blocks(&String::from_utf8_lossy(&output.stdout)));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_pem() -> String {
+    String::new()
 }
 
 /// DER → PEM.

@@ -53,11 +53,13 @@ fn current_exe() -> Option<PathBuf> {
     std::env::current_exe().ok()
 }
 
-/// Portable — если рядом нет деинсталлятора, который кладёт установщик.
+/// Portable — если рядом нет деинсталлятора, который кладёт установщик
+/// (только Windows; на macOS приложение обновляет плагин updater).
 fn is_portable() -> bool {
-    current_exe()
-        .and_then(|exe| exe.parent().map(|d| !d.join("uninstall.exe").exists()))
-        .unwrap_or(false)
+    cfg!(windows)
+        && current_exe()
+            .and_then(|exe| exe.parent().map(|d| !d.join("uninstall.exe").exists()))
+            .unwrap_or(false)
 }
 
 /// Старый exe после обновления portable-версии — убрать при запуске.
@@ -104,12 +106,16 @@ pub async fn update_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
         }
         return Ok(Some(UpdateInfo { version: latest.version, notes: latest.notes }));
     }
-    let update = app
-        .updater()
-        .map_err(|e| e.to_string())?
-        .check()
-        .await
-        .map_err(|e| format!("Не получилось узнать о новой версии: {e}"))?;
+    let update = match app.updater().map_err(|e| e.to_string())?.check().await {
+        Ok(update) => update,
+        // В релизе может не оказаться сборки для macOS (её собирают на Mac
+        // отдельно) — тогда просто «новой версии нет».
+        Err(e) if cfg!(target_os = "macos") => {
+            logs::warn(format!("обновление: {e}"));
+            return Ok(None);
+        }
+        Err(e) => return Err(format!("Не получилось узнать о новой версии: {e}")),
+    };
     Ok(update.map(|u| UpdateInfo { version: u.version, notes: u.body }))
 }
 

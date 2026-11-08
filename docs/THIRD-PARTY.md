@@ -12,6 +12,7 @@ BrotherHub использует программы других авторов. 
 - Сайт: https://mpv.io
 - Исходный код: https://github.com/mpv-player/mpv
 - Сборка для Windows: https://github.com/shinchiro/mpv-winbuild-cmake
+- Сборка для macOS: официальная, https://github.com/mpv-player/mpv/releases
 
 ## yt-dlp
 
@@ -24,8 +25,8 @@ BrotherHub использует программы других авторов. 
 
 Ускорение YouTube — локальный прокси `ciadpi` для обхода замедления.
 На компьютере скачивается с официальной страницы релизов, только если
-нажать «Найти лучший обход»; в APK собран из исходников
-(`app/src-tauri/byedpi`, без изменений). Лицензия: MIT, © hufrea.
+нажать «Найти лучший обход»; в APK и в приложении для macOS собран из
+исходников (`app/src-tauri/byedpi`, без изменений). Лицензия: MIT, © hufrea.
 
 - Исходный код: https://github.com/hufrea/byedpi
 

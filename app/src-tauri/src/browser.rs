@@ -173,6 +173,7 @@ fn build(
     proxy: Option<Url>,
 ) -> tauri::Result<WebviewWindow> {
     let handle = app.clone();
+    #[cfg_attr(target_os = "macos", allow(unused_mut))]
     let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(url))
         .title("BrotherHub — обзор")
         .data_directory(data)
@@ -192,9 +193,14 @@ fn build(
         .resizable(false)
         .skip_taskbar(true)
         .visible(false);
+    // На macOS прокси у WebView только с macOS 14 и отдельной функцией
+    // Tauri — там «Обзор» открывается без обхода.
+    #[cfg(not(target_os = "macos"))]
     if let Some(proxy) = proxy {
         builder = builder.proxy_url(proxy);
     }
+    #[cfg(target_os = "macos")]
+    let _ = proxy;
     builder.parent(main)?.build()
 }
 

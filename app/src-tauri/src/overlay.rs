@@ -114,6 +114,8 @@ pub async fn overlay_place(app: AppHandle, rect: Rect, session: u64) -> Result<(
     window.set_size(size).map_err(|e| e.to_string())?;
     window.set_position(position).map_err(|e| e.to_string())?;
     window.show().map_err(|e| e.to_string())?;
+    // macOS: панель — над окном mpv.
+    crate::video::follow();
     Ok(())
 }
 

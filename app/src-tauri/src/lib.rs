@@ -1,4 +1,4 @@
-//! BrotherHub: общая часть для Windows и Android.
+//! BrotherHub: общая часть для Windows, macOS и Android.
 //!
 //! На компьютере видео показывает mpv (player.rs), на телефоне — ExoPlayer
 //! из Kotlin-части приложения (player_android.rs + PlayerPlugin.kt).
@@ -109,6 +109,7 @@ pub fn run() {
         session::subtitles_clear,
         video::set_video_rect,
         video::set_side_rect,
+        video::window_fullscreen,
         adhd::adhd_start,
         adhd::adhd_stop,
         video::watch_cursor,
@@ -228,6 +229,11 @@ fn desktop_setup(app: &mut tauri::App) {
                 overlay::follow(&handle);
                 browser::follow(&handle);
                 reactions::follow(&handle);
+                video::follow();
+            }
+            // macOS: окно mpv поверх главного, только пока мы активны.
+            if matches!(event, tauri::WindowEvent::Focused(_)) {
+                video::follow();
             }
         });
         if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {

@@ -174,6 +174,7 @@ if ($buildPc) {
 # см. docs/ANDROID.md). Без него — только версия для компьютера.
 $base = "https://github.com/Ferrumnyak/BrotherHub/releases/download/v$version"
 $apkName = $null
+$macFiles = @()
 $apk32Name = $null
 $androidDir = Join-Path $root "app\src-tauri\gen\android"
 # У Android своя нумерация версий: app/src-tauri/tauri.android.conf.json.
@@ -296,6 +297,22 @@ if ($all) {
             url     = "$base/$apkName"
         }
     }
+    # macOS собирается на Mac (scripts/release-mac.sh). Если его папку
+    # release/macos положили сюда, в release\macos, — добавляем её часть.
+    $macJson = Join-Path $releaseDir "macos\latest-macos.json"
+    if (Test-Path $macJson) {
+        $mac = Get-Content $macJson -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($mac.version -ne $version) {
+            Write-Warning "Сборка для macOS версии $($mac.version), а не $version, — в latest.json её не добавляю."
+        } else {
+            foreach ($p in $mac.platforms.PSObject.Properties) {
+                $latest.platforms[$p.Name] = $p.Value
+            }
+            $macFiles = @($mac.files)
+        }
+    } else {
+        Write-Host "Сборки для macOS нет (release\macos\latest-macos.json) — в latest.json только Windows и Android."
+    }
     $json = $latest | ConvertTo-Json -Depth 5
     [IO.File]::WriteAllText((Join-Path $releaseDir "latest.json"), $json, (New-Object Text.UTF8Encoding($false)))
 }
@@ -318,5 +335,6 @@ Write-Host "  BrotherHub-$version-portable.zip"
 Write-Host "  $portableName"
 if ($apkName) { Write-Host "  $apkName" }
 if ($apk32Name) { Write-Host "  $apk32Name" }
+foreach ($f in $macFiles) { Write-Host "  macos\$f" }
 Write-Host "  latest.json"
 Write-Host "Подробно — docs\BUILD-INSTALLER.md."
