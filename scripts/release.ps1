@@ -161,23 +161,56 @@ $androidVersion = (Get-Content $androidConf -Raw | ConvertFrom-Json).version
 if (Test-Path (Join-Path $androidDir "keystore.properties")) {
     Write-Host "Собираю APK для Android $androidVersion..."
     # Gradle нужна Java 17+. Если JAVA_HOME не задан или указывает на старую
-    # Java (в PATH часто лежит Java 8 от Oracle), берём ту, что идёт с Android Studio.
-    $studioJbr = "C:\Program Files\Android\Android Studio\jbr"
-    $javaOk = $false
-    if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) {
+    # Java (в PATH часто лежит Java 8 от Oracle), ищем подходящую сами.
+    function Get-JavaMajor([string]$home_) {
+        $exe = Join-Path $home_ "bin\java.exe"
+        if (-not (Test-Path $exe)) { return 0 }
         # java -version пишет в stderr — при "Stop" PowerShell счёл бы это ошибкой.
         $ErrorActionPreference = "Continue"
-        $ver = & (Join-Path $env:JAVA_HOME "bin\java.exe") -version 2>&1 | Select-Object -First 1
+        $line = & $exe -version 2>&1 | Select-Object -First 1
         $ErrorActionPreference = "Stop"
-        if ("$ver" -match '"(\d+)' -and [int]$Matches[1] -ge 17) { $javaOk = $true }
-    }
-    if (-not $javaOk) {
-        if (-not (Test-Path (Join-Path $studioJbr "bin\java.exe"))) {
-            throw "Для сборки APK нужна Java 17 или новее. Поставь Android Studio или задай JAVA_HOME (см. docs\ANDROID.md)."
+        if ("$line" -match '"(\d+)(\.(\d+))?') {
+            $major = [int]$Matches[1]
+            if ($major -eq 1 -and $Matches[3]) { $major = [int]$Matches[3] }
+            return $major
         }
-        Write-Host "Java для Gradle: $studioJbr"
-        $env:JAVA_HOME = $studioJbr
-        $env:Path = (Join-Path $studioJbr "bin") + ";" + $env:Path
+        return 0
+    }
+    if ((Get-JavaMajor "$env:JAVA_HOME") -lt 17) {
+        $candidates = @()
+        # Android Studio: обычная установка, установка для одного пользователя, Toolbox.
+        $studio = Get-ItemProperty "HKLM:\SOFTWARE\Android Studio", "HKCU:\SOFTWARE\Android Studio" -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.Path }
+        $candidates += $studio | Where-Object { $_ } | ForEach-Object { Join-Path $_ "jbr" }
+        $candidates += "$env:ProgramFiles\Android\Android Studio\jbr"
+        $candidates += "$env:LOCALAPPDATA\Programs\Android Studio\jbr"
+        $patterns = @(
+            "$env:LOCALAPPDATA\JetBrains\Toolbox\apps\AndroidStudio\*\*\jbr",
+            "$env:LOCALAPPDATA\Programs\Android Studio*\jbr",
+            "$env:ProgramFiles\Android\Android Studio*\jbr",
+            "$env:ProgramFiles\Java\jdk*",
+            "$env:ProgramFiles\Eclipse Adoptium\jdk*",
+            "$env:ProgramFiles\Microsoft\jdk*",
+            "$env:ProgramFiles\Zulu\zulu*",
+            "$env:ProgramFiles\BellSoft\LibericaJDK*",
+            "$env:USERPROFILE\.jdks\*",
+            "$env:USERPROFILE\scoop\apps\*jdk*\current"
+        )
+        foreach ($pattern in $patterns) {
+            $candidates += Get-Item $pattern -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+        }
+        $best = $null
+        $bestMajor = 0
+        foreach ($c in ($candidates | Select-Object -Unique)) {
+            $major = Get-JavaMajor $c
+            if ($major -ge 17 -and $major -gt $bestMajor) { $best = $c; $bestMajor = $major }
+        }
+        if (-not $best) {
+            throw "Для сборки APK нужна Java 17 или новее, а её не нашлось. Задай JAVA_HOME (папка, где лежит bin\java.exe) — например, папку jbr внутри Android Studio (см. docs\ANDROID.md)."
+        }
+        Write-Host "Java $bestMajor для Gradle: $best"
+        $env:JAVA_HOME = $best
+        $env:Path = (Join-Path $best "bin") + ";" + $env:Path
     }
     $env:VITE_DEFAULT_SERVER = $server
     Push-Location (Join-Path $root "app")
