@@ -5,6 +5,7 @@
 // пульте — это Enter, он нажимает кнопку сам.
 
 import { invoke } from "@tauri-apps/api/core";
+import { IS_ANDROID } from "./platform";
 
 /** Это телевизор (класс `tv` у <html>)? */
 export function isTv(): boolean {
@@ -23,6 +24,18 @@ const DIRS: Record<string, Dir> = {
   ArrowLeft: "left",
   ArrowRight: "right",
 };
+
+/** Коды клавиш: некоторые ТВ присылают стрелки без имени клавиши. */
+const DIR_CODES: Record<number, Dir> = { 37: "left", 38: "up", 39: "right", 40: "down" };
+
+function dirOf(e: KeyboardEvent): Dir | undefined {
+  return DIRS[e.key] ?? DIR_CODES[e.keyCode];
+}
+
+/** «ОК» на пульте (Enter; 23 — DPAD_CENTER, если его не перевели в Enter). */
+function isOk(e: KeyboardEvent): boolean {
+  return e.key === "Enter" || e.keyCode === 13 || e.keyCode === 23;
+}
 
 function visible(el: Element): boolean {
   const r = el.getBoundingClientRect();
@@ -142,9 +155,19 @@ export async function initTv() {
   let tv = false;
   try {
     tv = (await invoke<{ tv: boolean }>("mobile_info")).tv;
-  } catch {
-    return; // не Android
+  } catch (e) {
+    if (!IS_ANDROID) return; // компьютер
+    console.info(`BrotherHub: пульт: не узнал, ТВ ли это: ${e}`);
   }
+  console.info(`BrotherHub: пульт: это ТВ? ${tv}`);
+  let seen = 0;
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (seen++ < 3) console.info(`BrotherHub: пульт: клавиша key=${e.key} code=${e.keyCode}`);
+    },
+    true,
+  );
   if (tv) {
     enable();
     return;
@@ -152,7 +175,7 @@ export async function initTv() {
   // Приставка не сказала, что она телевизор, но нажали стрелку пульта —
   // значит, всё-таки телевизор.
   const probe = (e: KeyboardEvent) => {
-    if (!DIRS[e.key]) return;
+    if (!dirOf(e)) return;
     window.removeEventListener("keydown", probe, true);
     enable("по нажатию стрелки");
     onKey(e);
@@ -200,7 +223,7 @@ function enable(how = "по системе") {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (e.key === "Enter") {
+  if (isOk(e)) {
     const el = document.activeElement;
     if (isTextField(el) && el !== typing) {
       e.preventDefault();
@@ -213,7 +236,7 @@ function onKey(e: KeyboardEvent) {
     }
     return;
   }
-  const dir = DIRS[e.key];
+  const dir = dirOf(e);
   if (!dir) return;
   const current = document.activeElement === document.body ? null : document.activeElement;
   if (arrowStaysInField(current, dir)) return;
@@ -221,12 +244,21 @@ function onKey(e: KeyboardEvent) {
   // Перехватываем стрелку, даже если идти некуда: иначе она перематывала бы видео.
   e.preventDefault();
   e.stopImmediatePropagation();
+  if (!target) {
+    console.info(`BrotherHub: пульт: ${dir} — некуда (с ${describe(current)})`);
+  }
   if (target) {
     if (isTextField(target)) quiet(target);
     target.focus({ preventScroll: true });
     if (document.activeElement !== target) {
-      console.info(`BrotherHub: пульт: не выделяется ${target.tagName.toLowerCase()}.${target.className}`);
+      console.info(`BrotherHub: пульт: не выделяется ${describe(target)}`);
     }
     target.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
+}
+
+function describe(el: Element | null): string {
+  if (!el) return "ничего";
+  const text = (el.textContent ?? "").trim().slice(0, 30);
+  return `${el.tagName.toLowerCase()}${el.className ? "." + String(el.className).split(" ")[0] : ""} «${text}»`;
 }
