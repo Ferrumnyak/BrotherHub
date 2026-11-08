@@ -155,8 +155,11 @@ $base = "https://github.com/Ferrumnyak/BrotherHub/releases/download/v$version"
 $apkName = $null
 $apk32Name = $null
 $androidDir = Join-Path $root "app\src-tauri\gen\android"
+# У Android своя нумерация версий: app/src-tauri/tauri.android.conf.json.
+$androidConf = Join-Path $root "app\src-tauri\tauri.android.conf.json"
+$androidVersion = (Get-Content $androidConf -Raw | ConvertFrom-Json).version
 if (Test-Path (Join-Path $androidDir "keystore.properties")) {
-    Write-Host "Собираю APK для Android..."
+    Write-Host "Собираю APK для Android $androidVersion..."
     $env:VITE_DEFAULT_SERVER = $server
     Push-Location (Join-Path $root "app")
     try {
@@ -174,12 +177,12 @@ if (Test-Path (Join-Path $androidDir "keystore.properties")) {
         Where-Object { $_.Name -notmatch "unsigned" } | Select-Object -First 1
     if (-not $apk) { throw "Не нашёл подписанный APK для arm64 в $apkDir" }
     # Почти все телефоны — arm64; старые ТВ-приставки бывают 32-битными (armv7).
-    $apkName = "BrotherHub-$version-android.apk"
+    $apkName = "BrotherHub-$androidVersion-android.apk"
     Copy-Item $apk.FullName (Join-Path $releaseDir $apkName) -Force
     $apk32 = Get-ChildItem $apkDir -Recurse -Filter "*armeabi*release*.apk" |
         Where-Object { $_.Name -notmatch "unsigned" } | Select-Object -First 1
     if ($apk32) {
-        $apk32Name = "BrotherHub-$version-android-armv7.apk"
+        $apk32Name = "BrotherHub-$androidVersion-android-armv7.apk"
         Copy-Item $apk32.FullName (Join-Path $releaseDir $apk32Name) -Force
     }
 }
@@ -205,7 +208,7 @@ $latest = [ordered]@{
 }
 if ($apkName) {
     $latest["android"] = [ordered]@{
-        version = $version
+        version = $androidVersion
         url     = "$base/$apkName"
     }
 }

@@ -51,12 +51,13 @@ async fn latest_apk() -> Result<Option<(String, String, Option<String>)>, String
 }
 
 /// Есть ли APK новее этого.
+/// У Android-версии своя нумерация (tauri.android.conf.json).
 #[tauri::command]
-pub async fn update_check() -> Result<Option<UpdateInfo>, String> {
+pub async fn update_check(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
     let Some((version, _, notes)) = latest_apk().await? else {
         return Ok(None);
     };
-    let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).ok();
+    let current = Some(app.package_info().version.clone());
     let newer = semver::Version::parse(version.trim_start_matches('v'))
         .ok()
         .zip(current)
