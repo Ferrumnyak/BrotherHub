@@ -20,6 +20,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
+# Rust и Homebrew — даже если их нет в PATH этого Терминала.
+export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 red() { printf '\033[31m%s\033[0m\n' "$*"; }
 green() { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -34,7 +36,7 @@ fi
 # release.env мог прийти с Windows — с \r в концах строк.
 setting() {
     tr -d '\r' < release.env | grep -E "^[[:space:]]*$1[[:space:]]*=" | head -1 \
-        | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+        | cut -d= -f2- | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' || true
 }
 SERVER=$(setting SERVER)
 case "$SERVER" in
