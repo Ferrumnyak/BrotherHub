@@ -3461,3 +3461,8 @@ html.android .room.fullscreen {
 .header-actions .adhd-toggle span[aria-hidden="true"] {
   font-size: 18px;
 }
+
+/* Телефон горизонтально — экран «низкий», но выбор качества нужен. */
+html.android .stage .track-select {
+  display: inline-flex;
+}

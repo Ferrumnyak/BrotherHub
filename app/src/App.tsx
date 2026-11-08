@@ -4359,7 +4359,7 @@ function PlayerControls({
           title="Озвучка, субтитры и качество — у каждого свои"
         >
           <Icon name={tracksOpen ? "close" : "sliders"} size={16} />
-          {tracksOpen ? "Готово" : "Звук и субтитры"}
+          {tracksOpen ? "Готово" : IS_ANDROID ? "Качество" : "Звук и субтитры"}
         </button>
 
         {tracksOpen && subsLink !== null && (
@@ -4390,6 +4390,9 @@ function PlayerControls({
         )}
         {tracksOpen && subsLink === null && (
         <div className="tracks">
+        {/* На телефоне плеер пока умеет только качество: озвучки и субтитры —
+            на компьютере. */}
+        {!IS_ANDROID && (
         <label className="track-select" title="Озвучка у каждого своя">
           <span>Озвучка</span>
           <select
@@ -4405,6 +4408,8 @@ function PlayerControls({
             ))}
           </select>
         </label>
+)}
+        {!IS_ANDROID && (
         <label className="track-select" title="Субтитры у каждого свои">
           <span>Субтитры</span>
           <select value={subValue} disabled={!info} onChange={(e) => onSubtitle(e.target.value)}>
@@ -4424,6 +4429,7 @@ function PlayerControls({
             )}
           </select>
         </label>
+        )}
 
         <label
           className="track-select"
