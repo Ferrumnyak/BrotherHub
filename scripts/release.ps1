@@ -153,24 +153,35 @@ Compress-Archive -Path $folder -DestinationPath $zip
 # см. docs/ANDROID.md). Без него — только версия для компьютера.
 $base = "https://github.com/Ferrumnyak/BrotherHub/releases/download/v$version"
 $apkName = $null
+$apk32Name = $null
 $androidDir = Join-Path $root "app\src-tauri\gen\android"
 if (Test-Path (Join-Path $androidDir "keystore.properties")) {
     Write-Host "Собираю APK для Android..."
     $env:VITE_DEFAULT_SERVER = $server
     Push-Location (Join-Path $root "app")
     try {
-        npm run tauri android build -- --apk --target aarch64 armv7
+        # Отдельный APK под каждый процессор: в общем лежал бы yt-dlp (Python)
+        # сразу для всех, и файл вышел бы в 2–3 раза тяжелее.
+        npm run tauri android build -- --apk --split-per-abi --target aarch64 armv7
         if ($LASTEXITCODE -ne 0) { throw "Сборка APK не удалась — ошибки выше." }
     }
     finally {
         Pop-Location
         Remove-Item Env:VITE_DEFAULT_SERVER -ErrorAction SilentlyContinue
     }
-    $apk = Get-ChildItem (Join-Path $androidDir "app\build\outputs\apk") -Recurse -Filter "*release*.apk" |
+    $apkDir = Join-Path $androidDir "app\build\outputs\apk"
+    $apk = Get-ChildItem $apkDir -Recurse -Filter "*arm64*release*.apk" |
         Where-Object { $_.Name -notmatch "unsigned" } | Select-Object -First 1
-    if (-not $apk) { throw "Не нашёл подписанный APK в $androidDir\app\build\outputs\apk" }
+    if (-not $apk) { throw "Не нашёл подписанный APK для arm64 в $apkDir" }
+    # Почти все телефоны — arm64; старые ТВ-приставки бывают 32-битными (armv7).
     $apkName = "BrotherHub-$version-android.apk"
     Copy-Item $apk.FullName (Join-Path $releaseDir $apkName) -Force
+    $apk32 = Get-ChildItem $apkDir -Recurse -Filter "*armeabi*release*.apk" |
+        Where-Object { $_.Name -notmatch "unsigned" } | Select-Object -First 1
+    if ($apk32) {
+        $apk32Name = "BrotherHub-$version-android-armv7.apk"
+        Copy-Item $apk32.FullName (Join-Path $releaseDir $apk32Name) -Force
+    }
 }
 else {
     Write-Warning "APK не собран: нет ключа подписи (keystore.properties) — см. docs\ANDROID.md."
@@ -207,5 +218,6 @@ Write-Host "  $setupName"
 Write-Host "  BrotherHub-$version-portable.zip"
 Write-Host "  $portableName"
 if ($apkName) { Write-Host "  $apkName" }
+if ($apk32Name) { Write-Host "  $apk32Name" }
 Write-Host "  latest.json"
 Write-Host "Подробно — docs\BUILD-INSTALLER.md."
