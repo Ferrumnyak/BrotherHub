@@ -324,7 +324,7 @@ function formatSpeed(bytes: number) {
 
 /**
  * Ускорение YouTube (обход замедления, dpi.rs): поиск лучших настроек по
- * кнопке и выключатель. Только на компьютере.
+ * кнопке и выключатель. На компьютере, телефоне и ТВ.
  */
 function DpiSettings() {
   const [status, setStatus] = useState<DpiStatus | null>(null);
@@ -3045,7 +3045,7 @@ export default function App() {
                 Крестик сворачивает в трей (значок у часов), а не закрывает
               </label>
               )}
-              {!IS_ANDROID && <DpiSettings />}
+              <DpiSettings />
               <h3 className="settings-sub">Голос</h3>
               {!IS_ANDROID && (
               <fieldset>

@@ -13,6 +13,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Сборка ByeDPI под Android (build.rs).
+cc = "1"
 
 [dependencies]
 brotherwatch-shared.workspace = true

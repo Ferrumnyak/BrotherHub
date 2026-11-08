@@ -88,6 +88,18 @@ class StartArgs {
 }
 
 @InvokeArg
+class ProxyArgs {
+    var proxy: String? = null
+}
+
+@InvokeArg
+class YtdlStreamArgs {
+    var url: String = ""
+    var format: String = "best"
+    var proxy: String? = null
+}
+
+@InvokeArg
 class PollArgs {
     var player: Long = 0
 }
@@ -342,6 +354,42 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    // ---------- Ускорение YouTube (dpi.rs) ----------
+
+    /// Новый адрес прокси обхода (null — выключен).
+    @Command
+    fun setProxy(invoke: Invoke) {
+        val args = invoke.parseArgs(ProxyArgs::class.java)
+        DpiProxy.set(args.proxy)
+        invoke.resolve()
+    }
+
+    /// Прямая ссылка на поток ролика (для замера скорости обхода).
+    @Command
+    fun ytdlStream(invoke: Invoke) {
+        val args = invoke.parseArgs(YtdlStreamArgs::class.java)
+        Thread {
+            try {
+                if (!ytdlReady) {
+                    YoutubeDL.getInstance().init(activity.applicationContext)
+                    ytdlReady = true
+                }
+                val request = YoutubeDLRequest(args.url)
+                request.addOption("--no-warnings")
+                request.addOption("--no-playlist")
+                request.addOption("-f", args.format)
+                request.addOption("-g")
+                args.proxy?.let { request.addOption("--proxy", it) }
+                val out = YoutubeDL.getInstance().execute(request).out
+                val link = out.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("http") }
+                invoke.resolve(JSObject().apply { put("url", link) })
+            } catch (e: Throwable) {
+                Log.w(TAG, "yt-dlp для замера: ${e.message?.lineSequence()?.firstOrNull()}")
+                invoke.reject(e.message ?: "yt-dlp не ответил")
+            }
+        }.start()
+    }
+
     // ---------- СДВГ-режим ----------
 
     /// Найти ролики (Subway Surfers, мыло, ковры…) и крутить их по очереди.
@@ -356,7 +404,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 val found = mutableListOf<String>()
                 for (q in args.queries) {
                     try {
-                        val request = YoutubeDLRequest("ytsearch3:$q")
+                        val request = DpiProxy.apply(YoutubeDLRequest("ytsearch3:$q"))
                         request.addOption("--flat-playlist")
                         request.addOption("--no-warnings")
                         request.addOption("-J")
@@ -973,7 +1021,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         var last: Throwable? = null
         for (client in attempts) {
             try {
-                val request = YoutubeDLRequest(url)
+                val request = DpiProxy.apply(YoutubeDLRequest(url))
                 request.addOption("--no-warnings")
                 request.addOption("--no-playlist")
                 request.addOption("-J")
@@ -984,7 +1032,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 } catch (e: Throwable) {
                     // Нужного качества нет — берём что есть.
                     if (e.message?.contains("Requested format is not available") != true) throw e
-                    val any = YoutubeDLRequest(url)
+                    val any = DpiProxy.apply(YoutubeDLRequest(url))
                     any.addOption("--no-warnings")
                     any.addOption("--no-playlist")
                     any.addOption("-J")

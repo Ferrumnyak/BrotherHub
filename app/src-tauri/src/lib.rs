@@ -5,7 +5,6 @@
 //! Всё, что бывает только на компьютере (окна поверх видео, трей,
 //! глобальные клавиши, обновление exe), собирается только там.
 
-#[cfg_attr(mobile, path = "dpi_mobile.rs")]
 mod dpi;
 mod logs;
 mod net;
@@ -84,6 +83,7 @@ pub fn run() {
                     tools::set_data_dir(dir);
                 }
                 logs::init();
+                dpi::start_saved();
             }
             let session = session::Session::start(app.handle().clone());
             app.manage(session);
@@ -165,6 +165,9 @@ pub fn run() {
         video::watch_cursor,
         tools::player_tools,
         tools::player_setup,
+        dpi::dpi_status,
+        dpi::dpi_set_enabled,
+        dpi::dpi_find_best,
         logs::ui_log,
         prefetch::prefetch_media,
         titles::media_title,

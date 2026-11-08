@@ -11,8 +11,13 @@
 //! пробует наборы из [`PROFILES`], на каждом качает начало тестового ролика
 //! и запоминает самый быстрый. Сами по себе проверки не повторяются.
 //!
-//! `ciadpi.exe` скачивается с GitHub при первом поиске обхода; версия и
-//! SHA-256 архива закреплены ниже.
+//! Компьютер: `ciadpi.exe` скачивается с GitHub при первом поиске обхода;
+//! версия и SHA-256 архива закреплены ниже.
+//!
+//! Телефон и ТВ: `ciadpi` собирается из исходников (`app/src-tauri/byedpi`,
+//! см. build.rs) и лежит в APK рядом с библиотекой приложения как
+//! `libciadpi.so`. Прокси получают yt-dlp, ExoPlayer и WebView в
+//! Kotlin-части (`PlayerPlugin.setProxy`).
 
 use std::{
     net::{Ipv4Addr, SocketAddr, TcpListener},
@@ -33,8 +38,10 @@ use tokio::{
 
 use crate::logs;
 
+#[cfg(desktop)]
 const CIADPI_URL: &str =
     "https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-x86_64-w64.zip";
+#[cfg(desktop)]
 const CIADPI_SHA256: &str = "70d2c94147193cb915f9c6eb5144b8d404dacbcfa90bda2383b6b211afafa456";
 
 /// Домены, соединения с которыми ByeDPI запутывает (вместе с поддоменами).
@@ -127,8 +134,38 @@ pub fn ytdlp_proxy(cmd: &mut Command) {
     }
 }
 
+#[cfg(desktop)]
 fn ciadpi_path() -> Option<PathBuf> {
     crate::tools::tools_dir().map(|d| d.join("byedpi").join("ciadpi.exe"))
+}
+
+/// На телефоне — рядом с библиотекой приложения (папка нативных библиотек,
+/// файлы из APK распаковываются туда, оттуда их можно запускать).
+#[cfg(mobile)]
+fn ciadpi_path() -> Option<PathBuf> {
+    let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
+    maps.lines()
+        .filter_map(|l| l.split_whitespace().nth(5))
+        .find(|p| p.ends_with("/libbrotherwatch_lib.so") && !p.contains('!'))
+        .and_then(|p| Path::new(p).parent())
+        .map(|d| d.join("libciadpi.so"))
+}
+
+/// Сообщить новый прокси Kotlin-части (yt-dlp, ExoPlayer, WebView).
+fn notify(proxy: Option<String>) {
+    #[cfg(mobile)]
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::player::call("setProxy", serde_json::json!({ "proxy": proxy })).await {
+            logs::warn(format!("прокси обхода не передан плееру: {e}"));
+        }
+    });
+    #[cfg(desktop)]
+    let _ = proxy;
+}
+
+fn set_proxy(proxy: Option<String>) {
+    *PROXY.lock().unwrap() = proxy.clone();
+    notify(proxy);
 }
 
 fn free_port() -> Result<u16, String> {
@@ -155,6 +192,7 @@ async fn spawn(args: &[String]) -> Result<(Child, u16), String> {
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     let mut child = cmd.spawn().map_err(|e| format!("Не удалось запустить ByeDPI: {e}"))?;
+    #[cfg(desktop)]
     crate::player::bind_to_app_lifetime(&child);
 
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
@@ -193,7 +231,7 @@ async fn spawn(args: &[String]) -> Result<(Child, u16), String> {
 /// Остановить работающий прокси.
 async fn stop() {
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    *PROXY.lock().unwrap() = None;
+    set_proxy(None);
     if let Some(r) = running().lock().await.take() {
         let _ = r.stop.send(());
     }
@@ -206,7 +244,7 @@ async fn start(args: Vec<String>) -> Result<(), String> {
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let (stop_tx, stop_rx) = oneshot::channel();
     *running().lock().await = Some(Running { stop: stop_tx });
-    *PROXY.lock().unwrap() = Some(format!("http://127.0.0.1:{port}"));
+    set_proxy(Some(format!("http://127.0.0.1:{port}")));
     logs::info(format!("ByeDPI работает на порту {port}: {}", args.join(" ")));
 
     tauri::async_runtime::spawn(async move {
@@ -222,7 +260,7 @@ async fn start(args: Vec<String>) -> Result<(), String> {
             return;
         }
         logs::warn(format!("ByeDPI закрылся ({status:?}), запускаю заново"));
-        *PROXY.lock().unwrap() = None;
+        set_proxy(None);
         tokio::time::sleep(Duration::from_secs(2)).await;
         if GENERATION.load(Ordering::SeqCst) == generation {
             if let Err(e) = restart(args).await {
@@ -256,6 +294,15 @@ pub fn start_saved() {
 
 // ---------- Скачивание ciadpi ----------
 
+#[cfg(mobile)]
+async fn ensure_ciadpi() -> Result<(), String> {
+    match ciadpi_path() {
+        Some(p) if p.is_file() => Ok(()),
+        _ => Err("В этой сборке нет ByeDPI (см. scripts/fetch-byedpi.ps1).".into()),
+    }
+}
+
+#[cfg(desktop)]
 async fn ensure_ciadpi() -> Result<(), String> {
     let exe = ciadpi_path().ok_or("Не нашёл папку данных (%LOCALAPPDATA%).")?;
     if exe.is_file() {
@@ -307,6 +354,7 @@ async fn ensure_ciadpi() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(desktop)]
 fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
@@ -323,7 +371,22 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
 
 // ---------- Замер скорости ----------
 
+/// Формат потока для замера.
+const TEST_FORMAT: &str = "bv[height<=720][protocol=https]/b[protocol=https]";
+
 /// Прямая ссылка на поток тестового ролика (через `proxy`, если задан).
+/// На телефоне её достаёт yt-dlp из Kotlin-части.
+#[cfg(mobile)]
+async fn test_stream(proxy: Option<&str>) -> Option<String> {
+    let reply = crate::player::call(
+        "ytdlStream",
+        serde_json::json!({ "url": TEST_VIDEO, "format": TEST_FORMAT, "proxy": proxy }),
+    );
+    let reply = tokio::time::timeout(Duration::from_secs(90), reply).await.ok()?.ok()?;
+    reply.get("url")?.as_str().filter(|u| u.starts_with("http")).map(str::to_owned)
+}
+
+#[cfg(desktop)]
 async fn test_stream(proxy: Option<&str>) -> Option<String> {
     let ytdlp = crate::player::find_ytdlp().unwrap_or_else(|| "yt-dlp".into());
     let mut cmd = Command::new(ytdlp);
@@ -331,7 +394,7 @@ async fn test_stream(proxy: Option<&str>) -> Option<String> {
         "--no-warnings",
         "--no-playlist",
         "-f",
-        "bv[height<=720][protocol=https]/b[protocol=https]",
+        TEST_FORMAT,
         "-g",
     ]);
     if let Some(p) = proxy {
@@ -358,7 +421,7 @@ async fn test_stream(proxy: Option<&str>) -> Option<String> {
 /// Скорость скачивания начала потока, байт/с (0 — не качается).
 async fn measure(url: &str, proxy: Option<&str>) -> u64 {
     let builder = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .user_agent("Mozilla/5.0")
         .connect_timeout(Duration::from_secs(5));
     let builder = match proxy {
         Some(p) => match reqwest::Proxy::all(p) {
