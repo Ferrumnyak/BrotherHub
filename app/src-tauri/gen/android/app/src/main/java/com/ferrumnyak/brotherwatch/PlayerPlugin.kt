@@ -919,18 +919,44 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
 
     private data class Resolved(val streams: List<Stream>, val title: String?, val json: String)
 
+    /// Разные «клиенты» YouTube: если основной не отдаёт видео («This video is
+    /// not available» — YouTube так режет часть запросов с телефонов),
+    /// пробуем притвориться телевизором, мобильным сайтом и т.д.
+    private val youtubeClients = listOf(
+        null,
+        "youtube:player_client=tv,mweb",
+        "youtube:player_client=android_vr,web_safari",
+        "youtube:player_client=ios,web_embedded",
+    )
+
+    private fun ytdlJson(url: String, fmt: String): String {
+        val host = Uri.parse(url).host?.lowercase() ?: ""
+        val isYoutube = host.endsWith("youtube.com") || host == "youtu.be"
+        val attempts = if (isYoutube) youtubeClients else listOf(null)
+        var last: Throwable? = null
+        for (client in attempts) {
+            try {
+                val request = YoutubeDLRequest(url)
+                request.addOption("--no-warnings")
+                request.addOption("--no-playlist")
+                request.addOption("-J")
+                request.addOption("-f", fmt)
+                if (client != null) request.addOption("--extractor-args", client)
+                return YoutubeDL.getInstance().execute(request).out
+            } catch (e: Throwable) {
+                Log.w(TAG, "yt-dlp (${client ?: "обычный"}): ${e.message?.lineSequence()?.firstOrNull()}")
+                last = e
+            }
+        }
+        throw last ?: IllegalStateException("yt-dlp не ответил")
+    }
+
     private fun resolve(url: String, fmt: String): Resolved? {
         if (!ytdlReady) {
             YoutubeDL.getInstance().init(activity.applicationContext)
             ytdlReady = true
         }
-        val request = YoutubeDLRequest(url)
-        request.addOption("--no-warnings")
-        request.addOption("--no-playlist")
-        request.addOption("-J")
-        request.addOption("-f", fmt)
-        val response = YoutubeDL.getInstance().execute(request)
-        val json = response.out
+        val json = ytdlJson(url, fmt)
         val info = JSONObject(json)
         val formats = info.optJSONArray("requested_formats")
         val list = mutableListOf<JSONObject>()
