@@ -127,9 +127,21 @@ pub fn proxy() -> Option<String> {
     PROXY.lock().unwrap().clone()
 }
 
+/// Адрес того же прокси для yt-dlp — по SOCKS5. Свой HTTP-режим ByeDPI
+/// понимает только запросы с заголовком `Host:`, а Python в yt-dlp шлёт
+/// `CONNECT` без него — соединение тут же закрывалось («Remote end closed
+/// connection without response»). `socks5h` — имена разрешает сам прокси.
+pub fn ytdlp_proxy_url() -> Option<String> {
+    proxy().map(|p| socks(&p))
+}
+
+fn socks(http: &str) -> String {
+    http.replacen("http://", "socks5h://", 1)
+}
+
 /// Добавить yt-dlp прокси, если обход включён.
 pub fn ytdlp_proxy(cmd: &mut Command) {
-    if let Some(p) = proxy() {
+    if let Some(p) = ytdlp_proxy_url() {
         cmd.arg("--proxy").arg(p);
     }
 }
@@ -382,7 +394,7 @@ async fn test_stream(proxy: Option<&str>) -> Option<String> {
         "ytdlStream",
         serde_json::json!({ "url": TEST_VIDEO, "format": TEST_FORMAT, "proxy": proxy }),
     );
-    let reply = tokio::time::timeout(Duration::from_secs(90), reply).await.ok()?.ok()?;
+    let reply = tokio::time::timeout(Duration::from_secs(240), reply).await.ok()?.ok()?;
     reply.get("url")?.as_str().filter(|u| u.starts_with("http")).map(str::to_owned)
 }
 
@@ -452,6 +464,26 @@ async fn measure(url: &str, proxy: Option<&str>) -> u64 {
     }
     let ms = started.elapsed().as_millis().max(1) as u64;
     got * 1000 / ms
+}
+
+/// Открывается ли YouTube (TLS-соединение и ответ) — через `proxy` или напрямую.
+async fn reachable(proxy: Option<&str>) -> bool {
+    let builder = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0")
+        .connect_timeout(Duration::from_secs(6))
+        .timeout(Duration::from_secs(8));
+    let builder = match proxy {
+        Some(p) => match reqwest::Proxy::all(p) {
+            Ok(p) => builder.proxy(p),
+            Err(_) => return false,
+        },
+        None => builder.no_proxy(),
+    };
+    let Ok(client) = builder.build() else { return false };
+    match client.get("https://www.youtube.com/generate_204").send().await {
+        Ok(r) => r.status().is_success(),
+        Err(_) => false,
+    }
 }
 
 async fn measure_profile(url: &str, args: &[String]) -> u64 {
@@ -528,37 +560,75 @@ pub async fn dpi_find_best(app: AppHandle) -> Result<Status, String> {
     let Ok(_guard) = LOCK.get_or_init(|| Mutex::new(())).try_lock() else {
         return Err("Проверка уже идёт.".into());
     };
-    let total = PROFILES.len() + 1;
+    let total = PROFILES.len() * 2 + 1;
     let progress = |done| {
         let _ = app.emit("dpi-progress", Progress { done, total });
     };
     progress(0);
     ensure_ciadpi().await?;
 
-    // Ссылку на поток берём напрямую, а если YouTube не отвечает — через
-    // первый набор настроек.
-    let mut url = test_stream(proxy().as_deref()).await;
-    if url.is_none() {
-        if let Ok((mut child, port)) = spawn(&to_args(PROFILES[0].1)).await {
-            url = test_stream(Some(&format!("http://127.0.0.1:{port}"))).await;
+    // 1. Открывается ли YouTube вообще: напрямую и через каждый набор.
+    let direct_ok = reachable(None).await;
+    logs::info(format!("обход YouTube: напрямую {}", if direct_ok { "открывается" } else { "не открывается" }));
+    progress(1);
+    let mut working: Vec<(&str, &[&str])> = Vec::new();
+    for (i, &(name, args)) in PROFILES.iter().enumerate() {
+        let ok = match spawn(&to_args(args)).await {
+            Ok((mut child, port)) => {
+                let ok = reachable(Some(&format!("http://127.0.0.1:{port}"))).await;
+                let _ = child.kill().await;
+                ok
+            }
+            Err(e) => {
+                logs::warn(format!("обход YouTube: «{name}» не запустился: {e}"));
+                false
+            }
+        };
+        logs::info(format!("обход YouTube: «{name}» — {}", if ok { "открывается" } else { "нет" }));
+        if ok {
+            working.push((name, args));
+        }
+        progress(i + 2);
+    }
+    if !direct_ok && working.is_empty() {
+        return Err("YouTube не открывается ни напрямую, ни через один из способов обхода.".into());
+    }
+
+    // 2. С какими наборами работает сам yt-dlp: его TLS (OpenSSL в Python)
+    //    провайдер ловит иначе, чем наш, — годятся только они. Заодно —
+    //    ссылка на поток тестового ролика.
+    let mut url = if direct_ok { test_stream(None).await } else { None };
+    let mut usable: Vec<(&str, &[&str])> = Vec::new();
+    for &(name, args) in &working {
+        if let Ok((mut child, port)) = spawn(&to_args(args)).await {
+            let got = test_stream(Some(&format!("socks5h://127.0.0.1:{port}"))).await;
             let _ = child.kill().await;
+            logs::info(format!("обход YouTube: «{name}» — yt-dlp {}", if got.is_some() { "работает" } else { "не работает" }));
+            if got.is_some() {
+                usable.push((name, args));
+                url = url.or(got);
+            }
         }
     }
-    let url = url.ok_or("Не получилось открыть тестовый ролик YouTube. Проверь интернет.")?;
+    if !direct_ok && usable.is_empty() {
+        return Err("YouTube открывается только через способы обхода, с которыми не работает yt-dlp.".into());
+    }
+    let url = url.ok_or("YouTube открывается, но тестовый ролик не получилось разобрать (yt-dlp).")?;
 
-    let baseline = measure(&url, None).await;
+    // 3. Скорость — без обхода и с каждым подходящим набором.
+    let baseline = if direct_ok { measure(&url, None).await } else { 0 };
     logs::info(format!("обход YouTube: без обхода {} КБ/с", baseline / 1024));
-    progress(1);
-
     let mut best: Option<(&str, &[&str], u64)> = None;
-    for (i, &(name, args)) in PROFILES.iter().enumerate() {
+    let done_before = PROFILES.len() + 1;
+    for (i, &(name, args)) in usable.iter().enumerate() {
         let speed = measure_profile(&url, &to_args(args)).await;
         logs::info(format!("обход YouTube: «{name}» — {} КБ/с", speed / 1024));
         if best.map_or(true, |(_, _, b)| speed > b) {
             best = Some((name, args, speed));
         }
-        progress(i + 2);
+        progress(done_before + i + 1);
     }
+    progress(total);
 
     let mut s = load_settings();
     s.baseline = baseline;

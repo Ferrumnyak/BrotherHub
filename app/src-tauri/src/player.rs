@@ -195,9 +195,9 @@ impl Player {
             cmd.arg(format!("--tls-ca-file={}", ca.display()));
         }
         // Ускорение YouTube (dpi.rs): mpv и его yt-dlp — через прокси обхода.
-        if let Some(proxy) = crate::dpi::proxy() {
+        if let (Some(proxy), Some(socks)) = (crate::dpi::proxy(), crate::dpi::ytdlp_proxy_url()) {
             cmd.arg(format!("--http-proxy={proxy}"));
-            cmd.arg(format!("--ytdl-raw-options=proxy={proxy}"));
+            cmd.arg(format!("--ytdl-raw-options=proxy={socks}"));
         }
         // Подробный журнал плеера и yt-dlp (см. logs.rs).
         let log_file = crate::logs::mpv_log_path(id);
@@ -328,7 +328,9 @@ impl Player {
     /// плеера — новая ссылка откроется уже с нужным прокси.
     fn apply_proxy(&self) {
         let proxy = crate::dpi::proxy().unwrap_or_default();
-        let raw = if proxy.is_empty() { String::new() } else { format!("proxy={proxy}") };
+        let raw = crate::dpi::ytdlp_proxy_url()
+            .map(|p| format!("proxy={p}"))
+            .unwrap_or_default();
         self.command(json!(["set_property", "http-proxy", proxy]));
         self.command(json!(["set_property", "ytdl-raw-options", raw]));
     }

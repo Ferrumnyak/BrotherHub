@@ -1822,6 +1822,49 @@ export default function App() {
     micSoundRef.current = micOn;
   }, [micOn, voiceStatus, voiceMode]);
 
+  // ТВ: «Назад» на пульте сначала закрывает открытое (меню, смайлики,
+  // настройки, «Обзор», полный экран); `false` — закрывать нечего, Kotlin
+  // выходит из приложения (PlayerPlugin.routeKey).
+  useEffect(() => {
+    const w = window as unknown as { __bhBack?: () => boolean };
+    w.__bhBack = () => {
+      if (memberMenu) setMemberMenu(null);
+      else if (emojiOpen) setEmojiOpen(false);
+      else if (stickersOpen) setStickersOpen(false);
+      else if (voiceSettings) setVoiceSettings(false);
+      else if (browsing) closeBrowser();
+      else if (fullscreenRef.current || miniRef.current) onKeyRef.current("exit-fullscreen");
+      else return false;
+      return true;
+    };
+    return () => {
+      delete w.__bhBack;
+    };
+  });
+
+  // ТВ: кнопка микрофона на пульте — «нажми и говори». Держишь — микрофон
+  // включён, отпустил — как было (её передаёт Kotlin, PlayerPlugin.routeKey).
+  const micBeforeRemote = useRef<boolean | null>(null);
+  useEffect(() => {
+    const w = window as unknown as { __bhMic?: (down: boolean) => void };
+    w.__bhMic = (down) => {
+      if (down) {
+        if (micBeforeRemote.current !== null) return;
+        setMicOn((on) => {
+          micBeforeRemote.current = on;
+          return true;
+        });
+      } else if (micBeforeRemote.current !== null) {
+        const before = micBeforeRemote.current;
+        micBeforeRemote.current = null;
+        setMicOn(before);
+      }
+    };
+    return () => {
+      delete w.__bhMic;
+    };
+  }, []);
+
   // Глобальная кнопка «нажми и говори» работает, только пока мы в комнате.
   useEffect(() => {
     const active = joinedRoom !== null && voiceMode === "ptt" && pttKey !== null;

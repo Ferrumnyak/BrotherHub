@@ -363,6 +363,18 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
 
     // ---------- Пульт ТВ ----------
 
+    /// Телевизор или приставка. Многие дешёвые приставки не включают «режим
+    /// ТВ», поэтому смотрим ещё на функции Android TV и на отсутствие
+    /// сенсорного экрана.
+    private fun isTv(): Boolean {
+        val ui = activity.getSystemService(UiModeManager::class.java)
+        val pm = activity.packageManager
+        return ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            pm.hasSystemFeature("android.hardware.type.television") ||
+            !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+    }
+
     /// Плеер под интерфейсом не должен забирать фокус, иначе стрелки пульта
     /// уходят ему, а не кнопкам интерфейса.
     private fun noFocus(v: View) {
@@ -372,16 +384,56 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     private var keyLogged = false
+    private val loggedKeys = HashSet<Int>()
 
     /// Из MainActivity.dispatchKeyEvent: стрелки и «ОК» пульта — в интерфейс
     /// (или в «Обзор», если фокус в нём). `false` — обработать как обычно.
     fun routeKey(event: KeyEvent): Boolean {
+        // Кнопка микрофона (голосового поиска) на пульте — «нажми и говори».
+        when (event.keyCode) {
+            // «Назад» на ТВ: сначала закрыть открытое в интерфейсе (tv.ts/App.tsx,
+            // window.__bhBack), в «Обзоре» — страница сайта назад; выйти —
+            // только когда закрывать нечего.
+            KeyEvent.KEYCODE_BACK -> {
+                if (!isTv()) return false
+                val ui = webView ?: return false
+                if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                    val b = browser
+                    if (b != null && b.visibility == View.VISIBLE && b.hasFocus() && b.canGoBack()) {
+                        b.goBack()
+                    } else {
+                        ui.evaluateJavascript("window.__bhBack ? window.__bhBack() : false") { result ->
+                            if (result != "true") activity.finish()
+                        }
+                    }
+                }
+                return true
+            }
+            KeyEvent.KEYCODE_SEARCH, KeyEvent.KEYCODE_VOICE_ASSIST, KeyEvent.KEYCODE_ASSIST -> {
+                val ui = webView ?: return false
+                if (event.repeatCount == 0 &&
+                    (event.action == KeyEvent.ACTION_DOWN || event.action == KeyEvent.ACTION_UP)
+                ) {
+                    val down = event.action == KeyEvent.ACTION_DOWN
+                    Log.i(TAG, "пульт: микрофон ${if (down) "нажат" else "отпущен"} (${event.keyCode})")
+                    ui.evaluateJavascript("window.__bhMic && window.__bhMic($down)", null)
+                }
+                return true
+            }
+        }
         when (event.keyCode) {
             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER -> {}
-            else -> return false
+            else -> {
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 &&
+                    loggedKeys.add(event.keyCode)
+                ) {
+                    Log.i(TAG, "пульт: другая кнопка ${event.keyCode} (${KeyEvent.keyCodeToString(event.keyCode)})")
+                }
+                return false
+            }
         }
         val ui = webView ?: return false
         val focused = activity.currentFocus
@@ -451,15 +503,30 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                     YoutubeDL.getInstance().init(activity.applicationContext)
                     ytdlReady = true
                 }
-                val request = YoutubeDLRequest(args.url)
-                request.addOption("--no-warnings")
-                request.addOption("--no-playlist")
-                request.addOption("-f", args.format)
-                request.addOption("-g")
-                args.proxy?.let { request.addOption("--proxy", it) }
-                val out = YoutubeDL.getInstance().execute(request).out
-                val link = out.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("http") }
-                invoke.resolve(JSObject().apply { put("url", link) })
+                // Как при открытии видео: если основной клиент YouTube не
+                // отдаёт ссылку — запасные.
+                var last: Throwable? = null
+                for (client in youtubeClients) {
+                    try {
+                        val request = YoutubeDLRequest(args.url)
+                        request.addOption("--no-warnings")
+                        request.addOption("--no-playlist")
+                        request.addOption("-f", args.format)
+                        request.addOption("-g")
+                        if (client != null) request.addOption("--extractor-args", client)
+                        args.proxy?.let { request.addOption("--proxy", it) }
+                        val out = YoutubeDL.getInstance().execute(request).out
+                        val link = out.lineSequence().map { it.trim() }.firstOrNull { it.startsWith("http") }
+                        if (link != null) {
+                            invoke.resolve(JSObject().apply { put("url", link) })
+                            return@Thread
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "yt-dlp для замера (${client ?: "обычный"}): ${e.message?.lineSequence()?.firstOrNull()}")
+                        last = e
+                    }
+                }
+                invoke.reject(last?.message ?: "yt-dlp не отдал ссылку")
             } catch (e: Throwable) {
                 Log.w(TAG, "yt-dlp для замера: ${e.message?.lineSequence()?.firstOrNull()}")
                 invoke.reject(e.message ?: "yt-dlp не ответил")
@@ -600,15 +667,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     /// Телевизор ли это (интерфейс включает управление пультом).
     @Command
     fun info(invoke: Invoke) {
-        val ui = activity.getSystemService(UiModeManager::class.java)
-        val pm = activity.packageManager
-        // Многие дешёвые приставки не включают «режим ТВ», поэтому смотрим
-        // ещё на функции Android TV и на отсутствие сенсорного экрана.
-        val tv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
-            pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-            pm.hasSystemFeature("android.hardware.type.television") ||
-            !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
-        invoke.resolve(JSObject().apply { put("tv", tv) })
+        invoke.resolve(JSObject().apply { put("tv", isTv()) })
     }
 
     // ---------- Обновление ----------
@@ -753,6 +812,15 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         b.settings.mediaPlaybackRequiresUserGesture = true
         // Ссылки «в новом окне» открываются здесь же.
         b.settings.setSupportMultipleWindows(false)
+        if (isTv()) {
+            // На ТВ сайты по умолчанию открываются в мобильном виде (WebView
+            // представляется телефоном) — просим обычную версию для компьютера.
+            b.settings.userAgentString =
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
+            b.settings.useWideViewPort = true
+            b.settings.loadWithOverviewMode = true
+        }
         b.setBackgroundColor(Color.BLACK)
         val docStart = script != null &&
             WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)

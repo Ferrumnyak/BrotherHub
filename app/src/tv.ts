@@ -56,6 +56,29 @@ function visible(el: Element): boolean {
   return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
 }
 
+/** Ближайший предок с прокруткой по вертикали. */
+function scroller(el: Element): HTMLElement | null {
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight + 2) return p;
+  }
+  return null;
+}
+
+/** Элемент спрятан за краем своей прокручиваемой панели. */
+function clippedOut(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+    const style = getComputedStyle(p);
+    if (style.overflowY === "visible" && style.overflowX === "visible") continue;
+    const b = p.getBoundingClientRect();
+    if (r.bottom <= b.top + 2 || r.top >= b.bottom - 2 || r.right <= b.left + 2 || r.left >= b.right - 2) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Элементы, которые не удалось выделить при этом нажатии. */
 const skip = new Set<Element>();
 
@@ -65,8 +88,17 @@ function next(from: Element | null, dir: Dir): HTMLElement | null {
     (el) => el === from || visible(el),
   );
   const all = ordered.filter((el) => el !== from && !skip.has(el));
-  if (!from) return all[0] ?? null;
-  const spatial = nearest(from, all, dir);
+  if (!from) return all.find((el) => !clippedOut(el)) ?? all[0] ?? null;
+  // Сначала — внутри той же прокручиваемой панели (настройки, чат), даже то,
+  // что пока за её краем: панель прокрутится. Иначе «вниз» из середины
+  // настроек прыгало на кнопки голоса под ними.
+  const box = scroller(from);
+  if (box) {
+    const inside = nearest(from, all.filter((el) => box.contains(el)), dir);
+    if (inside) return inside;
+  }
+  // Дальше — только то, что сейчас видно в своих панелях.
+  const spatial = nearest(from, all.filter((el) => !clippedOut(el)), dir);
   if (spatial) return spatial;
   // В эту сторону по раскладке ничего нет — следующий (или предыдущий)
   // по порядку на странице: так можно дойти до любого элемента.
@@ -181,7 +213,8 @@ export async function initTv() {
     if (!IS_ANDROID) return; // компьютер
     say(`пульт: не узнал, ТВ ли это: ${e}`);
   }
-  say(`пульт: это ТВ? ${tv}`);
+  say(`пульт: это ТВ? ${tv}; экран ${innerWidth}×${innerHeight}, масштаб ${devicePixelRatio}`);
+  hideVideoPoster();
   let seen = 0;
   window.addEventListener(
     "keydown",
@@ -264,6 +297,17 @@ function enable(how = "по системе") {
 function onKey(e: KeyboardEvent) {
   if (isOk(e)) {
     const el = document.activeElement;
+    if (isTextField(el) && el === typing) {
+      // Enter на клавиатуре — отправили: прячем клавиатуру, поле остаётся
+      // выделенным для пульта.
+      setTimeout(() => {
+        typing = null;
+        el.blur();
+        quiet(el);
+        el.focus({ preventScroll: true });
+      }, 0);
+      return;
+    }
     if (isTextField(el) && el !== typing) {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -307,4 +351,16 @@ function describe(el: Element | null): string {
   if (!el) return "ничего";
   const text = (el.textContent ?? "").trim().slice(0, 30);
   return `${el.tagName.toLowerCase()}${el.className ? "." + String(el.className).split(" ")[0] : ""} «${text}»`;
+}
+
+/**
+ * WebView на Android рисует в пустом <video> свою заглушку — зелёного
+ * робота. Ставим всем видео прозрачную обложку.
+ */
+function hideVideoPoster() {
+  const blank = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+  const fix = (root: ParentNode) =>
+    root.querySelectorAll("video:not([poster])").forEach((v) => v.setAttribute("poster", blank));
+  fix(document);
+  new MutationObserver(() => fix(document)).observe(document.body, { childList: true, subtree: true });
 }

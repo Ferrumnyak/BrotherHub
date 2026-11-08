@@ -56,9 +56,11 @@ object DpiProxy {
         Handler(Looper.getMainLooper()).post { applyWebView() }
     }
 
-    /// Добавить yt-dlp прокси, если обход включён.
+    /// Добавить yt-dlp прокси, если обход включён. По SOCKS5: HTTP-режим
+    /// ByeDPI не понимает `CONNECT` без заголовка `Host:`, а Python в yt-dlp
+    /// шлёт именно такой (см. dpi.rs).
     fun apply(request: YoutubeDLRequest): YoutubeDLRequest {
-        url?.let { request.addOption("--proxy", it) }
+        url?.let { request.addOption("--proxy", it.replaceFirst("http://", "socks5h://")) }
         return request
     }
 

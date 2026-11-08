@@ -957,7 +957,10 @@ html.overlay.cursor-hidden * {
     margin-left: auto;
   }
 
-  .header-actions button:not(:last-child) {
+  /* .ghost — чтобы перебить размер шрифта кнопок шапки ниже по файлу,
+     иначе подписи вылезали из кружков (так было на ТВ). */
+  .header-actions button:not(:last-child),
+  .header-actions button.ghost:not(:last-child) {
     width: 36px;
     padding: 0;
     font-size: 0;
@@ -3430,6 +3433,39 @@ html.tv :focus {
 html.tv button:focus,
 html.tv .site-chip:focus {
   background: var(--quiet-hover);
+}
+
+/* «Обзор»: площадки — отдельной строкой с переносом, а не лентой вбок,
+   иначе видно только две-три. Подсказку прячем — места мало. */
+html.tv .browser-bar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  height: auto;
+}
+
+html.tv .browser-bar .site-chips {
+  order: 10;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  overflow: visible;
+  row-gap: 6px;
+}
+
+html.tv .browser-bar .browser-hint {
+  display: none;
+}
+
+/* Слабое железо приставок: без размытий, теней и плавных переходов. */
+html.tv *,
+html.tv *::before,
+html.tv *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+  text-shadow: none !important;
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  scroll-behavior: auto !important;
 }
 
 /* ---------- Телефон: компактнее ---------- */
