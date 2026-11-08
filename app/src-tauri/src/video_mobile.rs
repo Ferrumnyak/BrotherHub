@@ -38,9 +38,18 @@ pub async fn set_video_rect(rect: Option<Rect>, radius: Option<u32>) -> Result<(
     crate::player::call("rect", payload).await.map(|_| ())
 }
 
-/// Ролика сбоку («СДВГ-режим») на телефоне нет.
+/// Где показать ролик рядом с фильмом («СДВГ-режим»; `None` — спрятать).
 #[tauri::command]
-pub async fn set_side_rect() {}
+pub async fn set_side_rect(rect: Option<Rect>, radius: Option<u32>) -> Result<(), String> {
+    let _ = radius;
+    let payload = match rect {
+        Some(r) if r.width > 0 && r.height > 0 => serde_json::json!({
+            "visible": true, "x": r.x, "y": r.y, "width": r.width, "height": r.height
+        }),
+        _ => serde_json::json!({ "visible": false }),
+    };
+    crate::player::call("sideRect", payload).await.map(|_| ())
+}
 
 /// Курсора на телефоне нет.
 #[tauri::command]

@@ -3297,9 +3297,12 @@ html.android body {
   background: transparent;
 }
 
+/* Вырез камеры и полоска жестов: отступы присылает Android (--inset-*),
+   env() во встроенном браузере бывает нулевым. */
 html.android body {
   height: 100dvh;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+  padding: var(--inset-top, env(safe-area-inset-top)) var(--inset-right, 0px)
+    var(--inset-bottom, 0px) var(--inset-left, 0px);
 }
 
 html.android .video {
@@ -3419,4 +3422,29 @@ html.tv :focus {
 html.tv button:focus,
 html.tv .site-chip:focus {
   background: var(--quiet-hover);
+}
+
+/* ---------- Телефон: компактнее ---------- */
+
+/* Громкость — кнопками телефона; пока вводишь ссылку, «Обзор» уступает место. */
+html.android:not(.tv) .controls .volume,
+html.android:not(.tv) .source-bar:focus-within .browse-open {
+  display: none;
+}
+
+/* «Обзор» — область побольше, чтобы сайт и выбор площадок помещались. */
+html.android:not(.tv) .room.browsing:not(.fullscreen) .stage .video {
+  aspect-ratio: auto;
+  height: 68dvh;
+  max-height: none;
+}
+
+/* СДВГ-режим вертикально: фильм сверху, ролик снизу. */
+html.android:not(.tv) .room.adhd:not(.fullscreen):not(.browsing) .stage .video {
+  aspect-ratio: 8 / 9;
+  max-height: 80dvh;
+}
+
+html.android .room.fullscreen {
+  padding-bottom: 0;
 }

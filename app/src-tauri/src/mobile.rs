@@ -91,8 +91,36 @@ pub fn overlay_close() {}
 #[tauri::command]
 pub fn reactions_place() {}
 
+/// СДВГ-режим: что искать для ролика рядом с фильмом (как на компьютере).
+const ADHD_QUERIES: &[&str] = &[
+    "subway surfers gameplay no copyright",
+    "minecraft parkour gameplay no copyright",
+    "soap cutting asmr no talking",
+    "carpet cleaning satisfying",
+    "kinetic sand cutting asmr",
+    "hydraulic press satisfying",
+    "slime asmr satisfying no talking",
+    "temple run gameplay no commentary",
+];
+
+/// Включить СДВГ-режим (или переключить на другие ролики).
 #[tauri::command]
-pub fn adhd_stop() {}
+pub async fn adhd_start() -> Result<(), String> {
+    crate::player::call("adhdStart", serde_json::json!({ "queries": ADHD_QUERIES }))
+        .await
+        .map(|_| ())
+}
+
+#[tauri::command]
+pub async fn adhd_stop() -> Result<(), String> {
+    crate::player::call("adhdStop", serde_json::json!({})).await.map(|_| ())
+}
+
+/// Отступы под вырез камеры и полоску жестов (CSS-пиксели).
+#[tauri::command]
+pub async fn mobile_insets() -> Result<serde_json::Value, String> {
+    crate::player::call("insets", serde_json::json!({})).await
+}
 
 /// Полный экран на телефоне: альбомная ориентация и без системных панелей.
 #[tauri::command]

@@ -1,4 +1,5 @@
 import React from "react";
+import { invoke } from "@tauri-apps/api/core";
 import ReactDOM from "react-dom/client";
 import App, { ControlsOverlay } from "./App";
 import PlayerSetup from "./PlayerSetup";
@@ -20,6 +21,19 @@ import { initTheme } from "./theme";
 if (IS_ANDROID) {
   document.documentElement.classList.add("android");
   initTv();
+  // Отступы под вырез камеры и полоску жестов — от Android, на каждый
+  // поворот экрана и полный экран заново.
+  const insets = () =>
+    invoke<{ top: number; bottom: number; left: number; right: number }>("mobile_insets")
+      .then((i) => {
+        const root = document.documentElement.style;
+        for (const side of ["top", "bottom", "left", "right"] as const) {
+          root.setProperty(`--inset-${side}`, `${i[side]}px`);
+        }
+      })
+      .catch(() => {});
+  insets();
+  window.addEventListener("resize", () => setTimeout(insets, 150));
 }
 initTheme();
 blockBrowserMenu();

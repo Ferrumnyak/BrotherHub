@@ -1835,25 +1835,36 @@ export default function App() {
       // СДВГ-режим: фильм слева, ролик справа (ролики чаще вертикальные).
       const split = adhd && !mini;
       const gap = split ? 8 : 0;
-      const mainWidth = split ? Math.round(r.width * 0.66) : r.width;
+      // Высокая область (телефон вертикально) — ролик снизу, как в тиктоке;
+      // широкая — справа (ролики чаще вертикальные).
+      const below = split && r.height > r.width * 0.7;
+      const mainWidth = split && !below ? Math.round(r.width * 0.66) : r.width;
+      const mainHeight = below ? Math.round(r.width * (9 / 16)) : r.height;
       invoke("set_video_rect", {
         rect: {
           x: Math.round(r.left * k),
           y: Math.round(r.top * k),
-          width: Math.round((mainWidth - gap / 2) * k),
-          height: Math.round(r.height * k),
+          width: Math.round((mainWidth - (split && !below ? gap / 2 : 0)) * k),
+          height: Math.round((mainHeight - (below ? gap / 2 : 0)) * k),
         },
         radius,
       }).catch(() => {});
       invoke("set_side_rect", {
-        rect: split
-          ? {
-              x: Math.round((r.left + mainWidth + gap / 2) * k),
-              y: Math.round(r.top * k),
-              width: Math.round((r.width - mainWidth - gap / 2) * k),
-              height: Math.round(r.height * k),
-            }
-          : null,
+        rect: !split
+          ? null
+          : below
+            ? {
+                x: Math.round(r.left * k),
+                y: Math.round((r.top + mainHeight + gap / 2) * k),
+                width: Math.round(r.width * k),
+                height: Math.round((r.height - mainHeight - gap / 2) * k),
+              }
+            : {
+                x: Math.round((r.left + mainWidth + gap / 2) * k),
+                y: Math.round(r.top * k),
+                width: Math.round((r.width - mainWidth - gap / 2) * k),
+                height: Math.round(r.height * k),
+              },
         radius,
       }).catch(() => {});
     };
@@ -2388,6 +2399,8 @@ export default function App() {
     mini && "mini",
     !chatOpen && "chat-hidden",
     fullscreen && controlsHidden && "controls-hidden",
+    browsing !== null && "browsing",
+    adhd && "adhd",
   ]
     .filter(Boolean)
     .join(" ");
@@ -2413,7 +2426,6 @@ export default function App() {
                   Закрыть видео
                 </button>
               )}
-              {!IS_ANDROID && (
               <button
                 className={adhd ? "ghost adhd-toggle on" : "ghost adhd-toggle"}
                 onClick={toggleAdhd}
@@ -2426,8 +2438,7 @@ export default function App() {
                 <span aria-hidden="true">🧠</span>
                 {adhd ? "СДВГ: вкл" : "СДВГ"}
               </button>
-              )}
-              {adhd && !IS_ANDROID && (
+              {adhd && (
                 <button
                   className="ghost icon-only"
                   onClick={() => invoke("adhd_start").catch((err) => setError(String(err)))}
@@ -2510,7 +2521,7 @@ export default function App() {
                 }
                 aria-label="Ссылка на видео"
               />
-              {isHost && (
+              {isHost && (!IS_ANDROID || url.trim() !== "") && (
                 <button
                   type="button"
                   className="ghost"
@@ -2521,9 +2532,11 @@ export default function App() {
                   В список
                 </button>
               )}
-              <button type="submit" className="go" disabled={!url.trim()}>
-                {isHost ? "Смотреть" : "Предложить"}
-              </button>
+              {(!IS_ANDROID || url.trim() !== "") && (
+                <button type="submit" className="go" disabled={!url.trim()}>
+                  {isHost ? "Смотреть" : "Предложить"}
+                </button>
+              )}
             </label>
           </form>
         )}

@@ -38,6 +38,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -127,6 +128,11 @@ class BrowserPlaceArgs {
 }
 
 @InvokeArg
+class AdhdArgs {
+    var queries: Array<String> = arrayOf()
+}
+
+@InvokeArg
 class InstallArgs {
     var url: String = ""
 }
@@ -174,6 +180,12 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     /// Где видео в интерфейсе (чтобы вернуть его после «картинки в картинке»).
     private var lastRect: RectArgs? = null
     private var inPip = false
+    /// СДВГ-режим: второй плеер без звука рядом с фильмом.
+    private var sideExo: ExoPlayer? = null
+    private var sideView: PlayerView? = null
+    private val sideQueue = ArrayDeque<String>()
+    private var sideAll = listOf<String>()
+    private var sideToken = 0
     /// «Обзор»: сайт в своём WebView поверх области видео.
     private var browser: WebView? = null
     private var browserScript: String? = null
@@ -297,6 +309,161 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
         }
+    }
+
+    /// Отступы под вырез камеры и полоску жестов, в CSS-пикселях.
+    @Command
+    fun insets(invoke: Invoke) {
+        main.post {
+            val view = webView
+            val insets = view?.let { ViewCompat.getRootWindowInsets(it) }
+            val bars = insets?.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            val d = activity.resources.displayMetrics.density
+            invoke.resolve(JSObject().apply {
+                put("top", (bars?.top ?: 0) / d)
+                put("bottom", (bars?.bottom ?: 0) / d)
+                put("left", (bars?.left ?: 0) / d)
+                put("right", (bars?.right ?: 0) / d)
+            })
+        }
+    }
+
+    // ---------- СДВГ-режим ----------
+
+    /// Найти ролики (Subway Surfers, мыло, ковры…) и крутить их по очереди.
+    @Command
+    fun adhdStart(invoke: Invoke) {
+        val args = invoke.parseArgs(AdhdArgs::class.java)
+        invoke.resolve()
+        main.post {
+            ensureSide()
+            val token = ++sideToken
+            Thread {
+                val found = mutableListOf<String>()
+                for (q in args.queries) {
+                    try {
+                        val request = YoutubeDLRequest("ytsearch3:$q")
+                        request.addOption("--flat-playlist")
+                        request.addOption("--no-warnings")
+                        request.addOption("-J")
+                        val json = JSONObject(YoutubeDL.getInstance().execute(request).out)
+                        val entries = json.optJSONArray("entries") ?: continue
+                        for (i in 0 until entries.length()) {
+                            val e = entries.getJSONObject(i)
+                            val id = e.optString("id")
+                            if (id.isNotEmpty()) found.add("https://www.youtube.com/watch?v=$id")
+                        }
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "СДВГ: не нашлось «$q»", e)
+                    }
+                }
+                found.shuffle()
+                main.post {
+                    if (token != sideToken) return@post
+                    sideAll = found
+                    sideQueue.clear()
+                    sideQueue.addAll(found)
+                    nextSide(token)
+                }
+            }.start()
+        }
+    }
+
+    @Command
+    fun adhdStop(invoke: Invoke) {
+        invoke.resolve()
+        main.post {
+            sideToken++
+            sideExo?.release()
+            sideExo = null
+            sideView?.let { (it.parent as? ViewGroup)?.removeView(it) }
+            sideView = null
+        }
+    }
+
+    @Command
+    fun sideRect(invoke: Invoke) {
+        val args = invoke.parseArgs(RectArgs::class.java)
+        invoke.resolve()
+        main.post {
+            val v = sideView ?: return@post
+            if (!args.visible || args.width <= 0 || args.height <= 0 || inPip) {
+                v.visibility = View.GONE
+                return@post
+            }
+            val lp = (v.layoutParams as? FrameLayout.LayoutParams)
+                ?: FrameLayout.LayoutParams(args.width, args.height)
+            lp.width = args.width
+            lp.height = args.height
+            lp.gravity = Gravity.TOP or Gravity.START
+            lp.leftMargin = (webView?.left ?: 0) + args.x
+            lp.topMargin = (webView?.top ?: 0) + args.y
+            v.layoutParams = lp
+            v.visibility = View.VISIBLE
+        }
+    }
+
+    private fun ensureSide(): ExoPlayer {
+        sideExo?.let { return it }
+        val p = ExoPlayer.Builder(activity)
+            .setAudioAttributes(
+                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).build(),
+                false
+            )
+            .build()
+        p.volume = 0f
+        p.playWhenReady = true
+        p.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED) nextSide(sideToken)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                Log.w(TAG, "СДВГ: ролик не открылся", error)
+                nextSide(sideToken)
+            }
+        })
+        sideExo = p
+        val v = PlayerView(activity)
+        v.useController = false
+        v.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        v.setShutterBackgroundColor(Color.BLACK)
+        v.setBackgroundColor(Color.BLACK)
+        v.player = p
+        v.visibility = View.GONE
+        val parent = webView?.parent as? ViewGroup
+        val lp = FrameLayout.LayoutParams(1, 1, Gravity.TOP or Gravity.START)
+        if (parent != null) parent.addView(v, 0, lp) else activity.addContentView(v, lp)
+        sideView = v
+        return p
+    }
+
+    /// Следующий ролик: разбираем ссылку и включаем без звука.
+    private fun nextSide(token: Int) {
+        if (token != sideToken) return
+        if (sideQueue.isEmpty()) sideQueue.addAll(sideAll.shuffled())
+        val url = sideQueue.removeFirstOrNull() ?: return
+        Thread {
+            val result = try {
+                resolve(url, "bestvideo[height<=?480][vcodec!^=av01]/best[height<=?480]/best")
+            } catch (e: Throwable) {
+                null
+            }
+            main.post {
+                if (token != sideToken) return@post
+                val p = sideExo ?: return@post
+                if (result == null) {
+                    // Не разобрался — следующий, но не чаще раза в 2 секунды.
+                    main.postDelayed({ nextSide(token) }, 2000)
+                    return@post
+                }
+                // Только картинка: звук ролика не нужен.
+                p.setMediaSource(source(result.streams.first()))
+                p.prepare()
+            }
+        }.start()
     }
 
     /// Телевизор ли это (интерфейс включает управление пультом).
@@ -564,6 +731,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         val v = view ?: return
         if (on) {
             webView?.visibility = View.INVISIBLE
+            sideView?.visibility = View.GONE
             v.layoutParams = FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT

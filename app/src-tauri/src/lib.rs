@@ -172,7 +172,9 @@ pub fn run() {
         mobile::mute_set_key,
         mobile::overlay_close,
         mobile::reactions_place,
+        mobile::adhd_start,
         mobile::adhd_stop,
+        mobile::mobile_insets,
         mobile::mobile_fullscreen
     ]);
 
