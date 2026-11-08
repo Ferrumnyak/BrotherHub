@@ -3435,7 +3435,9 @@ html.tv .site-chip:focus {
 /* ---------- Телефон: компактнее ---------- */
 
 /* Громкость — кнопками телефона; пока вводишь ссылку, «Обзор» уступает место. */
-html.android:not(.tv) .controls .volume,
+/* Громкость в вертикальном режиме — кнопками телефона (места мало);
+   в полном экране ползунок есть. Пока вводишь ссылку, «Обзор» уступает место. */
+html.android:not(.tv) .room:not(.fullscreen) .controls .volume,
 html.android:not(.tv) .source-bar:has(input:focus) .browse-open {
   display: none;
 }
