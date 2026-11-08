@@ -144,6 +144,11 @@ class KeepAliveArgs {
 }
 
 @InvokeArg
+class BackgroundArgs {
+    var color: String = "#0f0d10"
+}
+
+@InvokeArg
 class FullscreenArgs {
     var on: Boolean = false
 }
@@ -740,6 +745,20 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         } else {
             webView?.visibility = View.VISIBLE
             lastRect?.let { place(it) }
+        }
+    }
+
+    /// Цвет «зала» под прозрачным интерфейсом — по теме оформления.
+    @Command
+    fun background(invoke: Invoke) {
+        val args = invoke.parseArgs(BackgroundArgs::class.java)
+        invoke.resolve()
+        main.post {
+            try {
+                activity.window.setBackgroundDrawable(ColorDrawable(Color.parseColor(args.color)))
+            } catch (e: Throwable) {
+                Log.w(TAG, "странный цвет фона: ${args.color}", e)
+            }
         }
     }
 

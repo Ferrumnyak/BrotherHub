@@ -150,3 +150,11 @@ pub async fn mobile_pip() -> Result<(), String> {
 pub async fn mobile_info() -> Result<serde_json::Value, String> {
     crate::player::call("info", serde_json::json!({})).await
 }
+
+/// Цвет фона окна под прозрачным интерфейсом (цвет темы, `#rrggbb`).
+#[tauri::command]
+pub async fn mobile_background(color: String) -> Result<(), String> {
+    crate::player::call("background", serde_json::json!({ "color": color }))
+        .await
+        .map(|_| ())
+}
