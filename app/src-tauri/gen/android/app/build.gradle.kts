@@ -20,7 +20,8 @@ val tauriProperties = Properties().apply {
 val keystoreProperties = Properties().apply {
     val propFile = rootProject.file("keystore.properties")
     if (propFile.exists()) {
-        propFile.inputStream().use { load(it) }
+        // UTF-8: иначе пароль с русскими буквами прочитался бы неверно.
+        propFile.reader(Charsets.UTF_8).use { load(it) }
     }
 }
 
@@ -80,8 +81,8 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         buildConfig = true
@@ -90,7 +91,7 @@ android {
 
 kotlin {
     compilerOptions {
-        jvmTarget = JvmTarget.JVM_1_8
+        jvmTarget = JvmTarget.JVM_17
     }
 }
 
