@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 // Голосовая связь через LiveKit.
 //
 // Звук идёт напрямую через сервер LiveKit; пропуск (token) выдаёт наш
@@ -86,6 +87,7 @@ export class VoiceClient {
         this.noiseCtx ??= new AudioContext({ sampleRate: 48000 });
         await track.setAudioContext(this.noiseCtx);
         await track.setProcessor(new RnnoiseProcessor());
+        await this.wakeNoise();
       } else if (this.noise !== "strong" && active) {
         await track.stopProcessor();
       }
@@ -94,6 +96,40 @@ export class VoiceClient {
       this.cb.onError(`Сильное шумоподавление не включилось: ${err}`);
     }
   }
+
+  /**
+   * Android WebView создаёт AudioContext «спящим», если не было нажатия, — и
+   * через RNNoise тогда уходит тишина (микрофон пишет, друзья не слышат).
+   * Будим сразу и при каждом нажатии, пока не проснётся.
+   */
+  private async wakeNoise() {
+    const ctx = this.noiseCtx;
+    if (!ctx) return;
+    if (ctx.state !== "running") {
+      try {
+        await ctx.resume();
+      } catch {
+        // без нажатия может не разрешить — разбудим по первому нажатию
+      }
+    }
+    invoke("ui_log", { message: `голос: шумоподавление, звук ${ctx.state}` }).catch(() => {});
+    if (ctx.state !== "running" && !this.wakeArmed) {
+      this.wakeArmed = true;
+      const wake = () => {
+        ctx.resume().then(() => {
+          if (ctx.state !== "running") return;
+          this.wakeArmed = false;
+          window.removeEventListener("keydown", wake, true);
+          window.removeEventListener("pointerdown", wake, true);
+          invoke("ui_log", { message: "голос: звук шумоподавления проснулся" }).catch(() => {});
+        }).catch(() => {});
+      };
+      window.addEventListener("keydown", wake, true);
+      window.addEventListener("pointerdown", wake, true);
+    }
+  }
+
+  private wakeArmed = false;
 
   get connected(): boolean {
     return this.room !== null;
@@ -383,6 +419,7 @@ export class VoiceClient {
     this.micOn = on;
     try {
       await room.localParticipant.setMicrophoneEnabled(on);
+      if (on) await this.wakeNoise();
     } catch (err) {
       this.micOn = false;
       const text = String(err);
