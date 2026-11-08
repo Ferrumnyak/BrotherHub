@@ -123,6 +123,12 @@ pub async fn mobile_insets() -> Result<serde_json::Value, String> {
     crate::player::call("insets", serde_json::json!({})).await
 }
 
+/// ТВ: перевести пульт в окно сайта «Обзора».
+#[tauri::command]
+pub async fn mobile_browser_focus() -> Result<(), String> {
+    crate::player::call("browserFocus", serde_json::json!({})).await.map(|_| ())
+}
+
 /// ТВ: показать экранную клавиатуру для поля в фокусе (WebView сам её не
 /// показывает, если поле выделено пультом).
 #[tauri::command]

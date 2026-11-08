@@ -418,6 +418,8 @@ function DpiSettings() {
  * и так далее: её и нужно прислать, если что-то сломалось.
  */
 export function LogsButton() {
+  // На телефоне и ТВ папки с логами не открыть (журнал — в adb logcat).
+  if (IS_ANDROID) return null;
   return (
     <button
       type="button"
@@ -3208,10 +3210,12 @@ export default function App() {
                 </div>
               )}
 
-              <div className="setting">
-                <span className="setting-label">Если что-то не работает</span>
-                <LogsButton />
-              </div>
+              {!IS_ANDROID && (
+                <div className="setting">
+                  <span className="setting-label">Если что-то не работает</span>
+                  <LogsButton />
+                </div>
+              )}
 
               <button className="primary" onClick={() => setVoiceSettings(false)}>
                 Готово

@@ -79,6 +79,9 @@ function clippedOut(el: Element): boolean {
   return false;
 }
 
+/** Последний выделенный элемент (куда вернуться, если фокус потерялся). */
+let lastFocused: HTMLElement | null = null;
+
 /** Элементы, которые не удалось выделить при этом нажатии. */
 const skip = new Set<Element>();
 
@@ -265,7 +268,9 @@ function enable(how = "по системе") {
   document.addEventListener(
     "focusin",
     (e) => {
-      if (isTextField(e.target as Element)) quiet(e.target as HTMLInputElement);
+      const el = e.target as Element;
+      if (el instanceof HTMLElement && el.matches(FOCUSABLE)) lastFocused = el;
+      if (isTextField(el)) quiet(el);
     },
     true,
   );
@@ -322,8 +327,28 @@ function onKey(e: KeyboardEvent) {
   }
   const dir = dirOf(e);
   if (!dir) return;
-  const current = document.activeElement === document.body ? null : document.activeElement;
+  let current = document.activeElement === document.body ? null : document.activeElement;
+  // Фокус не на кнопке/поле (например, пульт вернулся из окна сайта) —
+  // возвращаемся туда, где было выделение.
+  if (current && !current.matches(FOCUSABLE)) {
+    if (lastFocused?.isConnected && visible(lastFocused)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      lastFocused.focus({ preventScroll: true });
+      say(`пульт: ${dir} → ${describe(lastFocused)} (вернулся)`);
+      return;
+    }
+    current = null;
+  }
   if (arrowStaysInField(current, dir)) return;
+  // Площадки «Обзора» — нижний ряд над окном сайта: «вниз» — в сайт.
+  if (dir === "down" && current?.closest(".site-chips") && document.querySelector(".room.browsing")) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    say("пульт: down → окно сайта");
+    invoke("mobile_browser_focus").catch(() => {});
+    return;
+  }
   let target = next(current, dir);
   // Перехватываем стрелку, даже если идти некуда: иначе она перематывала бы видео.
   e.preventDefault();

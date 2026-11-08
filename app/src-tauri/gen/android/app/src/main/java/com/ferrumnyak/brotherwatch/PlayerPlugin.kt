@@ -399,8 +399,13 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 val ui = webView ?: return false
                 if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
                     val b = browser
-                    if (b != null && b.visibility == View.VISIBLE && b.hasFocus() && b.canGoBack()) {
+                    val inSite = b != null && b.visibility == View.VISIBLE && b.hasFocus()
+                    if (inSite && b!!.canGoBack()) {
                         b.goBack()
+                    } else if (inSite) {
+                        // Дальше назад некуда — пульт обратно на панель «Обзора».
+                        ui.requestFocus()
+                        Log.i(TAG, "пульт: из окна сайта — в интерфейс")
                     } else {
                         ui.evaluateJavascript("window.__bhBack ? window.__bhBack() : false") { result ->
                             if (result != "true") activity.finish()
@@ -457,6 +462,21 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             return true
         }
         return false
+    }
+
+    /// Пульт — в окно сайта «Обзора» (если оно открыто).
+    @Command
+    fun browserFocus(invoke: Invoke) {
+        main.post {
+            val b = browser
+            if (b != null && b.visibility == View.VISIBLE) {
+                b.isFocusable = true
+                b.isFocusableInTouchMode = true
+                b.requestFocus()
+                Log.i(TAG, "пульт: в окне сайта")
+            }
+            invoke.resolve()
+        }
     }
 
     /// Показать экранную клавиатуру для поля, выделенного пультом.

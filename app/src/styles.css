@@ -3455,6 +3455,19 @@ html.tv .browser-bar .browser-hint {
   display: none;
 }
 
+/* Пока открыт «Обзор» — сайту вся высота, панель плеера прячем. */
+html.tv .room.browsing:not(.fullscreen) .stage .video {
+  aspect-ratio: auto;
+  flex: 1 1 0;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+
+html.tv .room.browsing:not(.fullscreen) .stage .controls {
+  display: none;
+}
+
 /* Слабое железо приставок: без размытий, теней и плавных переходов. */
 html.tv *,
 html.tv *::before,
