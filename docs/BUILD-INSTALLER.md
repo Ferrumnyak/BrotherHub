@@ -110,6 +110,18 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1 -Notes "Что но
 
 Текст из `-Notes` друзья увидят рядом с кнопкой «Обновить».
 
+Для проверки можно собрать только часть — это быстрее, а `latest.json`
+при этом не меняется (друзьям обновление не придёт):
+
+```powershell
+scripts\release.ps1 -Only pc        # установщик и portable
+scripts\release.ps1 -Only phone     # APK для телефонов (arm64)
+scripts\release.ps1 -Only tv        # APK для 32-битных ТВ-приставок (armv7)
+scripts\release.ps1 -Only phone,tv  # оба APK
+```
+
+Для APK пароль ключа обновлений не нужен.
+
 ### 4. GitHub Releases
 
 1. Поставь метку версии и отправь всё на GitHub:
