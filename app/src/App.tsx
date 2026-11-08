@@ -2438,16 +2438,6 @@ export default function App() {
                 <span aria-hidden="true">🧠</span>
                 {adhd ? "СДВГ: вкл" : "СДВГ"}
               </button>
-              {adhd && (
-                <button
-                  className="ghost icon-only"
-                  onClick={() => invoke("adhd_start").catch((err) => setError(String(err)))}
-                  title="Другие ролики сбоку"
-                  aria-label="Другие ролики сбоку"
-                >
-                  <span aria-hidden="true">🔀</span>
-                </button>
-              )}
               {!IS_ANDROID && (
               <button
                 className={sharing ? "ghost sharing" : "ghost"}

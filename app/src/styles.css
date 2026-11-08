@@ -3301,8 +3301,14 @@ html.android body {
    env() во встроенном браузере бывает нулевым. */
 html.android body {
   height: 100dvh;
-  padding: var(--inset-top, env(safe-area-inset-top)) var(--inset-right, 0px)
-    var(--inset-bottom, 0px) var(--inset-left, 0px);
+  padding: 0 var(--inset-right, 0px) var(--inset-bottom, 0px) var(--inset-left, 0px);
+}
+
+/* Сверху — не отступ у всей страницы (была бы чёрная полоса), а у первых
+   блоков: их фон уходит под строку состояния, а текст — ниже выреза. */
+html.android .login-art,
+html.android .room:not(.fullscreen) .stage-header {
+  padding-top: calc(var(--inset-top, env(safe-area-inset-top)) + 10px);
 }
 
 html.android .video {
@@ -3428,7 +3434,7 @@ html.tv .site-chip:focus {
 
 /* Громкость — кнопками телефона; пока вводишь ссылку, «Обзор» уступает место. */
 html.android:not(.tv) .controls .volume,
-html.android:not(.tv) .source-bar:focus-within .browse-open {
+html.android:not(.tv) .source-bar:has(input:focus) .browse-open {
   display: none;
 }
 
