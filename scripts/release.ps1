@@ -179,7 +179,7 @@ if (Test-Path (Join-Path $androidDir "keystore.properties")) {
     # Почти все телефоны — arm64; старые ТВ-приставки бывают 32-битными (armv7).
     $apkName = "BrotherHub-$androidVersion-android.apk"
     Copy-Item $apk.FullName (Join-Path $releaseDir $apkName) -Force
-    $apk32 = Get-ChildItem $apkDir -Recurse -Filter "*armeabi*release*.apk" |
+    $apk32 = Get-ChildItem $apkDir -Recurse -Filter "*-arm-release*.apk" |
         Where-Object { $_.Name -notmatch "unsigned" } | Select-Object -First 1
     if ($apk32) {
         $apk32Name = "BrotherHub-$androidVersion-android-armv7.apk"
