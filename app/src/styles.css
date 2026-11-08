@@ -3448,3 +3448,8 @@ html.android:not(.tv) .room.adhd:not(.fullscreen):not(.browsing) .stage .video {
 html.android .room.fullscreen {
   padding-bottom: 0;
 }
+
+/* В узкой шапке подписи кнопок скрыты — эмодзи СДВГ-режима оставляем. */
+.header-actions .adhd-toggle span[aria-hidden="true"] {
+  font-size: 18px;
+}

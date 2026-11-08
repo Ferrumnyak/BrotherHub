@@ -175,7 +175,18 @@ pub fn run() {
         mobile::adhd_start,
         mobile::adhd_stop,
         mobile::mobile_insets,
-        mobile::mobile_fullscreen
+        mobile::mobile_fullscreen,
+        mobile::mobile_background,
+        mobile::mobile_keep_alive,
+        mobile::mobile_pip,
+        mobile::mobile_info,
+        browser::browser_open,
+        browser::browser_place,
+        browser::browser_url,
+        browser::browser_back,
+        browser::browser_close,
+        browser::browser_hide,
+        browser::browser_show
     ]);
 
     builder
