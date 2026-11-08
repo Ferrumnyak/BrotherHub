@@ -4,10 +4,10 @@
 //! в него картинку (опция `--wid`). Интерфейс сообщает, где на экране
 //! находится область видео, и мы двигаем это окно туда.
 //!
-//! На macOS чужое окно встроить нельзя (`--wid` там работает только для
-//! libmpv внутри самого приложения), поэтому mpv открывает своё окно без
-//! рамки, а мы держим его ровно над областью видео: двигаем вслед за
-//! главным окном и поднимаем над ним, пока приложение активно (модуль [`mac`]).
+//! На macOS mpv работает как библиотека внутри приложения (libmpv.rs), а
+//! его окно без рамки становится дочерним окном главного: macOS двигает его
+//! вместе с главным, переносит на другой рабочий стол и в полный экран.
+//! Интерфейс так же сообщает место, мы ставим туда окно (модуль `mac`).
 
 use std::sync::Mutex;
 
@@ -24,13 +24,13 @@ pub struct VideoHost {
 }
 
 impl VideoHost {
-    /// Идентификатор окна для `mpv --wid` (на macOS — нет, см. [`mac`]).
+    /// Идентификатор окна для `mpv --wid` (на macOS — номер места: 0 или 1,
+    /// см. модуль `mac`).
     pub fn wid(&self) -> Option<isize> {
         *self.hwnd.lock().unwrap()
     }
 
     /// Окно для ролика сбоку.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub fn side_wid(&self) -> Option<isize> {
         *self.side.lock().unwrap()
     }
@@ -93,22 +93,24 @@ pub fn create(window: &WebviewWindow, host: &VideoHost) -> Result<(), String> {
     Ok(())
 }
 
+/// macOS: места для окон mpv — 0 (фильм) и 1 (ролик сбоку).
 #[cfg(target_os = "macos")]
-pub fn create(window: &WebviewWindow, _host: &VideoHost) -> Result<(), String> {
+pub fn create(window: &WebviewWindow, host: &VideoHost) -> Result<(), String> {
     mac::init(window.clone());
+    *host.hwnd.lock().unwrap() = Some(0);
+    *host.side.lock().unwrap() = Some(1);
     Ok(())
+}
+
+/// macOS: у mpv на месте `slot` появилось окно — привязать к главному.
+#[cfg(target_os = "macos")]
+pub fn adopt(slot: usize, window: isize) {
+    mac::adopt(slot, window);
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
 pub fn create(_window: &WebviewWindow, _host: &VideoHost) -> Result<(), String> {
     Ok(())
-}
-
-/// Главное окно сдвинули, поменяли размер, свернули или переключились
-/// на другое приложение — на macOS окно mpv подстраивается (см. [`mac`]).
-pub fn follow() {
-    #[cfg(target_os = "macos")]
-    mac::apply();
 }
 
 #[cfg(windows)]
@@ -147,6 +149,11 @@ fn place(hwnd: isize, rect: Option<Rect>, radius: u32) {
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn place(slot: isize, rect: Option<Rect>, radius: u32) {
+    mac::place(slot as usize, rect, radius);
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
@@ -253,21 +260,12 @@ pub fn set_video_rect(
     rect: Option<Rect>,
     radius: Option<u32>,
 ) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = (&app, &host, radius);
-        mac::set_rect(false, rect);
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let Some(hwnd) = host.wid() else {
-            return Ok(());
-        };
-        let radius = radius.unwrap_or(0);
-        app.run_on_main_thread(move || place(hwnd, rect, radius))
-            .map_err(|e| e.to_string())
-    }
+    let Some(hwnd) = host.wid() else {
+        return Ok(());
+    };
+    let radius = radius.unwrap_or(0);
+    app.run_on_main_thread(move || place(hwnd, rect, radius))
+        .map_err(|e| e.to_string())
 }
 
 /// Где показать ролик сбоку («СДВГ-режим»; `None` — спрятать).
@@ -278,33 +276,22 @@ pub fn set_side_rect(
     rect: Option<Rect>,
     radius: Option<u32>,
 ) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = (&app, &host, radius);
-        mac::set_rect(true, rect);
-        Ok(())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let Some(hwnd) = host.side_wid() else {
-            return Ok(());
-        };
-        let radius = radius.unwrap_or(0);
-        app.run_on_main_thread(move || place(hwnd, rect, radius))
-            .map_err(|e| e.to_string())
-    }
+    let Some(hwnd) = host.side_wid() else {
+        return Ok(());
+    };
+    let radius = radius.unwrap_or(0);
+    app.run_on_main_thread(move || place(hwnd, rect, radius))
+        .map_err(|e| e.to_string())
 }
 
 /// Полный экран главного окна. На macOS — «простой» полный экран в том же
-/// рабочем столе: обычный уводит окно на отдельный Space, куда окно mpv
-/// (другая программа) не попадает, и видео пропадало бы.
+/// рабочем столе: окна поверх видео (панель, реакции) так надёжнее
+/// остаются над главным окном.
 #[tauri::command]
 pub fn window_fullscreen(window: WebviewWindow, on: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        window.set_simple_fullscreen(on).map_err(|e| e.to_string())?;
-        mac::apply();
-        Ok(())
+        window.set_simple_fullscreen(on).map_err(|e| e.to_string())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -312,62 +299,64 @@ pub fn window_fullscreen(window: WebviewWindow, on: bool) -> Result<(), String> 
     }
 }
 
-/// macOS: окно mpv поверх области видео.
-///
-/// mpv здесь — отдельная программа со своим окном без рамки
-/// (`--border=no`, без значка в Dock — см. [`spawn_args`]). Мы держим его
-/// над областью видео:
-///
-/// - место — свойство mpv `geometry` (с mpv 0.38 его можно менять на ходу)
-///   в пикселях экрана, на котором главное окно;
-/// - пока приложение активно, окно mpv «поверх» (`ontop`) на уровень выше
-///   главного окна: и в обычном режиме, и в мини-окне (оно само поверх
-///   всех). Ушли в другую программу — `ontop` снимается, иначе видео висело
-///   бы над её окнами. Панель и реакции поверх видео поднимаются ещё выше;
-/// - спрятать видео (меню, обзор, трансляция экрана, окно свёрнуто) —
-///   выключить видеодорожку (`vid=no`): с `--force-window=no` окно mpv
-///   закрывается, а звук продолжает идти. Показать — `vid=auto`.
+/// macOS: окна mpv — дочерние окна главного над областью видео.
 #[cfg(target_os = "macos")]
-pub mod mac {
+mod mac {
     use std::sync::{Mutex, OnceLock};
 
+    use objc2::encode::{Encode, Encoding};
     use objc2::runtime::AnyObject;
     use objc2::{class, msg_send};
-    use serde_json::{json, Value};
     use tauri::{Manager, WebviewWindow};
-    use tokio::sync::mpsc::UnboundedSender;
 
     use super::Rect;
 
-    /// Окна поверх видео — поднимаются над окном mpv.
-    const ABOVE_VIDEO: &[&str] = &["controls", "reactions"];
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
 
-    /// Настройки mpv, которых нет в старых версиях: файлом через
-    /// `--include`, а не в командной строке — незнакомую строку файла mpv
-    /// пропускает с предупреждением, а незнакомый ключ в командной строке
-    /// не дал бы ему запуститься.
-    const EXTRA_CONF: &str = "\
-focus-on=never
-macos-app-activation-policy=accessory
-macos-geometry-calculation=whole
-auto-window-resize=no
-hidpi-window-scale=no
-";
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CGSize {
+        width: f64,
+        height: f64,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct CGRect {
+        origin: CGPoint,
+        size: CGSize,
+    }
+
+    unsafe impl Encode for CGPoint {
+        const ENCODING: Encoding = Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+    }
+    unsafe impl Encode for CGSize {
+        const ENCODING: Encoding = Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+    }
+    unsafe impl Encode for CGRect {
+        const ENCODING: Encoding = Encoding::Struct("CGRect", &[CGPoint::ENCODING, CGSize::ENCODING]);
+    }
+
+    /// NSWindowOrderingMode.
+    const ABOVE: isize = 1;
+    /// Окна поверх видео — после окна mpv заново кладутся над ним.
+    const ABOVE_VIDEO: &[&str] = &["controls", "reactions"];
 
     static MAIN: OnceLock<WebviewWindow> = OnceLock::new();
 
-    /// Что последним отправлено окну mpv: место, видно ли, поверх ли,
-    /// уровень главного окна, номер экрана.
-    type Shown = (Option<String>, bool, isize, Option<usize>);
-
-    #[derive(Default)]
+    #[derive(Default, Clone, Copy)]
     struct Slot {
-        tx: Option<UnboundedSender<String>>,
+        /// NSWindow mpv (0 — ещё нет).
+        window: usize,
         rect: Option<Rect>,
-        shown: Option<Shown>,
+        radius: u32,
     }
 
-    /// `[0]` — фильм, `[1]` — ролик сбоку («СДВГ-режим»).
     fn slots() -> &'static Mutex<[Slot; 2]> {
         static SLOTS: OnceLock<Mutex<[Slot; 2]>> = OnceLock::new();
         SLOTS.get_or_init(Default::default)
@@ -377,188 +366,111 @@ hidpi-window-scale=no
         let _ = MAIN.set(window);
     }
 
-    /// Ключи запуска mpv на macOS.
-    pub fn spawn_args() -> Vec<String> {
-        let mut args: Vec<String> = [
-            "--border=no",
-            "--window-dragging=no",
-            "--keepaspect-window=no",
-            "--ontop=no",
-            // Окна нет, пока нет картинки; спрятать — выключить видео.
-            "--force-window=no",
-            // До первого «покажи здесь» от интерфейса видео выключено —
-            // иначе окно выскочило бы посреди экрана.
-            "--vid=no",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
-        let conf = std::env::temp_dir().join("brotherhub-mpv-macos.conf");
-        if std::fs::write(&conf, EXTRA_CONF).is_ok() {
-            args.push(format!("--include={}", conf.display()));
-        }
-        args
+    fn ns(window: &WebviewWindow) -> Option<*mut AnyObject> {
+        window.ns_window().ok().map(|p| p as *mut AnyObject).filter(|p| !p.is_null())
     }
 
-    /// Плеер запущен — дальше его окном управляем по этому каналу.
-    pub fn attach(side: bool, tx: UnboundedSender<String>) {
-        {
-            let mut slots = slots().lock().unwrap();
-            let slot = &mut slots[side as usize];
-            slot.tx = Some(tx);
-            slot.shown = None;
-        }
-        apply();
-    }
-
-    /// Плеер закрыли.
-    pub fn detach(side: bool) {
-        let mut slots = slots().lock().unwrap();
-        let slot = &mut slots[side as usize];
-        slot.tx = None;
-        slot.shown = None;
-    }
-
-    pub fn set_rect(side: bool, rect: Option<Rect>) {
-        slots().lock().unwrap()[side as usize].rect = rect;
-        apply();
-    }
-
-    /// Пересчитать место и «поверх» для окон mpv (в главном потоке:
-    /// окна AppKit трогать можно только оттуда).
-    pub fn apply() {
+    /// Окно mpv появилось: сделать его дочерним у главного (в главном потоке).
+    pub fn adopt(slot: usize, window: isize) {
         let Some(main) = MAIN.get() else {
             return;
         };
-        let window = main.clone();
-        let _ = main.run_on_main_thread(move || apply_now(&window));
-    }
-
-    fn send(tx: &UnboundedSender<String>, command: Value) {
-        let mut line = json!({ "command": command }).to_string();
-        line.push('\n');
-        let _ = tx.send(line);
-    }
-
-    fn ns_window(window: &WebviewWindow) -> Option<*mut AnyObject> {
-        window
-            .ns_window()
-            .ok()
-            .map(|p| p as *mut AnyObject)
-            .filter(|p| !p.is_null())
-    }
-
-    fn level(ns: *mut AnyObject) -> isize {
-        unsafe { msg_send![ns, level] }
-    }
-
-    fn set_level(ns: *mut AnyObject, level: isize) {
-        unsafe {
-            let _: () = msg_send![ns, setLevel: level];
-        }
-    }
-
-    /// Номер экрана с главным окном среди `NSScreen.screens` — так их
-    /// нумерует mpv (`--screen`). `None` — экран один или не нашёлся.
-    fn screen_index(ns: *mut AnyObject) -> Option<usize> {
-        unsafe {
-            let screen: *mut AnyObject = msg_send![ns, screen];
-            if screen.is_null() {
-                return None;
+        slots().lock().unwrap()[slot].window = window as usize;
+        let main2 = main.clone();
+        let _ = main.run_on_main_thread(move || unsafe {
+            let Some(parent) = ns(&main2) else {
+                return;
+            };
+            let win = window as *mut AnyObject;
+            let _: () = msg_send![win, setHasShadow: false];
+            let _: () = msg_send![win, setAlphaValue: 0.0f64];
+            let _: () = msg_send![win, setIgnoresMouseEvents: true];
+            let _: () = msg_send![parent, addChildWindow: win, ordered: ABOVE];
+            raise_above_video(&main2, parent);
+            // mpv ставит своё меню (File, Edit, …) — возвращаем меню приложения.
+            let app = main2.app_handle();
+            if let Ok(menu) = tauri::menu::Menu::default(app) {
+                let _ = app.set_menu(menu);
             }
-            let screens: *mut AnyObject = msg_send![class!(NSScreen), screens];
-            if screens.is_null() {
-                return None;
-            }
-            let count: usize = msg_send![screens, count];
-            if count < 2 {
-                return None;
-            }
-            (0..count).find(|&i| {
-                let s: *mut AnyObject = msg_send![screens, objectAtIndex: i];
-                s == screen
-            })
-        }
+            apply(&main2, slot);
+            crate::logs::info(format!("окно видео {slot} привязано к главному"));
+        });
     }
 
-    fn apply_now(main: &WebviewWindow) {
-        let Some(ns) = ns_window(main) else {
-            return;
-        };
-        let main_level = level(ns);
-        let focused = main.is_focused().unwrap_or(false);
-        let shown_main =
-            main.is_visible().unwrap_or(true) && !main.is_minimized().unwrap_or(false);
-        // Окно mpv поверх, пока мы активны или главное окно само поверх
-        // всех (мини-окно).
-        let front = shown_main && (focused || main_level > 0);
-        let origin = main.inner_position().ok();
-        let monitor = main.current_monitor().ok().flatten();
-        let screen = screen_index(ns);
-
-        let mut hidden_now = false;
-        {
-            let mut slots = slots().lock().unwrap();
-            for slot in slots.iter_mut() {
-                let Some(tx) = slot.tx.clone() else {
-                    continue;
-                };
-                // Место относительно левого верхнего угла экрана, в пикселях.
-                let geometry = match (slot.rect, origin, &monitor) {
-                    (Some(r), Some(o), Some(m)) if shown_main && r.width > 0 && r.height > 0 => {
-                        let at = m.position();
-                        Some(format!(
-                            "{}x{}+{}+{}",
-                            r.width,
-                            r.height,
-                            o.x + r.x - at.x,
-                            o.y + r.y - at.y
-                        ))
-                    }
-                    _ => None,
-                };
-                let visible = geometry.is_some();
-                let shown: Shown = (geometry.clone(), visible && front, main_level, screen);
-                if slot.shown.as_ref() == Some(&shown) {
-                    continue;
-                }
-                let was_visible = slot.shown.as_ref().is_some_and(|s| s.0.is_some());
-                if let Some(g) = &geometry {
-                    if let Some(i) = screen {
-                        send(&tx, json!(["set_property", "screen", i]));
-                    }
-                    send(&tx, json!(["set_property", "geometry", g]));
-                    if !was_visible {
-                        send(&tx, json!(["set_property", "vid", "auto"]));
-                    }
-                } else if was_visible || slot.shown.is_none() {
-                    send(&tx, json!(["set_property", "vid", "no"]));
-                    hidden_now = true;
-                }
-                send(&tx, json!(["set_property", "ontop-level", main_level + 1]));
-                send(&tx, json!(["set_property", "ontop", visible && front]));
-                slot.shown = Some(shown);
-            }
-        }
-
-        // Спрятали видео, пока мы активны, — вернуть главное окно наверх
-        // (на случай, если окно mpv успело его перекрыть).
-        if hidden_now && focused {
-            unsafe {
-                let _: () = msg_send![ns, orderFront: std::ptr::null_mut::<AnyObject>()];
-            }
-        }
-
-        // Панель и реакции — над видео; когда мы не активны — на обычном
-        // уровне, вместе с главным окном.
-        let above = if front { main_level + 2 } else { main_level };
+    /// Панель и реакции — снова над окнами mpv: дочерние окна лежат в
+    /// порядке добавления, поэтому их переподвешиваем.
+    unsafe fn raise_above_video(main: &WebviewWindow, parent: *mut AnyObject) {
         for label in ABOVE_VIDEO {
             if let Some(w) = main.app_handle().get_webview_window(label) {
-                if let Some(p) = ns_window(&w) {
-                    if level(p) != above {
-                        set_level(p, above);
-                    }
+                if let Some(child) = ns(&w) {
+                    let _: () = msg_send![parent, removeChildWindow: child];
+                    let _: () = msg_send![parent, addChildWindow: child, ordered: ABOVE];
                 }
+            }
+        }
+    }
+
+    /// Интерфейс сообщил место (вызывается в главном потоке).
+    pub fn place(slot: usize, rect: Option<Rect>, radius: u32) {
+        {
+            let mut slots = slots().lock().unwrap();
+            slots[slot].rect = rect;
+            slots[slot].radius = radius;
+        }
+        if let Some(main) = MAIN.get() {
+            unsafe { apply(main, slot) };
+            if rect.is_some() {
+                if let Some(parent) = ns(main) {
+                    unsafe { raise_above_video(main, parent) };
+                }
+            }
+        }
+    }
+
+    unsafe fn apply(main: &WebviewWindow, slot: usize) {
+        let s = slots().lock().unwrap()[slot];
+        if s.window == 0 {
+            return;
+        }
+        let win = s.window as *mut AnyObject;
+        let Some(parent) = ns(main) else {
+            return;
+        };
+        match s.rect {
+            Some(r) if r.width > 0 && r.height > 0 => {
+                let scale = main.scale_factor().unwrap_or(1.0);
+                // Содержимое главного окна в координатах экрана (Y снизу вверх).
+                let frame: CGRect = msg_send![parent, frame];
+                let content: CGRect = msg_send![parent, contentRectForFrameRect: frame];
+                let (w, h) = (r.width as f64 / scale, r.height as f64 / scale);
+                let x = content.origin.x + r.x as f64 / scale;
+                let y = content.origin.y + content.size.height - r.y as f64 / scale - h;
+                let target = CGRect {
+                    origin: CGPoint { x, y },
+                    size: CGSize { width: w, height: h },
+                };
+                let _: () = msg_send![win, setFrame: target, display: true];
+                // Скруглённые углы, как у области видео в интерфейсе.
+                let view: *mut AnyObject = msg_send![win, contentView];
+                if !view.is_null() {
+                    let _: () = msg_send![view, setWantsLayer: true];
+                    let layer: *mut AnyObject = msg_send![view, layer];
+                    if !layer.is_null() {
+                        let _: () = msg_send![layer, setCornerRadius: s.radius as f64 / scale];
+                        let _: () = msg_send![layer, setMasksToBounds: true];
+                    }
+                    let _: () = msg_send![win, setOpaque: false];
+                    let clear: *mut AnyObject = msg_send![class!(NSColor), clearColor];
+                    let _: () = msg_send![win, setBackgroundColor: clear];
+                }
+                let _: () = msg_send![win, setIgnoresMouseEvents: false];
+                let _: () = msg_send![win, setAlphaValue: 1.0f64];
+            }
+            // Спрятать — прозрачностью: видео не останавливается и не
+            // перезагружается.
+            _ => {
+                let _: () = msg_send![win, setAlphaValue: 0.0f64];
+                let _: () = msg_send![win, setIgnoresMouseEvents: true];
             }
         }
     }

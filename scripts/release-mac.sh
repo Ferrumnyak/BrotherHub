@@ -54,12 +54,6 @@ VERSION=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
 BASE="https://github.com/Ferrumnyak/BrotherHub/releases/download/v$VERSION"
 OUT="$ROOT/release/macos"
 
-# ---------- Плеер ----------
-HAS_MPV=$(node -p "const p=require('./app/src-tauri/player-pack.json'); !!(p.macos && p.macos.arm64 && p.macos.arm64.url && p.macos.x86_64 && p.macos.x86_64.url)")
-if [ "$HAS_MPV" != "true" ]; then
-    fail "В player-pack.json нет архивов mpv для macOS. Сначала запусти scripts/pack-player-mac.sh и выложи архивы (см. docs/MACOS.md)."
-fi
-
 # ---------- Ключ подписи обновлений ----------
 EXTRA_CONFIG=()
 KEY=$(setting UPDATER_KEY)

@@ -12,7 +12,7 @@ BrotherHub использует программы других авторов. 
 - Сайт: https://mpv.io
 - Исходный код: https://github.com/mpv-player/mpv
 - Сборка для Windows: https://github.com/shinchiro/mpv-winbuild-cmake
-- Сборка для macOS: официальная, https://github.com/mpv-player/mpv/releases
+- macOS: библиотека libmpv, которую ставит Homebrew (`brew install mpv`)
 
 ## yt-dlp
 

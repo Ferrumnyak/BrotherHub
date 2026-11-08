@@ -25,7 +25,7 @@
 
 use std::{
     net::{Ipv4Addr, SocketAddr, TcpListener},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         Mutex as StdMutex, OnceLock,
@@ -177,7 +177,7 @@ fn ciadpi_path() -> Option<PathBuf> {
     maps.lines()
         .filter_map(|l| l.split_whitespace().nth(5))
         .find(|p| p.ends_with("/libbrotherwatch_lib.so") && !p.contains('!'))
-        .and_then(|p| Path::new(p).parent())
+        .and_then(|p| std::path::Path::new(p).parent())
         .map(|d| d.join("libciadpi.so"))
 }
 
@@ -385,7 +385,7 @@ async fn ensure_ciadpi() -> Result<(), String> {
 }
 
 #[cfg(all(desktop, not(target_os = "macos")))]
-fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
+fn find_file(dir: &std::path::Path, name: &str) -> Option<PathBuf> {
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
         if path.is_dir() {

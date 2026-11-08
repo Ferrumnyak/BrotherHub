@@ -68,16 +68,9 @@ Remove-Item $staging -Recurse -Force
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 $size = (Get-Item $zip).Length
 $url = "https://github.com/$repo/releases/download/$tag/$name"
-$packPath = Join-Path $root "app\src-tauri\player-pack.json"
-$pack = [ordered]@{ url = $url; sha256 = $hash; size = $size }
-# Архивы для macOS готовит scripts/pack-player-mac.sh — их сохраняем как есть.
-if (Test-Path $packPath) {
-    $old = Get-Content $packPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($old.macos) { $pack["macos"] = $old.macos }
-}
-$json = ($pack | ConvertTo-Json -Depth 5) + "`n"
+$json = "{`n  `"url`": `"$url`",`n  `"sha256`": `"$hash`",`n  `"size`": $size`n}`n"
 # Без BOM: файл читает Rust при сборке.
-[IO.File]::WriteAllText($packPath, $json, (New-Object Text.UTF8Encoding $false))
+[IO.File]::WriteAllText((Join-Path $root "app\src-tauri\player-pack.json"), $json, (New-Object Text.UTF8Encoding $false))
 
 $mb = [Math]::Round($size / 1MB, 1)
 Write-Host ""

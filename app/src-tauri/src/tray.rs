@@ -57,15 +57,12 @@ pub fn hide_app(app: &AppHandle) {
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.hide();
     }
-    // macOS: окно mpv — отдельная программа, его прячем отдельно.
-    crate::video::follow();
 }
 
 /// Вернуть окно из трея. Интерфейс по событию `app-shown` заново ставит
 /// окна поверх видео (реакции, панель) на свои места.
 pub fn show_app(app: &AppHandle) {
     crate::deeplink::show_main(app);
-    crate::video::follow();
     let _ = app.emit("app-shown", ());
 }
 

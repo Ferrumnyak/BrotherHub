@@ -84,7 +84,16 @@ pub struct Player {
     write_tx: mpsc::UnboundedSender<String>,
     pending: Pending,
     next_request: Arc<AtomicU64>,
-    _child: Child,
+    _process: Process,
+}
+
+/// Сам mpv: отдельная программа или (macOS) библиотека в нашем процессе.
+/// Держим, чтобы mpv жил, пока жив [`Player`].
+#[allow(dead_code)]
+enum Process {
+    Program(Child),
+    #[cfg(target_os = "macos")]
+    Library(crate::libmpv::Mpv),
 }
 
 /// Чтение свойств mpv без самого плеера: его можно взять из сессии и
@@ -179,12 +188,13 @@ impl Player {
         // Шрифты экранных подсказок и обычных (не ASS) субтитров.
         cmd.args([format!("--osd-font={UI_FONT}"), format!("--sub-font={UI_FONT}")]);
         cmd.arg(format!("--ytdl-format={}", ytdl_format(quality)));
+        #[cfg(not(target_os = "macos"))]
         if let Some(wid) = wid {
             cmd.arg(format!("--wid={wid}"));
         }
-        // macOS: своё окно без рамки над областью видео (video.rs).
+        // macOS: mpv — библиотека, а у неё клавиши mpv по умолчанию выключены.
         #[cfg(target_os = "macos")]
-        cmd.args(crate::video::mac::spawn_args());
+        cmd.arg("--input-default-bindings=yes");
         let input_conf = std::env::temp_dir().join("brotherwatch-input.conf");
         if std::fs::write(&input_conf, INPUT_CONF).is_ok() {
             cmd.arg(format!("--input-conf={}", input_conf.display()));
@@ -214,6 +224,10 @@ impl Player {
         if let Some(log) = &log_file {
             cmd.arg(format!("--log-file={}", log.display()));
         }
+        #[cfg(target_os = "macos")]
+        let mpv = crate::libmpv::find()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "libmpv не найдена".into());
         crate::logs::info(format!(
             "запускаю плеер #{id}: {mpv}; yt-dlp: {}; журнал: {}",
             ytdlp.as_deref().unwrap_or("из PATH"),
@@ -222,22 +236,38 @@ impl Player {
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "нет".into())
         ));
-        // Не показывать чёрное консольное окно рядом с плеером.
-        #[cfg(windows)]
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        let mut child = cmd.spawn().map_err(|e| {
-            let msg = format!(
-                "не удалось запустить mpv ({mpv}): {e}. \
-                     Установи mpv и проверь, что команда `mpv --version` работает в терминале."
-            );
-            crate::logs::error(&msg);
-            msg
-        })?;
+        // macOS: libmpv в нашем процессе с теми же ключами.
+        #[cfg(target_os = "macos")]
+        let (process, stream) = {
+            let _ = &mpv;
+            let _ = wid;
+            let lib = crate::libmpv::Mpv::start(&crate::libmpv::args_of(&cmd), 0)
+                .inspect_err(|e| crate::logs::error(e))?;
+            let stream = connect_ipc(&ipc, None).await.inspect_err(|e| crate::logs::error(e))?;
+            (Process::Library(lib), stream)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (process, stream) = {
+            // Не показывать чёрное консольное окно рядом с плеером.
+            #[cfg(windows)]
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            let mut child = cmd.spawn().map_err(|e| {
+                let msg = format!(
+                    "не удалось запустить mpv ({mpv}): {e}. \
+                         Установи mpv и проверь, что команда `mpv --version` работает в терминале."
+                );
+                crate::logs::error(&msg);
+                msg
+            })?;
 
-        // mpv завершится вместе с приложением, как бы оно ни закрылось.
-        bind_to_app_lifetime(&child);
+            // mpv завершится вместе с приложением, как бы оно ни закрылось.
+            bind_to_app_lifetime(&child);
 
-        let stream = connect_ipc(&ipc, &mut child).await.inspect_err(|e| crate::logs::error(e))?;
+            let stream = connect_ipc(&ipc, Some(&mut child))
+                .await
+                .inspect_err(|e| crate::logs::error(e))?;
+            (Process::Program(child), stream)
+        };
         let (read, mut write) = tokio::io::split(stream);
 
         // Запись команд в mpv.
@@ -249,8 +279,6 @@ impl Player {
                 }
             }
         });
-        #[cfg(target_os = "macos")]
-        crate::video::mac::attach(false, write_tx.clone());
 
         // Чтение ответов и событий из mpv.
         let pending: Pending = Arc::default();
@@ -300,7 +328,7 @@ impl Player {
             write_tx,
             pending,
             next_request: Arc::new(AtomicU64::new(1)),
-            _child: child,
+            _process: process,
         };
         // Панель Windows «Сейчас играет» (есть в mpv 0.40+). Через IPC, а не
         // в командной строке: старый mpv с незнакомым ключом не запустился бы.
@@ -655,7 +683,15 @@ fn in_path(exe: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Найдётся ли mpv (иначе его нужно скачать — см. tools.rs). На macOS —
+/// библиотека libmpv.
+#[cfg(target_os = "macos")]
+pub fn mpv_available() -> bool {
+    crate::libmpv::find().is_some()
+}
+
 /// Найдётся ли mpv (иначе его нужно скачать — см. tools.rs).
+#[cfg(not(target_os = "macos"))]
 pub fn mpv_available() -> bool {
     let exe = exe_name("mpv");
     std::env::var_os("BROTHERWATCH_MPV").is_some()
@@ -699,39 +735,14 @@ pub(crate) fn ipc_path(id: u64) -> String {
     format!("/tmp/brotherwatch-mpv-{}-{id}.sock", std::process::id())
 }
 
-/// Подключиться к mpv, запущенному не через [`Player`] (ролик сбоку,
-/// adhd.rs), — только чтобы отправлять ему команды. Ответы читаем и
-/// выбрасываем, иначе mpv упрётся в полный канал.
-#[cfg(target_os = "macos")]
-pub(crate) async fn command_channel(
-    path: &str,
-    child: &mut Child,
-) -> Result<mpsc::UnboundedSender<String>, String> {
-    let stream = connect_ipc(path, child).await?;
-    let (read, mut write) = tokio::io::split(stream);
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-    tauri::async_runtime::spawn(async move {
-        while let Some(line) = rx.recv().await {
-            if write.write_all(line.as_bytes()).await.is_err() {
-                break;
-            }
-        }
-    });
-    tauri::async_runtime::spawn(async move {
-        let mut lines = BufReader::new(read).lines();
-        while let Ok(Some(_)) = lines.next_line().await {}
-    });
-    Ok(tx)
-}
-
 /// mpv создаёт канал не сразу после запуска — ждём до 10 секунд.
 async fn connect_ipc(
     path: &str,
-    child: &mut Child,
+    mut child: Option<&mut Child>,
 ) -> Result<impl AsyncRead + AsyncWrite + Unpin + Send + 'static, String> {
     let mut last_error = String::new();
     for _ in 0..100 {
-        if let Ok(Some(status)) = child.try_wait() {
+        if let Some(Ok(Some(status))) = child.as_mut().map(|c| c.try_wait()) {
             return Err(format!("mpv сразу завершился ({status})"));
         }
         match open_ipc(path).await {

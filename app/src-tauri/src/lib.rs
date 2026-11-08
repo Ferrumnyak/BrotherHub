@@ -6,6 +6,8 @@
 //! глобальные клавиши, обновление exe), собирается только там.
 
 mod dpi;
+#[cfg(target_os = "macos")]
+mod libmpv;
 mod logs;
 mod net;
 #[cfg_attr(target_os = "android", path = "player_android.rs")]
@@ -231,11 +233,6 @@ fn desktop_setup(app: &mut tauri::App) {
                 overlay::follow(&handle);
                 browser::follow(&handle);
                 reactions::follow(&handle);
-                video::follow();
-            }
-            // macOS: окно mpv поверх главного, только пока мы активны.
-            if matches!(event, tauri::WindowEvent::Focused(_)) {
-                video::follow();
             }
         });
         if let Err(e) = video::create(&window, &app.state::<video::VideoHost>()) {
