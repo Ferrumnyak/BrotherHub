@@ -352,6 +352,7 @@ name = "brotherwatch"
 version = "0.5.4"
 dependencies = [
  "brotherwatch-shared",
+ "cc",
  "encoding_rs",
  "futures-util",
  "raw-window-handle",
