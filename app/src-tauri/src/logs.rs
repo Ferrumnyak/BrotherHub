@@ -88,11 +88,34 @@ fn write(level: &str, msg: &str) {
     let line = format!("{} [{level}] {msg}\n", timestamp());
     #[cfg(debug_assertions)]
     eprint!("{line}");
+    // Android: ещё и в logcat (adb logcat -s BrotherHub), файл с телефона
+    // не достать.
+    #[cfg(target_os = "android")]
+    android_log(level, msg);
     if let Ok(mut guard) = FILE.lock() {
         if let Some(file) = guard.as_mut() {
             let _ = file.write_all(line.as_bytes());
             let _ = file.flush();
         }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn android_log(level: &str, msg: &str) {
+    use std::ffi::CString;
+    extern "C" {
+        fn __android_log_write(prio: i32, tag: *const std::ffi::c_char, text: *const std::ffi::c_char) -> i32;
+    }
+    // 4 — INFO, 5 — WARN, 6 — ERROR.
+    let prio = match level {
+        "error" => 6,
+        "warn" => 5,
+        _ => 4,
+    };
+    let tag = CString::new("BrotherHub").unwrap();
+    let Ok(text) = CString::new(msg.replace('\0', " ")) else { return };
+    unsafe {
+        __android_log_write(prio, tag.as_ptr(), text.as_ptr());
     }
 }
 

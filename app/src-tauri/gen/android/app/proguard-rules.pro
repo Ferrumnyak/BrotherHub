@@ -26,3 +26,10 @@
 -keep class com.yausername.** { *; }
 -keep class com.fasterxml.jackson.** { *; }
 -dontwarn com.fasterxml.jackson.**
+# yt-dlp для Android распаковывает Python через Apache Commons Compress: после
+# сжатия R8 его классы ломались («class … is not a concrete class»), и yt-dlp
+# в релизной сборке не запускался вовсе.
+-keep class org.apache.commons.compress.** { *; }
+-dontwarn org.apache.commons.compress.**
+-keep class org.tukaani.xz.** { *; }
+-dontwarn org.tukaani.xz.**

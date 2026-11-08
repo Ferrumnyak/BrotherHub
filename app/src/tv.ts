@@ -13,6 +13,11 @@ export function isTv(): boolean {
 }
 
 // summary — заголовки раскрывашек («Сервер и пароль», «Темы»).
+/** Запись в журнал (на Android видна в adb logcat с тегом BrotherHub). */
+function say(message: string) {
+  invoke("ui_log", { message }).catch(() => {});
+}
+
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex="-1"])';
 
@@ -157,14 +162,14 @@ export async function initTv() {
     tv = (await invoke<{ tv: boolean }>("mobile_info")).tv;
   } catch (e) {
     if (!IS_ANDROID) return; // компьютер
-    console.info(`BrotherHub: пульт: не узнал, ТВ ли это: ${e}`);
+    say(`пульт: не узнал, ТВ ли это: ${e}`);
   }
-  console.info(`BrotherHub: пульт: это ТВ? ${tv}`);
+  say(`пульт: это ТВ? ${tv}`);
   let seen = 0;
   window.addEventListener(
     "keydown",
     (e) => {
-      if (seen++ < 3) console.info(`BrotherHub: пульт: клавиша key=${e.key} code=${e.keyCode}`);
+      if (seen++ < 3) say(`пульт: клавиша key=${e.key} code=${e.keyCode}`);
     },
     true,
   );
@@ -188,9 +193,7 @@ let enabled = false;
 function enable(how = "по системе") {
   if (enabled) return;
   enabled = true;
-  invoke("ui_log", { message: `пульт: режим ТВ включён ${how}` }).catch(() => {});
-  // Видно в adb logcat (строки chromium … CONSOLE).
-  console.info(`BrotherHub: пульт: режим ТВ включён ${how}`);
+  say(`пульт: режим ТВ включён ${how}`);
   document.documentElement.classList.add("tv");
   window.addEventListener("keydown", onKey, true);
   document.addEventListener(
@@ -245,13 +248,13 @@ function onKey(e: KeyboardEvent) {
   e.preventDefault();
   e.stopImmediatePropagation();
   if (!target) {
-    console.info(`BrotherHub: пульт: ${dir} — некуда (с ${describe(current)})`);
+    say(`пульт: ${dir} — некуда (с ${describe(current)})`);
   }
   if (target) {
     if (isTextField(target)) quiet(target);
     target.focus({ preventScroll: true });
     if (document.activeElement !== target) {
-      console.info(`BrotherHub: пульт: не выделяется ${describe(target)}`);
+      say(`пульт: не выделяется ${describe(target)}`);
     }
     target.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
