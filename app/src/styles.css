@@ -3400,6 +3400,8 @@ html.android .room.fullscreen .stage > .controls {
 html.android .room.fullscreen.controls-hidden .stage > .controls {
   opacity: 0;
   pointer-events: none;
+  /* Прячется медленно и плавно, появляется быстро. */
+  transition-duration: 0.8s;
 }
 
 html.android .room.fullscreen .video {

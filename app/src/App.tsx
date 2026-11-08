@@ -1358,7 +1358,9 @@ export default function App() {
       clearTimeout(timer);
       timer = setTimeout(
         () => {
-          if (!overControlsRef.current) show(false);
+          // На телефоне «мышь над панелью» после касания так и остаётся —
+          // там прячем всегда, следующее касание покажет снова.
+          if (!overControlsRef.current || IS_ANDROID) show(false);
         },
         mini ? 1800 : 3000,
       );
@@ -1838,7 +1840,9 @@ export default function App() {
       // Высокая область (телефон вертикально) — ролик снизу, как в тиктоке;
       // широкая — справа (ролики чаще вертикальные).
       const below = split && r.height > r.width * 0.7;
-      const mainWidth = split && !below ? Math.round(r.width * 0.66) : r.width;
+      // Фильм — ровно 16:9 по высоте (без чёрных полос), ролику — остаток.
+      const mainWidth =
+        split && !below ? Math.min(Math.round(r.height * (16 / 9)), Math.round(r.width * 0.75)) : r.width;
       const mainHeight = below ? Math.round(r.width * (9 / 16)) : r.height;
       invoke("set_video_rect", {
         rect: {

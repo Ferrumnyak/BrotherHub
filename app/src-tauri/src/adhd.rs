@@ -49,6 +49,8 @@ pub async fn adhd_start(host: State<'_, VideoHost>) -> Result<(), String> {
         "--no-input-default-bindings",
         "--input-vo-keyboard=no",
         "--cursor-autohide=always",
+        // Заполнить место целиком, обрезав края, — без чёрных полос.
+        "--panscan=1.0",
         "--hwdec=auto-safe",
         "--shuffle",
         "--loop-playlist=inf",

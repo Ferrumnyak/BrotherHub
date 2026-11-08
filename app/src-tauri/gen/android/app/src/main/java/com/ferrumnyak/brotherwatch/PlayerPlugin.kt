@@ -433,7 +433,8 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         sideExo = p
         val v = PlayerView(activity)
         v.useController = false
-        v.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        // Ролик обрезаем по краям, чтобы заполнял место без чёрных полос.
+        v.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
         v.setShutterBackgroundColor(Color.BLACK)
         v.setBackgroundColor(Color.BLACK)
         v.player = p
