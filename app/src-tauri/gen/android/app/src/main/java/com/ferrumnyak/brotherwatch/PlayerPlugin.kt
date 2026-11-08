@@ -32,6 +32,7 @@ import android.os.Looper
 import android.util.Log
 import android.util.Rational
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
@@ -220,6 +221,10 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         keepLink(activity.intent)
         // Интерфейс прозрачный: под ним — видео.
         webView.setBackgroundColor(Color.TRANSPARENT)
+        // Фокус — интерфейсу: на ТВ иначе стрелки пульта никуда не попадают.
+        webView.isFocusable = true
+        webView.isFocusableInTouchMode = true
+        main.post { webView.requestFocus() }
         activity.window.setBackgroundDrawable(ColorDrawable(HALL))
         worker.execute {
             try {
@@ -355,6 +360,42 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    // ---------- Пульт ТВ ----------
+
+    /// Плеер под интерфейсом не должен забирать фокус, иначе стрелки пульта
+    /// уходят ему, а не кнопкам интерфейса.
+    private fun noFocus(v: View) {
+        v.isFocusable = false
+        v.isFocusableInTouchMode = false
+        (v as? ViewGroup)?.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+    }
+
+    private var keyLogged = false
+
+    /// Из MainActivity.dispatchKeyEvent: стрелки и «ОК» пульта — в интерфейс
+    /// (или в «Обзор», если фокус в нём). `false` — обработать как обычно.
+    fun routeKey(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,
+            KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> {}
+            else -> return false
+        }
+        val ui = webView ?: return false
+        val focused = activity.currentFocus
+        if (!keyLogged) {
+            keyLogged = true
+            Log.i(TAG, "пульт: кнопка ${event.keyCode}, фокус у ${focused?.javaClass?.simpleName ?: "никого"}")
+        }
+        val b = browser
+        if (focused === ui || (b != null && focused === b && b.visibility == View.VISIBLE)) return false
+        ui.isFocusable = true
+        ui.isFocusableInTouchMode = true
+        ui.requestFocus()
+        return false
+    }
+
     // ---------- Ускорение YouTube (dpi.rs) ----------
 
     /// Новый адрес прокси обхода (null — выключен).
@@ -485,6 +526,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         val v = android.view.LayoutInflater.from(activity)
             .inflate(R.layout.side_player, null) as PlayerView
         v.clipToOutline = true
+        noFocus(v)
         v.player = p
         v.visibility = View.GONE
         val parent = webView?.parent as? ViewGroup
@@ -1184,6 +1226,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
 
         val v = PlayerView(activity)
         v.useController = false
+        noFocus(v)
         v.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
         v.setShutterBackgroundColor(Color.BLACK)
         v.setBackgroundColor(Color.BLACK)

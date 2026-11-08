@@ -95,7 +95,7 @@ export async function initTv() {
   const probe = (e: KeyboardEvent) => {
     if (!DIRS[e.key]) return;
     window.removeEventListener("keydown", probe, true);
-    enable();
+    enable("по нажатию стрелки");
     onKey(e);
   };
   window.addEventListener("keydown", probe, true);
@@ -103,9 +103,12 @@ export async function initTv() {
 
 let enabled = false;
 
-function enable() {
+function enable(how = "по системе") {
   if (enabled) return;
   enabled = true;
+  invoke("ui_log", { message: `пульт: режим ТВ включён ${how}` }).catch(() => {});
+  // Видно в adb logcat (строки chromium … CONSOLE).
+  console.info(`BrotherHub: пульт: режим ТВ включён ${how}`);
   document.documentElement.classList.add("tv");
   window.addEventListener("keydown", onKey, true);
   // Сразу что-нибудь в фокусе — иначе первое нажатие «ничего не делает».

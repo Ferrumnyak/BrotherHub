@@ -2,12 +2,19 @@ package com.ferrumnyak.brotherwatch
 
 import android.content.res.Configuration
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.enableEdgeToEdge
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+  }
+
+  // Пульт ТВ: стрелки и «ОК» — в интерфейс, а не в плеер под ним.
+  override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    PlayerPlugin.instance?.routeKey(event)
+    return super.dispatchKeyEvent(event)
   }
 
   // Ушли на рабочий стол, пока идёт видео, — уходим в «картинку в картинке»
