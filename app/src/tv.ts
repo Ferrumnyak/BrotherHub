@@ -11,8 +11,9 @@ export function isTv(): boolean {
   return document.documentElement.classList.contains("tv");
 }
 
+// summary — заголовки раскрывашек («Сервер и пароль», «Темы»).
 const FOCUSABLE =
-  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), summary, [tabindex]:not([tabindex="-1"])';
 
 type Dir = "up" | "down" | "left" | "right";
 
