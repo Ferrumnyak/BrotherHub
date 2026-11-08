@@ -1218,7 +1218,8 @@ export default function App() {
 
   // ----- Полный экран и панель чата -----
 
-  async function applyFullscreen(next: boolean) {
+  /** `auto` — полный экран от поворота телефона (повернул обратно — вышел). */
+  async function applyFullscreen(next: boolean, auto = false) {
     if (next && miniRef.current) await applyMini(false);
     invoke("ui_log", { message: next ? "полный экран: вход" : "полный экран: выход" }).catch(() => {});
     if (IS_ANDROID) {
@@ -1227,7 +1228,8 @@ export default function App() {
       // Страница могла быть прокручена к чату — видео должно встать сверху.
       document.body.scrollTop = 0;
       window.scrollTo(0, 0);
-      await invoke("mobile_fullscreen", { on: next }).catch(() => {});
+      autoFullscreenRef.current = next && auto;
+      await invoke("mobile_fullscreen", { on: next, lock: !auto }).catch(() => {});
       setFullscreen(next);
       setChatOpen(!next);
       return;
@@ -1779,6 +1781,27 @@ export default function App() {
   useEffect(() => {
     invoke("set_chat_overlay", { enabled: joinedRoom !== null && !chatOpen }).catch(() => {});
   }, [joinedRoom, chatOpen]);
+
+  // Телефон: повернул горизонтально во время видео — сразу полный экран,
+  // обратно вертикально — выход из него.
+  const autoFullscreenRef = useRef(false);
+  const rotateRef = useRef<() => void>(() => {});
+  rotateRef.current = () => {
+    if (!IS_ANDROID || isTv()) return;
+    const type = screen.orientation?.type ?? "";
+    const landscape = type ? type.startsWith("landscape") : window.innerWidth > window.innerHeight;
+    if (landscape && !fullscreenRef.current && joinedRoom !== null && playback?.media && !browsing) {
+      applyFullscreen(true, true);
+    } else if (!landscape && fullscreenRef.current && autoFullscreenRef.current) {
+      applyFullscreen(false);
+    }
+  };
+  useEffect(() => {
+    if (!IS_ANDROID) return;
+    const on = () => rotateRef.current();
+    screen.orientation?.addEventListener("change", on);
+    return () => screen.orientation?.removeEventListener("change", on);
+  }, []);
 
   // Телефон: пока ты в зале, приложение работает и свёрнутым (фильм и голос
   // не обрываются) — Android показывает об этом уведомление.

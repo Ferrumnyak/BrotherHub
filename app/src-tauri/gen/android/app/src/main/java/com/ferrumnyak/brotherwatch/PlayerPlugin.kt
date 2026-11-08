@@ -151,6 +151,9 @@ class BackgroundArgs {
 @InvokeArg
 class FullscreenArgs {
     var on: Boolean = false
+    /// Закрепить альбомную ориентацию (кнопка). Без этого — полный экран
+    /// от поворота телефона: повернул обратно — вышел.
+    var lock: Boolean = true
 }
 
 @TauriPlugin
@@ -305,7 +308,9 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             val window = activity.window
             val controller = WindowCompat.getInsetsController(window, window.decorView)
             if (args.on) {
-                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                activity.requestedOrientation =
+                    if (args.lock) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                    else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 controller.systemBarsBehavior =
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -431,12 +436,11 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             }
         })
         sideExo = p
-        val v = PlayerView(activity)
-        v.useController = false
-        // Ролик обрезаем по краям, чтобы заполнял место без чёрных полос.
-        v.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-        v.setShutterBackgroundColor(Color.BLACK)
-        v.setBackgroundColor(Color.BLACK)
+        // Ролик обрезаем по краям, чтобы заполнял место без чёрных полос
+        // (настройки — в res/layout/side_player.xml).
+        val v = android.view.LayoutInflater.from(activity)
+            .inflate(R.layout.side_player, null) as PlayerView
+        v.clipToOutline = true
         v.player = p
         v.visibility = View.GONE
         val parent = webView?.parent as? ViewGroup

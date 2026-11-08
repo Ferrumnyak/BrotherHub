@@ -124,8 +124,9 @@ pub async fn mobile_insets() -> Result<serde_json::Value, String> {
 
 /// Полный экран на телефоне: альбомная ориентация и без системных панелей.
 #[tauri::command]
-pub async fn mobile_fullscreen(on: bool) -> Result<(), String> {
-    crate::player::call("fullscreen", serde_json::json!({ "on": on }))
+pub async fn mobile_fullscreen(on: bool, lock: Option<bool>) -> Result<(), String> {
+    let lock = lock.unwrap_or(true);
+    crate::player::call("fullscreen", serde_json::json!({ "on": on, "lock": lock }))
         .await
         .map(|_| ())
 }
