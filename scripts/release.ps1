@@ -163,6 +163,7 @@ if (Test-Path (Join-Path $androidDir "keystore.properties")) {
     # Gradle нужна Java 17+. Если JAVA_HOME не задан или указывает на старую
     # Java (в PATH часто лежит Java 8 от Oracle), ищем подходящую сами.
     function Get-JavaMajor([string]$home_) {
+        if (-not $home_) { return 0 }
         $exe = Join-Path $home_ "bin\java.exe"
         if (-not (Test-Path $exe)) { return 0 }
         # java -version пишет в stderr — при "Stop" PowerShell счёл бы это ошибкой.
