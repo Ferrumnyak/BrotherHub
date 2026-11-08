@@ -194,7 +194,11 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
     private var ytdlJson: String? = null
     private var currentUrl: String? = null
     /// Номер загрузки: ответ yt-dlp для старой ссылки выбрасываем.
+    @Volatile
     private var loadToken = 0
+    /// Процесс yt-dlp, который сейчас разбирает ссылку (чтобы остановить его,
+    /// если включили другое видео).
+    private var loadProcess: String? = null
     /// Ждём готовности после loadfile, чтобы прислать file-loaded.
     private var loading = false
     private var ytdlReady = false
@@ -1145,11 +1149,26 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
             return
         }
         val fmt = format
-        worker.execute {
+        // Включили другое видео — старое сразу останавливаем, а прежний
+        // yt-dlp прерываем: раньше новое ждало в очереди, пока старое
+        // разберётся (через обход — до нескольких минут).
+        loadProcess?.let { old ->
+            try {
+                YoutubeDL.getInstance().destroyProcessById(old)
+            } catch (_: Throwable) {
+            }
+        }
+        val pid = "load-$token"
+        loadProcess = pid
+        exo?.let {
+            it.stop()
+            it.clearMediaItems()
+        }
+        Thread {
             val result = try {
-                resolve(url, fmt)
+                resolve(url, fmt, pid) { token == loadToken }
             } catch (e: Throwable) {
-                Log.w(TAG, "yt-dlp не разобрал $url", e)
+                if (token == loadToken) Log.w(TAG, "yt-dlp не разобрал $url", e)
                 null
             }
             main.post {
@@ -1169,7 +1188,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 if (mediaTitle == null) mediaTitle = result.title
                 play(token, result.streams)
             }
-        }
+        }.start()
     }
 
     private data class Stream(val url: String, val protocol: String?, val headers: Map<String, String>)
@@ -1186,12 +1205,19 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         "youtube:player_client=ios,web_embedded",
     )
 
-    private fun ytdlJson(url: String, fmt: String): String {
+    private fun ytdlJson(
+        url: String,
+        fmt: String,
+        pid: String? = null,
+        alive: () -> Boolean = { true },
+    ): String {
         val host = Uri.parse(url).host?.lowercase() ?: ""
         val isYoutube = host.endsWith("youtube.com") || host == "youtu.be"
         val attempts = if (isYoutube) youtubeClients else listOf(null)
         var last: Throwable? = null
         for (client in attempts) {
+            // Уже включили другое видео — запасные клиенты не перебираем.
+            if (!alive()) throw IllegalStateException("видео сменили")
             try {
                 val request = DpiProxy.apply(YoutubeDLRequest(url))
                 request.addOption("--no-warnings")
@@ -1200,7 +1226,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 request.addOption("-f", fmt)
                 if (client != null) request.addOption("--extractor-args", client)
                 return try {
-                    YoutubeDL.getInstance().execute(request).out
+                    YoutubeDL.getInstance().execute(request, pid).out
                 } catch (e: Throwable) {
                     // Нужного качества нет — берём что есть.
                     if (e.message?.contains("Requested format is not available") != true) throw e
@@ -1209,7 +1235,7 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                     any.addOption("--no-playlist")
                     any.addOption("-J")
                     if (client != null) any.addOption("--extractor-args", client)
-                    YoutubeDL.getInstance().execute(any).out
+                    YoutubeDL.getInstance().execute(any, pid).out
                 }
             } catch (e: Throwable) {
                 Log.w(TAG, "yt-dlp (${client ?: "обычный"}): ${e.message?.lineSequence()?.firstOrNull()}")
@@ -1219,12 +1245,17 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
         throw last ?: IllegalStateException("yt-dlp не ответил")
     }
 
-    private fun resolve(url: String, fmt: String): Resolved? {
+    private fun resolve(
+        url: String,
+        fmt: String,
+        pid: String? = null,
+        alive: () -> Boolean = { true },
+    ): Resolved? {
         if (!ytdlReady) {
             YoutubeDL.getInstance().init(activity.applicationContext)
             ytdlReady = true
         }
-        val json = ytdlJson(url, fmt)
+        val json = ytdlJson(url, fmt, pid, alive)
         val info = JSONObject(json)
         val formats = info.optJSONArray("requested_formats")
         val list = mutableListOf<JSONObject>()
