@@ -942,7 +942,18 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 request.addOption("-J")
                 request.addOption("-f", fmt)
                 if (client != null) request.addOption("--extractor-args", client)
-                return YoutubeDL.getInstance().execute(request).out
+                return try {
+                    YoutubeDL.getInstance().execute(request).out
+                } catch (e: Throwable) {
+                    // Нужного качества нет — берём что есть.
+                    if (e.message?.contains("Requested format is not available") != true) throw e
+                    val any = YoutubeDLRequest(url)
+                    any.addOption("--no-warnings")
+                    any.addOption("--no-playlist")
+                    any.addOption("-J")
+                    if (client != null) any.addOption("--extractor-args", client)
+                    YoutubeDL.getInstance().execute(any).out
+                }
             } catch (e: Throwable) {
                 Log.w(TAG, "yt-dlp (${client ?: "обычный"}): ${e.message?.lineSequence()?.firstOrNull()}")
                 last = e
@@ -1139,8 +1150,11 @@ class PlayerPlugin(private val activity: Activity) : Plugin(activity) {
                 ?: type.declaredFields.firstOrNull { it.name.contains("STABLE") }
                     ?.also { it.isAccessible = true }?.get(null)
                 ?: return
-            method.invoke(ydl, context, channel)
-            Log.i(TAG, "yt-dlp обновлён")
+            val status = method.invoke(ydl, context, channel)
+            val version = ydl.javaClass.methods
+                .firstOrNull { it.name == "version" && it.parameterTypes.size == 1 }
+                ?.invoke(ydl, context)
+            Log.i(TAG, "yt-dlp: обновление — $status, версия $version")
         } catch (e: Throwable) {
             Log.w(TAG, "yt-dlp не обновился", e)
         }
