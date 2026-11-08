@@ -160,6 +160,25 @@ $androidConf = Join-Path $root "app\src-tauri\tauri.android.conf.json"
 $androidVersion = (Get-Content $androidConf -Raw | ConvertFrom-Json).version
 if (Test-Path (Join-Path $androidDir "keystore.properties")) {
     Write-Host "Собираю APK для Android $androidVersion..."
+    # Gradle нужна Java 17+. Если JAVA_HOME не задан или указывает на старую
+    # Java (в PATH часто лежит Java 8 от Oracle), берём ту, что идёт с Android Studio.
+    $studioJbr = "C:\Program Files\Android\Android Studio\jbr"
+    $javaOk = $false
+    if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME "bin\java.exe"))) {
+        # java -version пишет в stderr — при "Stop" PowerShell счёл бы это ошибкой.
+        $ErrorActionPreference = "Continue"
+        $ver = & (Join-Path $env:JAVA_HOME "bin\java.exe") -version 2>&1 | Select-Object -First 1
+        $ErrorActionPreference = "Stop"
+        if ("$ver" -match '"(\d+)' -and [int]$Matches[1] -ge 17) { $javaOk = $true }
+    }
+    if (-not $javaOk) {
+        if (-not (Test-Path (Join-Path $studioJbr "bin\java.exe"))) {
+            throw "Для сборки APK нужна Java 17 или новее. Поставь Android Studio или задай JAVA_HOME (см. docs\ANDROID.md)."
+        }
+        Write-Host "Java для Gradle: $studioJbr"
+        $env:JAVA_HOME = $studioJbr
+        $env:Path = (Join-Path $studioJbr "bin") + ";" + $env:Path
+    }
     $env:VITE_DEFAULT_SERVER = $server
     Push-Location (Join-Path $root "app")
     try {
